@@ -1,0 +1,37 @@
+[package]
+name = "alpha-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# 日期时间
+chrono = { workspace = true }
+
+# UUID
+uuid = { workspace = true }
+
+# 错误处理
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# 数值计算
+num-traits = "0.2"
+
+# 异步支持
+async-trait = { workspace = true }
+
+[features]
+default = ["std"]
+std = []
+wasm = ["chrono/wasmbind", "uuid/js"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }

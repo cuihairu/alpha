@@ -1,0 +1,31 @@
+[package]
+name = "alpha-build-tools"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 命令行参数
+clap = { workspace = true }
+
+# 文件系统
+walkdir = "2.4"
+
+# 模板引擎
+tera = "1.19"
+
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# 错误处理
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# 正则表达式
+regex = "1.10"
+
+# 时间处理
+chrono = { workspace = true }
+
+# 内部包
+alpha-core = { workspace = true }

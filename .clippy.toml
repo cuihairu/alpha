@@ -1,0 +1,40 @@
+# Clippy 配置
+
+# 复杂度阈值
+cognitive-complexity-threshold = 15
+too-many-arguments-threshold = 7
+type-complexity-threshold = 250
+too-many-lines-threshold = 100
+
+# 性能相关
+vec-box-size-threshold = 4096
+trivial-copy-size-limit = 256
+
+# 文档要求
+missing-docs-in-crate-items = true
+
+# 允许的 lint
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+allow-dbg-in-tests = true
+
+# 限制的 lint
+disallowed-names = ["foo", "bar", "baz", "quux"]
+
+# 函数行数限制
+too-many-lines-threshold = 100
+
+# 字符串字面量阈值
+string-add-assign-threshold = 5
+
+# 数组和 Vec 的大小阈值
+array-size-threshold = 512000
+
+# 大型类型阈值
+type-complexity-threshold = 250
+
+# 认知复杂度阈值
+cognitive-complexity-threshold = 15
+
+# 参数数量阈值
+too-many-arguments-threshold = 7

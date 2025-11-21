@@ -1,0 +1,123 @@
+[workspace]
+members = [
+    # 跨平台核心库
+    "packages/core",
+    "packages/protocols",
+    "packages/storage",
+    "packages/wasm-analyzer",
+
+    # 服务端微服务
+    "services/api-gateway",
+    "services/data-engine",
+    "services/real-time-feed",
+    "services/collector",
+
+    # 前端应用
+    "wasm-analyzer/pkg",
+    "desktop",
+    "mobile/android/rust",
+    "mobile/ios/rust",
+    "mobile/shared",
+
+    # 开发工具
+    "tools/build-tools",
+    "tools/benchmark",
+    "tools/data-migration"
+]
+
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Alpha Finance Team"]
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+homepage = "https://alpha.finance"
+repository = "https://github.com/alpha-finance/platform"
+
+[workspace.dependencies]
+# 异步运行时
+tokio = { version = "1.35", features = ["full"] }
+async-trait = "0.1"
+
+# Web 框架和 HTTP
+axum = { version = "0.7", features = ["macros", "ws", "headers"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression"] }
+hyper = { version = "1.0", features = ["full"] }
+
+# 数据处理
+datafusion = "35.0"
+arrow = "50.0"
+parquet = "50.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 数据库
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "timescale", "chrono", "uuid"] }
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+
+# gRPC 和 Protobuf
+tonic = "0.10"
+prost = "0.12"
+
+# WebAssembly
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+console_error_panic_hook = "0.1"
+
+# 桌面端 (Tauri)
+tauri = { version = "1.5", features = ["api-all"] }
+
+# 移动端 JNI
+jni = "0.21"
+uniffi = "0.25"
+
+# 日期时间
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# 错误处理
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 日志和追踪
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 配置管理
+config = "0.13"
+clap = { version = "4.4", features = ["derive"] }
+
+# 测试
+tokio-test = "0.4"
+proptest = "1.4"
+
+# 性能监控
+metrics = "0.21"
+prometheus = "0.13"
+
+# 内部包引用
+alpha-core = { path = "packages/core" }
+alpha-protocols = { path = "packages/protocols" }
+alpha-storage = { path = "packages/storage" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release.package."*"]
+opt-level = 3
+
+# 优化 WASM 包大小
+[profile.release.package.alpha-wasm-analyzer]
+opt-level = "s"
+lto = true

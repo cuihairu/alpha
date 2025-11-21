@@ -1,0 +1,46 @@
+[package]
+name = "alpha-data-engine"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# Web 框架
+axum = { workspace = true }
+tonic = { workspace = true }
+
+# 数据处理
+datafusion = { workspace = true }
+arrow = { workspace = true }
+parquet = { workspace = true }
+
+# 数据库
+sqlx = { workspace = true }
+redis = { workspace = true }
+
+# 异步运行时
+tokio = { workspace = true }
+
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# 日志
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# 配置管理
+config = { workspace = true }
+
+# 错误处理
+anyhow = { workspace = true }
+
+# 时间处理
+chrono = { workspace = true }
+
+# 内部包
+alpha-core = { workspace = true }
+alpha-protocols = { workspace = true }
+alpha-storage = { workspace = true }

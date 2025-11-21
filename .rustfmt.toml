@@ -1,0 +1,49 @@
+# Rust 格式化配置
+
+edition = "2021"
+hard_tabs = false
+tab_spaces = 4
+max_width = 100
+use_small_heuristics = "Default"
+reorder_imports = true
+reorder_modules = true
+remove_nested_parens = true
+edition_2021 = true
+merge_derives = true
+use_try_shorthand = true
+use_field_init_shorthand = true
+force_explicit_abi = true
+empty_item_single_line = true
+struct_lit_single_line = true
+fn_single_line = false
+where_single_line = false
+
+# 导入排序
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+reorder_imports = true
+reorder_modules = true
+
+# 注释格式化
+comment_width = 80
+wrap_comments = true
+normalize_comments = true
+normalize_doc_attributes = true
+
+# 字符串格式化
+format_strings = true
+format_macro_matchers = true
+format_macro_bodies = true
+
+# 控制结构
+control_brace_style = "AlwaysSameLine"
+brace_style = "SameLineWhere"
+indent_style = "Block"
+
+# 空白处理
+blank_lines_upper_bound = 1
+blank_lines_lower_bound = 0
+
+# 链式调用
+chain_width = 60
+single_line_if_else_max_width = 50

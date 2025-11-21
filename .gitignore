@@ -1,32 +1,72 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+# Rust
+/target/
+Cargo.lock
 
-# Test binary, built with `go test -c`
-*.test
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# Code coverage profiles and other test artifacts
-*.out
-coverage.*
-*.coverprofile
-profile.cov
+# OS
+.DS_Store
+Thumbs.db
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Logs
+*.log
 
-# Go workspace file
-go.work
-go.work.sum
-
-# env file
+# Environment
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# Node.js (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# WebAssembly
+wasm-analyzer/pkg/
+wasm-analyzer/node_modules/
+
+# Desktop
+desktop/src-tauri/target/
+desktop/target/
+desktop/dist/
+
+# Mobile
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/ios/build/
+mobile/ios/DerivedData/
+mobile/ios/Pods/
+mobile/ios/.xcode.env.local
+
+# Tools
+tools/benchmark/target/
+tools/data-migration/target/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker
+.dockerignore
+
+# Coverage
+tarpaulin-report.html
+cobertura.xml
+
+# Backup
+*.bak
+*.backup
+
+# Temporary
+*.tmp
+*.temp

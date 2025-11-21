@@ -1,0 +1,40 @@
+[package]
+name = "alpha-real-time-feed"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# 异步运行时
+tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite = "0.20"
+
+# Web 框架
+axum = { workspace = true, features = ["ws"] }
+
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# 日志
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# 广播通道
+tokio-stream = "0.1"
+futures-util = "0.3"
+
+# 时间处理
+chrono = { workspace = true }
+
+# 错误处理
+anyhow = { workspace = true }
+
+# 内部包
+alpha-core = { workspace = true }
+alpha-protocols = { workspace = true }
+
+# 随机数生成（用于模拟数据）
+rand = "0.8"
