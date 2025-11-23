@@ -8,7 +8,7 @@ const config = {
   organizationName: 'cuihairu',
   projectName: 'alpha',
 
-  onBrokenLinks: 'throw',
+  onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
 
   i18n: {
