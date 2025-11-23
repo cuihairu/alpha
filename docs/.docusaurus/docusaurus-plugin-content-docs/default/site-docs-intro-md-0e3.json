@@ -1,0 +1,23 @@
+{
+  "id": "intro",
+  "title": "简介",
+  "description": "🎯 项目概述",
+  "source": "@site/docs/intro.md",
+  "sourceDirName": ".",
+  "slug": "/",
+  "permalink": "/alpha/docs/",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/cuihairu/alpha/tree/main/docs/docs/intro.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "简介",
+    "slug": "/"
+  },
+  "sidebar": "tutorialSidebar",
+  "next": {
+    "title": "环境要求",
+    "permalink": "/alpha/docs/getting-started"
+  }
+}

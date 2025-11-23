@@ -1,0 +1,26 @@
+{
+  "id": "installation",
+  "title": "安装指南",
+  "description": "本指南将帮助您在不同环境中安装和配置 Alpha Finance。",
+  "source": "@site/docs/installation.md",
+  "sourceDirName": ".",
+  "slug": "/installation",
+  "permalink": "/alpha/docs/installation",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/cuihairu/alpha/tree/main/docs/docs/installation.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "安装指南"
+  },
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "环境要求",
+    "permalink": "/alpha/docs/getting-started"
+  },
+  "next": {
+    "title": "Alpha Finance Ubuntu 24.04 部署指南",
+    "permalink": "/alpha/docs/deployment"
+  }
+}

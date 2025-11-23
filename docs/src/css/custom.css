@@ -1,0 +1,364 @@
+/**
+ * CSS 样式定制
+ * 基于 Docusaurus 的自定义主题
+ */
+
+/* 全局样式 */
+:root {
+  --ifm-color-primary: #00bcd4;
+  --ifm-color-primary-dark: #00acc1;
+  --ifm-color-primary-darker: #0097a7;
+  --ifm-color-primary-darkest: #00838f;
+  --ifm-color-primary-light: #26c6da;
+  --ifm-color-primary-lighter: #4dd0e1;
+  --ifm-color-primary-lightest: #80deea;
+
+  /* Alpha Finance 品牌色彩 */
+  --alpha-primary: #1e88e5;
+  --alpha-secondary: #00bcd4;
+  --alpha-accent: #ff6f00;
+  --alpha-success: #4caf50;
+  --alpha-warning: #ff9800;
+  --alpha-error: #f44336;
+  --alpha-dark: #263238;
+  --alpha-light: #eceff1;
+
+  /* 自定义字体 */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --font-family-mono: 'Source Code Pro', 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
+}
+
+/* 导航栏样式 */
+.navbar__title {
+  font-weight: 700;
+  background: linear-gradient(45deg, var(--alpha-primary), var(--alpha-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.navbar__logo {
+  height: 32px;
+  width: 32px;
+}
+
+/* 代码块样式 */
+.prism-code {
+  font-family: var(--font-family-mono);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* Rust 代码高亮 */
+.language-rust .token.keyword {
+  color: #ff79c6;
+}
+
+.language-rust .token.string {
+  color: #f1fa8c;
+}
+
+.language-rust .token.number {
+  color: #bd93f9;
+}
+
+.language-rust .token.comment {
+  color: #6272a4;
+  font-style: italic;
+}
+
+/* admonition 样式增强 */
+.admonition {
+  border-radius: 8px;
+  border-left-width: 4px;
+}
+
+.admonition--info {
+  border-left-color: var(--alpha-primary);
+}
+
+.admonition--warning {
+  border-left-color: var(--alpha-warning);
+}
+
+.admonition--danger {
+  border-left-color: var(--alpha-error);
+}
+
+.admonition--success {
+  border-left-color: var(--alpha-success);
+}
+
+/* 按钮样式 */
+.button {
+  border-radius: 6px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 卡片样式 */
+.card {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* 表格样式 */
+.markdown table {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.markdown th {
+  background: var(--alpha-primary);
+  color: white;
+  font-weight: 600;
+}
+
+.markdown tr:nth-child(even) {
+  background-color: var(--alpha-light);
+}
+
+/* 代码内联样式 */
+.markdown code {
+  background-color: var(--alpha-light);
+  color: var(--alpha-dark);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: var(--font-family-mono);
+}
+
+/* 链接样式 */
+.markdown a {
+  color: var(--alpha-primary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-bottom-color 0.2s ease;
+}
+
+.markdown a:hover {
+  border-bottom-color: var(--alpha-primary);
+}
+
+/* 引用样式 */
+.markdown blockquote {
+  border-left: 4px solid var(--alpha-primary);
+  background-color: var(--alpha-light);
+  padding: 1rem 1.5rem;
+  margin: 1.5rem 0;
+  border-radius: 0 8px 8px 0;
+}
+
+/* 列表样式 */
+.markdown ul, .markdown ol {
+  padding-left: 1.5rem;
+}
+
+.markdown li {
+  margin-bottom: 0.5rem;
+}
+
+/* 标题样式 */
+.markdown h1 {
+  color: var(--alpha-dark);
+  border-bottom: 2px solid var(--alpha-primary);
+  padding-bottom: 0.5rem;
+}
+
+.markdown h2 {
+  color: var(--alpha-primary);
+  border-bottom: 1px solid var(--alpha-light);
+  padding-bottom: 0.3rem;
+}
+
+.markdown h3 {
+  color: var(--alpha-dark);
+}
+
+/* 页脚样式 */
+.footer {
+  background: linear-gradient(135deg, var(--alpha-dark), #37474f);
+  border-top: 3px solid var(--alpha-primary);
+}
+
+/* 搜索框样式 */
+.DocSearch {
+  --docsearch-primary-color: var(--alpha-primary);
+  --docsearch-highlight-color: var(--alpha-accent);
+}
+
+/* 面包屑导航 */
+.breadcrumbs__item {
+  color: var(--alpha-primary) !important;
+}
+
+.breadcrumbs__item--active {
+  color: var(--alpha-dark) !important;
+}
+
+/* 侧边栏样式 */
+.theme-doc-sidebar-container {
+  border-right: 1px solid var(--alpha-light);
+}
+
+.theme-doc-sidebar-item-link {
+  border-radius: 6px;
+  margin: 0.2rem 0;
+  padding: 0.5rem 1rem;
+  transition: all 0.2s ease;
+}
+
+.theme-doc-sidebar-item-link:hover {
+  background-color: var(--alpha-light);
+  transform: translateX(4px);
+}
+
+.theme-doc-sidebar-item-link--active {
+  background-color: var(--alpha-primary);
+  color: white;
+}
+
+/* 标签页样式 */
+.tabs {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tabs__item {
+  border-radius: 8px 8px 0 0;
+  font-weight: 600;
+}
+
+/* 进度条样式 */
+.pager {
+  border-top: 1px solid var(--alpha-light);
+  padding-top: 1rem;
+  margin-top: 2rem;
+}
+
+.pager-link {
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  transition: all 0.2s ease;
+}
+
+.pager-link:hover {
+  background-color: var(--alpha-light);
+}
+
+/* 暗色主题适配 */
+[data-theme='dark'] {
+  --alpha-light: #37474f;
+  --alpha-dark: #eceff1;
+}
+
+/* 响应式设计 */
+@media only screen and (max-width: 996px) {
+  .navbar__title {
+    font-size: 1.2rem;
+  }
+
+  .card {
+    margin-bottom: 1rem;
+  }
+}
+
+@media only screen and (max-width: 768px) {
+  .markdown table {
+    font-size: 0.8rem;
+  }
+
+  .prism-code {
+    font-size: 0.8rem;
+  }
+}
+
+/* 动画效果 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.markdown > *:first-child {
+  animation: fadeIn 0.6s ease-out;
+}
+
+/* 自定义组件样式 */
+.alpha-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin: 2rem 0;
+}
+
+.alpha-feature-card {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.alpha-feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.alpha-feature-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  color: var(--alpha-primary);
+}
+
+.alpha-architecture-diagram {
+  background: var(--alpha-light);
+  border-radius: 12px;
+  padding: 2rem;
+  margin: 2rem 0;
+  text-align: center;
+}
+
+.alpha-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.alpha-stat-item {
+  background: linear-gradient(135deg, var(--alpha-primary), var(--alpha-secondary));
+  color: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.alpha-stat-number {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.alpha-stat-label {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}

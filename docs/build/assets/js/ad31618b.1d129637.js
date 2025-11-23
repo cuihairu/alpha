@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkalpha_finance_docs=globalThis.webpackChunkalpha_finance_docs||[]).push([[113],{8154:a=>{a.exports=JSON.parse('{"label":"announcement","permalink":"/alpha/blog/tags/announcement","allTagsPath":"/alpha/blog/tags","count":1,"unlisted":false}')}}]);

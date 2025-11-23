@@ -1,0 +1,52 @@
+{
+  "permalink": "/alpha/blog/alpha-finance-launch",
+  "editUrl": "https://github.com/cuihairu/alpha/tree/main/docs/blog/blog/2024-01-01-alpha-finance-launch.md",
+  "source": "@site/blog/2024-01-01-alpha-finance-launch.md",
+  "title": "🎉 Alpha Finance 正式发布",
+  "description": "经过数月的精心开发，我们非常高兴地宣布 Alpha Finance 正式发布！这是一个基于 Rust 和 WebAssembly 构建的高性能金融数据分析平台，专为专业交易者和金融机构设计。",
+  "date": "2024-01-01T00:00:00.000Z",
+  "formattedDate": "2024年1月1日",
+  "tags": [
+    {
+      "label": "announcement",
+      "permalink": "/alpha/blog/tags/announcement"
+    },
+    {
+      "label": "release",
+      "permalink": "/alpha/blog/tags/release"
+    },
+    {
+      "label": "rust",
+      "permalink": "/alpha/blog/tags/rust"
+    },
+    {
+      "label": "webassembly",
+      "permalink": "/alpha/blog/tags/webassembly"
+    }
+  ],
+  "readingTime": 5.86,
+  "hasTruncateMarker": false,
+  "authors": [
+    {
+      "name": "Alpha Finance Team",
+      "title": "开发团队",
+      "url": "https://github.com/cuihairu/alpha",
+      "imageURL": "https://github.com/cuihairu.png",
+      "key": "alpha-team"
+    }
+  ],
+  "frontMatter": {
+    "title": "🎉 Alpha Finance 正式发布",
+    "slug": "alpha-finance-launch",
+    "authors": [
+      "alpha-team"
+    ],
+    "tags": [
+      "announcement",
+      "release",
+      "rust",
+      "webassembly"
+    ]
+  },
+  "unlisted": false
+}

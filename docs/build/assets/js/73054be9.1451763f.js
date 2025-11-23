@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkalpha_finance_docs=globalThis.webpackChunkalpha_finance_docs||[]).push([[964],{2566:a=>{a.exports=JSON.parse('{"permalink":"/alpha/blog/tags/webassembly","page":1,"postsPerPage":10,"totalPages":1,"totalCount":1,"blogDescription":"Blog","blogTitle":"Blog"}')}}]);

@@ -1,0 +1,84 @@
+{
+  "pluginId": "default",
+  "version": "current",
+  "label": "Next",
+  "banner": null,
+  "badge": false,
+  "noIndex": false,
+  "className": "docs-version-current",
+  "isLast": true,
+  "docsSidebars": {
+    "tutorialSidebar": [
+      {
+        "type": "link",
+        "label": "简介",
+        "href": "/alpha/docs/",
+        "docId": "intro",
+        "unlisted": false
+      },
+      {
+        "type": "category",
+        "label": "快速开始",
+        "items": [
+          {
+            "type": "link",
+            "label": "环境要求",
+            "href": "/alpha/docs/getting-started",
+            "docId": "getting-started",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "安装指南",
+            "href": "/alpha/docs/installation",
+            "docId": "installation",
+            "unlisted": false
+          }
+        ],
+        "collapsed": true,
+        "collapsible": true
+      },
+      {
+        "type": "category",
+        "label": "部署指南",
+        "items": [
+          {
+            "type": "link",
+            "label": "Ubuntu 24.04 部署",
+            "href": "/alpha/docs/deployment",
+            "docId": "deployment",
+            "unlisted": false
+          }
+        ],
+        "collapsed": true,
+        "collapsible": true
+      }
+    ]
+  },
+  "docs": {
+    "deployment": {
+      "id": "deployment",
+      "title": "Alpha Finance Ubuntu 24.04 部署指南",
+      "description": "📋 目录",
+      "sidebar": "tutorialSidebar"
+    },
+    "getting-started": {
+      "id": "getting-started",
+      "title": "环境要求",
+      "description": "在开始使用 Alpha Finance 之前，请确保您的开发环境满足以下要求。",
+      "sidebar": "tutorialSidebar"
+    },
+    "installation": {
+      "id": "installation",
+      "title": "安装指南",
+      "description": "本指南将帮助您在不同环境中安装和配置 Alpha Finance。",
+      "sidebar": "tutorialSidebar"
+    },
+    "intro": {
+      "id": "intro",
+      "title": "简介",
+      "description": "🎯 项目概述",
+      "sidebar": "tutorialSidebar"
+    }
+  }
+}

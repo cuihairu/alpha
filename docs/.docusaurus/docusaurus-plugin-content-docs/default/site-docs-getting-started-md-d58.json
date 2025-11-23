@@ -1,0 +1,26 @@
+{
+  "id": "getting-started",
+  "title": "环境要求",
+  "description": "在开始使用 Alpha Finance 之前，请确保您的开发环境满足以下要求。",
+  "source": "@site/docs/getting-started.md",
+  "sourceDirName": ".",
+  "slug": "/getting-started",
+  "permalink": "/alpha/docs/getting-started",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/cuihairu/alpha/tree/main/docs/docs/getting-started.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "环境要求"
+  },
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "简介",
+    "permalink": "/alpha/docs/"
+  },
+  "next": {
+    "title": "安装指南",
+    "permalink": "/alpha/docs/installation"
+  }
+}

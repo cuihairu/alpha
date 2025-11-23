@@ -1,0 +1,20 @@
+{
+  "id": "deployment",
+  "title": "Alpha Finance Ubuntu 24.04 部署指南",
+  "description": "📋 目录",
+  "source": "@site/docs/deployment.md",
+  "sourceDirName": ".",
+  "slug": "/deployment",
+  "permalink": "/alpha/docs/deployment",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/cuihairu/alpha/tree/main/docs/docs/deployment.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "安装指南",
+    "permalink": "/alpha/docs/installation"
+  }
+}

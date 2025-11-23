@@ -1,0 +1,22 @@
+[
+  {
+    "label": "announcement",
+    "permalink": "/alpha/blog/tags/announcement",
+    "count": 1
+  },
+  {
+    "label": "release",
+    "permalink": "/alpha/blog/tags/release",
+    "count": 1
+  },
+  {
+    "label": "rust",
+    "permalink": "/alpha/blog/tags/rust",
+    "count": 1
+  },
+  {
+    "label": "webassembly",
+    "permalink": "/alpha/blog/tags/webassembly",
+    "count": 1
+  }
+]

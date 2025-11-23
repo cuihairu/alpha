@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkalpha_finance_docs=globalThis.webpackChunkalpha_finance_docs||[]).push([[472],{5513:a=>{a.exports=JSON.parse('{"title":"Recent posts","items":[{"title":"\ud83c\udf89 Alpha Finance \u6b63\u5f0f\u53d1\u5e03","permalink":"/alpha/blog/alpha-finance-launch","unlisted":false}]}')}}]);
