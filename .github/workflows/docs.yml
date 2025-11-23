@@ -21,7 +21,7 @@ concurrency:
 
 # 默认环境变量
 env:
-  NODE_VERSION: '18'
+  NODE_VERSION: '22'
 
 jobs:
   # 构建文档
@@ -42,7 +42,14 @@ jobs:
 
       - name: 安装依赖
         working-directory: ./docs
-        run: npm ci
+        run: npm install
+
+      - name: 显示环境信息
+        working-directory: ./docs
+        run: |
+          node --version
+          npm --version
+          ls -la
 
       - name: 构建文档
         working-directory: ./docs
