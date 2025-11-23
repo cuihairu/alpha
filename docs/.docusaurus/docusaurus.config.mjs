@@ -10,7 +10,7 @@ export default {
   "baseUrl": "/alpha/",
   "organizationName": "cuihairu",
   "projectName": "alpha",
-  "onBrokenLinks": "throw",
+  "onBrokenLinks": "warn",
   "onBrokenMarkdownLinks": "warn",
   "i18n": {
     "defaultLocale": "zh-CN",

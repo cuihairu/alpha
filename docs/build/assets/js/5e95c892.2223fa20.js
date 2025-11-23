@@ -1,1 +1,0 @@
-"use strict";(globalThis.webpackChunkalpha_finance_docs=globalThis.webpackChunkalpha_finance_docs||[]).push([[647],{7121:(a,e,s)=>{s.r(e),s.d(e,{default:()=>i});s(6540);var c=s(4164),n=s(7559),r=s(1003),l=s(2831),h=s(781),u=s(4848);function i(a){return(0,u.jsx)(r.e3,{className:(0,c.A)(n.G.wrapper.docsPages),children:(0,u.jsx)(h.A,{children:(0,l.v)(a.route.routes)})})}}}]);
