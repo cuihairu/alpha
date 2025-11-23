@@ -9,12 +9,14 @@ license.workspace = true
 [lib]
 crate-type = ["cdylib"]
 
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
 [dependencies]
 # WASM 绑定
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 js-sys = { workspace = true }
-web-sys = { workspace = true }
 
 # 控制台错误处理
 console_error_panic_hook = { workspace = true }
@@ -33,9 +35,15 @@ chrono = { workspace = true }
 # 内部包
 alpha-core = { workspace = true }
 
-[dependencies.web-sys]
-version = "0.3"
-features = [
+# UUID 生成
+uuid = { version = "1.0", features = ["v4", "wasm-bindgen"] }
+
+# 日志
+tracing = "0.1"
+tracing-wasm = "0.2"
+
+# Web API
+web-sys = { version = "0.3", features = [
   "console",
   "Performance",
   "Window",
@@ -46,7 +54,11 @@ features = [
   "Location",
   "Navigator",
   "History",
-]
+  "PerformanceTiming",
+]}
+
+# 随机数生成（用于模拟数据）
+getrandom = { version = "0.2", features = ["js"] }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-O", "--enable-simd"]

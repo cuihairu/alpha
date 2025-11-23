@@ -1,0 +1,38 @@
+# Alpha Finance 微服务配置
+
+## 数据库配置
+database_url = "postgresql://postgres:password@localhost:5432/alpha_finance"
+redis_url = "redis://localhost:6379"
+
+## 服务发现配置
+[service_discovery]
+api_gateway = "http://localhost:8080"
+data_engine = "http://localhost:8081"
+real_time_feed = "http://localhost:8082"
+collector = "http://localhost:8083"
+
+## 认证配置
+[auth]
+jwt_secret = "your-secret-key-change-in-production"
+token_expiry = 3600  # seconds
+
+## 限流配置
+[rate_limit]
+requests_per_minute = 100
+burst_size = 20
+
+## 日志配置
+[logging]
+level = "info"
+format = "json"
+output = "stdout"
+
+## 监控配置
+[monitoring]
+prometheus_port = 9090
+health_check_interval = 30  # seconds
+
+## 数据源配置
+[data_sources]
+[simulation_symbols]
+symbols = ["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "META", "NVDA", "NFLX"]

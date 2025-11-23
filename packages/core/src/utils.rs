@@ -1,7 +1,7 @@
 //! 工具函数模块
 
-use crate::errors::AlphaResult;
-use chrono::{DateTime, Utc, Duration};
+use crate::errors::{AlphaError, AlphaResult};
+use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 
 /// 时间工具函数
 pub mod time {
@@ -15,7 +15,7 @@ pub mod time {
     /// 时间戳转换为 DateTime
     pub fn timestamp_to_datetime(timestamp: i64) -> AlphaResult<DateTime<Utc>> {
         DateTime::from_timestamp_millis(timestamp)
-            .ok_or_else(|| crate::errors::AlphaError::invalid_input("Invalid timestamp"))
+            .ok_or_else(|| AlphaError::invalid_input("Invalid timestamp"))
     }
 
     /// 获取交易时间范围 (9:30-16:00)
@@ -111,34 +111,37 @@ pub mod string {
 
 /// 数据验证工具
 pub mod validation {
+    use crate::errors::{AlphaError, AlphaResult};
     use crate::models::MarketData;
 
     /// 验证市场数据有效性
     pub fn validate_market_data(data: &MarketData) -> AlphaResult<()> {
         if data.symbol.is_empty() {
-            return Err(crate::errors::AlphaError::invalid_input("Symbol cannot be empty"));
+            return Err(AlphaError::invalid_input("Symbol cannot be empty"));
         }
 
         if data.price <= 0.0 {
-            return Err(crate::errors::AlphaError::invalid_input("Price must be positive"));
+            return Err(AlphaError::invalid_input("Price must be positive"));
         }
 
         if data.timestamp > chrono::Utc::now() {
-            return Err(crate::errors::AlphaError::invalid_input("Timestamp cannot be in the future"));
+            return Err(AlphaError::invalid_input(
+                "Timestamp cannot be in the future",
+            ));
         }
 
         Ok(())
     }
 
     /// 验证价格范围合理性
-    pub fn validate_price_range(price: f64, symbol: &str) -> AlphaResult<()> {
+    pub fn validate_price_range(price: f64, _symbol: &str) -> AlphaResult<()> {
         // 基本的价格合理性检查
         if price <= 0.0 {
-            return Err(crate::errors::AlphaError::invalid_input("Price must be positive"));
+            return Err(AlphaError::invalid_input("Price must be positive"));
         }
 
         if price > 1_000_000.0 {
-            return Err(crate::errors::AlphaError::invalid_input("Price seems unreasonably high"));
+            return Err(AlphaError::invalid_input("Price seems unreasonably high"));
         }
 
         Ok(())
@@ -178,6 +181,7 @@ mod tests {
 
     #[test]
     fn test_validation() {
+        use crate::models::MarketData;
         use chrono::Utc;
 
         let valid_data = MarketData {

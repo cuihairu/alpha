@@ -4,17 +4,21 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub mod models;
-pub mod indicators;
 pub mod analytics;
-pub mod utils;
 pub mod errors;
+pub mod indicators;
+pub mod models;
+pub mod utils;
 
 // 重新导出主要类型
-pub use models::*;
-pub use indicators::TechnicalIndicators;
 pub use analytics::AnalysisEngine;
 pub use errors::*;
+pub use indicators::TechnicalIndicators;
+pub use models::*;
+pub use utils::numeric;
+pub use utils::string;
+pub use utils::time;
+pub use utils::validation;
 
 #[cfg(test)]
 mod tests {

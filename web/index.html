@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alpha Finance - 金融数据分析平台</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🚀 Alpha Finance</h1>
+            <p>高性能金融数据分析平台</p>
+        </header>
+
+        <div class="dashboard">
+            <!-- 股票分析卡片 -->
+            <div class="card">
+                <h3>📈 股票分析</h3>
+                <div id="analysis-status"></div>
+
+                <div class="form-group">
+                    <label for="symbol">股票代码</label>
+                    <input type="text" id="symbol" placeholder="例如: AAPL" value="AAPL">
+                </div>
+
+                <div class="form-group">
+                    <label for="period">分析周期</label>
+                    <select id="period">
+                        <option value="daily">日线</option>
+                        <option value="weekly">周线</option>
+                        <option value="monthly">月线</option>
+                    </select>
+                </div>
+
+                <button class="btn" onclick="analyzeStock()">
+                    开始分析
+                </button>
+
+                <div id="analysis-results" class="results"></div>
+            </div>
+
+            <!-- 技术指标卡片 -->
+            <div class="card">
+                <h3>📊 技术指标</h3>
+                <div id="indicators-status"></div>
+
+                <div class="form-group">
+                    <label for="rsi-period">RSI 周期</label>
+                    <input type="number" id="rsi-period" value="14" min="2" max="50">
+                </div>
+
+                <div class="form-group">
+                    <label for="sma-short">短期均线</label>
+                    <input type="number" id="sma-short" value="20" min="5" max="50">
+                </div>
+
+                <div class="form-group">
+                    <label for="sma-long">长期均线</label>
+                    <input type="number" id="sma-long" value="50" min="20" max="200">
+                </div>
+
+                <button class="btn" onclick="calculateIndicators()">
+                    计算指标
+                </button>
+
+                <div id="indicators-results" class="results"></div>
+            </div>
+        </div>
+
+        <!-- 实时数据卡片 -->
+        <div class="card">
+            <h3>⚡ 实时数据</h3>
+            <div id="realtime-status"></div>
+
+            <div class="form-group">
+                <label for="watchlist">观察列表</label>
+                <input type="text" id="watchlist" placeholder="股票代码，用逗号分隔" value="AAPL,GOOGL,MSFT">
+            </div>
+
+            <button class="btn" onclick="startRealTime()">
+                开始实时监控
+            </button>
+
+            <div id="realtime-results" class="results"></div>
+        </div>
+
+        <!-- 性能监控卡片 -->
+        <div class="card">
+            <h3>🔧 系统性能</h3>
+            <button class="btn" onclick="getPerformanceMetrics()">
+                获取性能指标
+            </button>
+            <div id="performance-results" class="results"></div>
+        </div>
+
+        <footer class="footer">
+            <p>© 2024 Alpha Finance - 基于 Rust + WebAssembly 的高性能金融分析平台</p>
+        </footer>
+    </div>
+
+    <!-- 引入 WebAssembly 模块 -->
+    <script type="module">
+        import init, { WasmAnalyzer, Utils } from './pkg/alpha_wasm_analyzer.js';
+
+        // 全局变量
+        window.analyzer = null;
+        window.utils = null;
+        window.isRealTimeRunning = false;
+
+        // 初始化 WASM 模块
+        async function initializeWasm() {
+            try {
+                showStatus('analysis-status', 'loading', '正在加载分析引擎...');
+                await init();
+
+                window.analyzer = new WasmAnalyzer();
+                window.utils = Utils;
+
+                showStatus('analysis-status', 'success', '✅ 分析引擎加载成功');
+                console.log('✅ WASM 分析引擎初始化完成');
+            } catch (error) {
+                console.error('❌ WASM 初始化失败:', error);
+                showStatus('analysis-status', 'error', '❌ 加载失败: ' + error.message);
+            }
+        }
+
+        // 显示状态信息
+        function showStatus(elementId, type, message) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        // 生成模拟市场数据
+        function generateMockData(symbol, days = 100) {
+            const data = [];
+            let price = 100 + Math.random() * 50; // 起始价格 100-150
+
+            for (let i = 0; i < days; i++) {
+                const date = new Date();
+                date.setDate(date.getDate() - (days - i));
+
+                // 模拟价格波动
+                const change = (Math.random() - 0.5) * 10;
+                price = Math.max(10, price + change);
+
+                const volume = Math.floor(Math.random() * 1000000) + 100000;
+
+                data.push({
+                    symbol: symbol,
+                    timestamp: date.toISOString(),
+                    price: parseFloat(price.toFixed(2)),
+                    volume: volume,
+                    bid: parseFloat((price - 0.1).toFixed(2)),
+                    ask: parseFloat((price + 0.1).toFixed(2)),
+                    open: parseFloat((price - Math.random() * 2).toFixed(2)),
+                    high: parseFloat((price + Math.random() * 3).toFixed(2)),
+                    low: parseFloat((price - Math.random() * 3).toFixed(2))
+                });
+            }
+
+            return data;
+        }
+
+        // 暴露函数到全局作用域
+        window.initializeWasm = initializeWasm;
+        window.showStatus = showStatus;
+        window.generateMockData = generateMockData;
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', initializeWasm);
+    </script>
+
+    <!-- 演示数据生成器 -->
+    <script src="demo-data.js"></script>
+    <!-- 主要业务逻辑 -->
+    <script src="app.js"></script>
+</body>
+</html>

@@ -24,12 +24,12 @@
 - [ ] 开发键盘快捷键和右键菜单支持
 
 ## 🔧 Rust 微服务架构
-- [ ] 基于 Axum + Tokio 构建高性能 HTTP/gRPC 服务
-- [ ] 使用 Tonic + Prost 替代 go-zero 实现微服务通信
-- [ ] 集成 DataFusion 替代 DuckDB 服务端实现内存 SQL 引擎
-- [ ] 开发基于 Arrow 的列式数据处理管线
-- [ ] 实现基于 Tokio 的异步消息队列和事件驱动架构
-- [ ] 构建统一配置管理（config-rs）和分布式追踪（tracing）
+- [x] 基于 Axum + Tokio 构建高性能 HTTP/gRPC 服务
+- [x] 使用 Tonic + Prost 替代 go-zero 实现微服务通信
+- [x] 集成 DataFusion 替代 DuckDB 服务端实现内存 SQL 引擎
+- [x] 开发基于 Arrow 的列式数据处理管线
+- [x] 实现基于 Tokio 的异步消息队列和事件驱动架构
+- [x] 构建统一配置管理（config-rs）和分布式追踪（tracing）
 
 ## 📱 移动端应用（Android & iOS）
 - [ ] 设计移动端 Rust 核心库架构（JNI + UniFFI）
@@ -48,15 +48,15 @@
 - [ ] 构建统一的主题系统和个性化配置
 
 ## 🕷️ 数据采集服务
-- [ ] 基于 Tokio + Reqwest 开发高性能异步爬虫引擎
-- [ ] 实现智能任务调度器和限流代理池管理
-- [ ] 构建反爬虫对策（User-Agent 轮换、请求频率控制）
-- [ ] 开发多数据源适配器（API、网页、FTP、文件推送）
-- [ ] 实现数据质量校验、清洗和标准化流程
-- [ ] 构建采集状态监控和自动故障恢复机制
+- [x] 基于 Tokio + Reqwest 开发高性能异步爬虫引擎
+- [x] 实现智能任务调度器和限流代理池管理
+- [x] 构建反爬虫对策（User-Agent 轮换、请求频率控制）
+- [x] 开发多数据源适配器（API、网页、FTP、文件推送）
+- [x] 实现数据质量校验、清洗和标准化流程
+- [x] 构建采集状态监控和自动故障恢复机制
 
 ## 💾 存储与数据处理
-- [ ] 集成 SQLx + TimescaleDB 实现时序数据存储
+- [x] 集成 SQLx + TimescaleDB 实现时序数据存储
 - [ ] 使用 DataFusion + Arrow 构建内存分析引擎
 - [ ] 设计 Parquet 格式的数据湖存储架构
 - [ ] 实现基于 Redis 的分布式缓存和限流系统
@@ -74,8 +74,8 @@
 ## 🔍 监控与可观测性
 - [ ] 集成 Prometheus + Grafana + Loki 全链路监控
 - [ ] 开发分布式追踪系统（tracing + Jaeger）
-- [ ] 实现基于 Metrics 的性能指标收集
-- [ ] 构建健康检查和服务依赖监控
+- [x] 实现基于 Metrics 的性能指标收集
+- [x] 构建健康检查和服务依赖监控
 - [ ] 开发 Rust 专用的内存安全监控工具
 - [ ] 实现实时告警和智能故障诊断
 

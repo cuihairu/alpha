@@ -1,0 +1,160 @@
+version: '3.8'
+
+services:
+  # ClickHouse 数据库 (高性能分析型数据库)
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: alpha-clickhouse
+    environment:
+      CLICKHOUSE_DB: alpha_finance
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: admin123
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"  # HTTP 接口
+      - "9000:9000"  # TCP 接口
+      - "9004:9004"  # MySQL 接口
+      - "9005:9005"  # PostgreSQL 接口
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./config/clickhouse-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./config/clickhouse-users.xml:/etc/clickhouse-server/users.d/users.xml
+    networks:
+      - alpha-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis 缓存 (用于会话和临时数据)
+  redis:
+    image: redis:7-alpine
+    container_name: alpha-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
+  # API 网关
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: alpha-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
+      - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+    depends_on:
+      - clickhouse
+      - redis
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
+  # 数据处理引擎
+  data-engine:
+    build:
+      context: .
+      dockerfile: services/data-engine/Dockerfile
+    container_name: alpha-data-engine
+    ports:
+      - "8081:8081"
+    environment:
+      - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
+      - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+    depends_on:
+      - clickhouse
+      - redis
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
+  # 实时数据流服务
+  real-time-feed:
+    build:
+      context: .
+      dockerfile: services/real-time-feed/Dockerfile
+    container_name: alpha-real-time-feed
+    ports:
+      - "8082:8082"
+    environment:
+      - RUST_LOG=info
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
+  # 数据采集服务
+  collector:
+    build:
+      context: .
+      dockerfile: services/collector/Dockerfile
+    container_name: alpha-collector
+    ports:
+      - "8083:8083"
+    environment:
+      - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
+      - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
+      - RUST_LOG=info
+    depends_on:
+      - clickhouse
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
+  # Prometheus 监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: alpha-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
+  # Grafana 仪表板
+  grafana:
+    image: grafana/grafana:latest
+    container_name: alpha-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  alpha-network:
+    driver: bridge

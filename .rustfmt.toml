@@ -21,8 +21,6 @@ where_single_line = false
 # 导入排序
 imports_granularity = "Crate"
 group_imports = "StdExternalCrate"
-reorder_imports = true
-reorder_modules = true
 
 # 注释格式化
 comment_width = 80

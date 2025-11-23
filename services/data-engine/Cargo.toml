@@ -10,6 +10,8 @@ license.workspace = true
 # Web 框架
 axum = { workspace = true }
 tonic = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
 
 # 数据处理
 datafusion = { workspace = true }

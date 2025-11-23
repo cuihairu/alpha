@@ -1,0 +1,25 @@
+[package]
+name = "alpha-protocols"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+prost = { workspace = true }
+
+# 内部包
+alpha-core = { workspace = true }
+
+# 时间处理
+chrono = { workspace = true }
+
+[build-dependencies]
+tonic-build = "0.10"

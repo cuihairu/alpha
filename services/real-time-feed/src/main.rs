@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::{
     sync::broadcast,
@@ -110,9 +110,13 @@ fn start_data_generator(app_state: Arc<AppState>) {
         let mut interval = interval(Duration::from_millis(100)); // 每100ms发送一次数据
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let symbols = vec!["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA"];
-        let mut last_prices: HashMap<String, f64> = symbols.iter()
-            .map(|s| (s.to_string(), 100.0 + rand::random::<f64>() * 900.0))
+        let symbols: Vec<String> = vec!["AAPL", "GOOGL", "MSFT", "AMZN", "TSLA"]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut last_prices: HashMap<String, f64> = symbols
+            .iter()
+            .map(|s| (s.clone(), 100.0 + rand::random::<f64>() * 900.0))
             .collect();
 
         loop {
@@ -162,13 +166,14 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
     let mut data_receiver = app_state.data_sender.subscribe();
 
     // 将连接添加到管理器
-    app_state.connection_manager.add_connection(
-        connection_id.clone(),
-        app_state.data_sender.clone(),
-    );
+    app_state
+        .connection_manager
+        .add_connection(connection_id.clone(), app_state.data_sender.clone());
 
     // 处理连接
     let (mut sender, mut receiver) = socket.split();
+    let send_connection_id = connection_id.clone();
+    let recv_connection_id = connection_id.clone();
 
     // 发送数据的任务
     let send_task = tokio::spawn(async move {
@@ -182,6 +187,7 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
             };
 
             if sender.send(message).await.is_err() {
+                tracing::debug!("Send loop closed for {}", send_connection_id);
                 break;
             }
         }
@@ -192,25 +198,33 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
         while let Some(msg) = receiver.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    tracing::debug!("Received text message from {}: {}", connection_id, text);
+                    tracing::debug!(
+                        "Received text message from {}: {}",
+                        recv_connection_id,
+                        text
+                    );
 
                     // 处理订阅请求
                     if let Ok(subscribe_msg) = serde_json::from_str::<SubscribeMessage>(&text) {
-                        tracing::info!("Client {} subscribed to: {:?}", connection_id, subscribe_msg.symbols);
+                        tracing::info!(
+                            "Client {} subscribed to: {:?}",
+                            recv_connection_id,
+                            subscribe_msg.symbols
+                        );
                     }
                 }
                 Ok(Message::Ping(payload)) => {
-                    // 响应 ping
-                    if let Err(e) = sender.send(Message::Pong(payload)).await {
-                        tracing::debug!("Failed to send pong: {}", e);
-                        break;
-                    }
+                    tracing::debug!(
+                        "Received ping from {}, payload: {:?}",
+                        recv_connection_id,
+                        payload
+                    );
                 }
                 Ok(Message::Close(_)) => {
                     break;
                 }
                 Err(e) => {
-                    tracing::debug!("WebSocket error for {}: {}", connection_id, e);
+                    tracing::debug!("WebSocket error for {}: {}", recv_connection_id, e);
                     break;
                 }
                 _ => {}
@@ -225,7 +239,9 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
     }
 
     // 清理连接
-    app_state.connection_manager.remove_connection(&connection_id);
+    app_state
+        .connection_manager
+        .remove_connection(&connection_id);
     tracing::info!("WebSocket connection closed: {}", connection_id);
 }
 

@@ -4,7 +4,7 @@
 
 use axum::{
     extract::Query,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     middleware,
     response::Json,
     routing::{get, post},
@@ -93,15 +93,13 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化日志
     tracing_subscriber::fmt()
-        .with_max_level(
-            match args.log_level.to_lowercase().as_str() {
-                "debug" => tracing::Level::DEBUG,
-                "info" => tracing::Level::INFO,
-                "warn" => tracing::Level::WARN,
-                "error" => tracing::Level::ERROR,
-                _ => tracing::Level::INFO,
-            }
-        )
+        .with_max_level(match args.log_level.to_lowercase().as_str() {
+            "debug" => tracing::Level::DEBUG,
+            "info" => tracing::Level::INFO,
+            "warn" => tracing::Level::WARN,
+            "error" => tracing::Level::ERROR,
+            _ => tracing::Level::INFO,
+        })
         .init();
 
     tracing::info!("Starting Alpha Finance API Gateway");
@@ -168,7 +166,7 @@ async fn health_check() -> Json<HealthResponse> {
 /// API 代理端点
 async fn api_proxy(
     axum::extract::Path(path): axum::extract::Path<String>,
-    headers: HeaderMap,
+    _headers: HeaderMap,
     query: Query<std::collections::HashMap<String, String>>,
 ) -> Json<ApiResponse<serde_json::Value>> {
     // 这里应该实现实际的代理逻辑
@@ -179,7 +177,7 @@ async fn api_proxy(
     // 模拟代理响应
     let mock_data = serde_json::json!({
         "path": path,
-        "query": serde_json::to_value(query.into_inner()).unwrap_or_default(),
+        "query": serde_json::to_value(query.0).unwrap_or_default(),
         "timestamp": chrono::Utc::now(),
     });
 
@@ -190,7 +188,6 @@ async fn api_proxy(
 async fn ws_proxy(
     axum::extract::Path(path): axum::extract::Path<String>,
     ws: axum::extract::ws::WebSocketUpgrade,
-    ws_state: axum::extract::State<()>,
 ) -> axum::response::Response {
     tracing::info!("WebSocket connection to: {}", path);
 

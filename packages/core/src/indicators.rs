@@ -2,9 +2,10 @@
 //!
 //! 提供跨平台的技术指标算法实现，确保所有平台计算结果一致
 
-use crate::models::{IndicatorResult, SignalType, MarketData};
 use crate::errors::AlphaError;
-use num_traits::Float;
+use crate::models::{IndicatorResult, MarketData, SignalType};
+
+pub mod advanced;
 
 /// 技术指标计算器
 #[derive(Debug, Clone)]
@@ -114,7 +115,12 @@ impl TechnicalIndicators {
     }
 
     /// 计算布林带 (Bollinger Bands)
-    pub fn calculate_bollinger_bands(&self, prices: &[f64], period: usize, std_dev: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    pub fn calculate_bollinger_bands(
+        &self,
+        prices: &[f64],
+        period: usize,
+        std_dev: f64,
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let sma = self.calculate_sma(prices, period);
         let mut upper_band = vec![0.0; prices.len()];
         let mut lower_band = vec![0.0; prices.len()];
@@ -122,9 +128,11 @@ impl TechnicalIndicators {
         for i in period - 1..prices.len() {
             let slice = &prices[i - period + 1..=i];
             let mean = sma[i];
-            let variance = slice.iter()
+            let variance = slice
+                .iter()
                 .map(|&price| (price - mean).powi(2))
-                .sum::<f64>() / period as f64;
+                .sum::<f64>()
+                / period as f64;
             let std_deviation = variance.sqrt();
 
             upper_band[i] = (mean + std_dev * std_deviation).round_to(self.precision);
@@ -135,7 +143,13 @@ impl TechnicalIndicators {
     }
 
     /// 计算移动平均收敛散度 (MACD)
-    pub fn calculate_macd(&self, prices: &[f64], fast_period: usize, slow_period: usize, signal_period: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    pub fn calculate_macd(
+        &self,
+        prices: &[f64],
+        fast_period: usize,
+        slow_period: usize,
+        signal_period: usize,
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let ema_fast = self.calculate_ema(prices, fast_period);
         let ema_slow = self.calculate_ema(prices, slow_period);
 
@@ -148,14 +162,19 @@ impl TechnicalIndicators {
         let mut histogram = vec![0.0; prices.len()];
 
         for i in 0..prices.len() {
-            histogram[i] = ((macd_line[i] - signal_line[i]) * 1000.0).round_to(self.precision); // 放大显示
+            histogram[i] = ((macd_line[i] - signal_line[i]) * 1000.0).round_to(self.precision);
+            // 放大显示
         }
 
         (macd_line, signal_line, histogram)
     }
 
     /// 从市场数据计算技术指标
-    pub fn calculate_from_market_data(&self, data: &[MarketData], symbol: &str) -> Result<IndicatorResult, AlphaError> {
+    pub fn calculate_from_market_data(
+        &self,
+        data: &[MarketData],
+        _symbol: &str,
+    ) -> Result<IndicatorResult, AlphaError> {
         if data.is_empty() {
             return Err(AlphaError::InvalidInput("Empty market data".to_string()));
         }
@@ -165,11 +184,16 @@ impl TechnicalIndicators {
 
         // 计算 RSI 作为示例
         let rsi_values = self.calculate_rsi(&prices, 14);
-        let signals: Vec<SignalType> = rsi_values.iter()
+        let signals: Vec<SignalType> = rsi_values
+            .iter()
             .map(|&rsi| {
-                if rsi > 70.0 { SignalType::Sell }
-                else if rsi < 30.0 { SignalType::Buy }
-                else { SignalType::Hold }
+                if rsi > 70.0 {
+                    SignalType::Sell
+                } else if rsi < 30.0 {
+                    SignalType::Buy
+                } else {
+                    SignalType::Hold
+                }
             })
             .collect();
 
@@ -219,7 +243,10 @@ mod tests {
     #[test]
     fn test_rsi_calculation() {
         let indicators = TechnicalIndicators::new();
-        let prices = vec![44.0, 44.5, 45.0, 44.8, 45.2, 45.8, 46.2, 46.5, 46.0, 45.8, 45.5, 45.2, 44.8, 44.5, 44.0];
+        let prices = vec![
+            44.0, 44.5, 45.0, 44.8, 45.2, 45.8, 46.2, 46.5, 46.0, 45.8, 45.5, 45.2, 44.8, 44.5,
+            44.0,
+        ];
         let rsi = indicators.calculate_rsi(&prices, 14);
 
         assert!(!rsi.is_empty());

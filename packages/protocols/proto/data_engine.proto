@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package alpha.dataengine;
+
+message IndicatorRequest {
+  string symbol = 1;
+  uint32 lookback_days = 2;
+  uint32 rsi_period = 3;
+  uint32 sma_short = 4;
+  uint32 sma_long = 5;
+  uint32 macd_fast = 6;
+  uint32 macd_slow = 7;
+  uint32 macd_signal = 8;
+}
+
+message IndicatorSeries {
+  string name = 1;
+  repeated double values = 2;
+  repeated int64 timestamps = 3;
+}
+
+message IndicatorResponse {
+  string symbol = 1;
+  repeated IndicatorSeries series = 2;
+}
+
+message HistoryRequest {
+  string symbol = 1;
+  uint32 days = 2;
+  uint32 limit = 3;
+}
+
+message HistoryPoint {
+  int64 timestamp = 1;
+  double price = 2;
+  uint64 volume = 3;
+}
+
+message HistoryResponse {
+  string symbol = 1;
+  uint32 period_days = 2;
+  repeated HistoryPoint points = 3;
+}
+
+message PerformanceRequest {
+  string symbol = 1;
+  uint32 period_days = 2;
+}
+
+message PerformanceResponse {
+  string symbol = 1;
+  double total_return = 2;
+  double annualized_return = 3;
+  double volatility = 4;
+  double max_drawdown = 5;
+  double sharpe_ratio = 6;
+  double win_rate = 7;
+}
+
+service DataEngineService {
+  rpc GetIndicators(IndicatorRequest) returns (IndicatorResponse);
+  rpc GetHistory(HistoryRequest) returns (HistoryResponse);
+  rpc CalculatePerformance(PerformanceRequest) returns (PerformanceResponse);
+}

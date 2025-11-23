@@ -28,6 +28,9 @@ clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+# 时间
+chrono = { workspace = true }
+
 # 错误处理
 anyhow = { workspace = true }
 thiserror = { workspace = true }

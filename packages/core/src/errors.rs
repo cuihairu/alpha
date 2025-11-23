@@ -92,7 +92,10 @@ impl From<chrono::ParseError> for AlphaError {
 #[cfg(target_arch = "wasm32")]
 impl From<js_sys::Error> for AlphaError {
     fn from(err: js_sys::Error) -> Self {
-        Self::WasmError(format!("JavaScript error: {}", err.as_string().unwrap_or_default()))
+        Self::WasmError(format!(
+            "JavaScript error: {}",
+            err.as_string().unwrap_or_default()
+        ))
     }
 }
 

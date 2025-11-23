@@ -38,3 +38,4 @@ alpha-protocols = { workspace = true }
 
 # 随机数生成（用于模拟数据）
 rand = "0.8"
+uuid = { workspace = true }

@@ -1,0 +1,97 @@
+<?xml version="1.0"?>
+<yandex>
+    <users>
+        <!-- 管理员用户 - 拥有所有权限 -->
+        <admin>
+            <password>admin123</password>
+            <access_management>1</access_management>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <databases>
+                <database>alpha_finance</database>
+            </databases>
+        </admin>
+
+        <!-- 只读用户 - 用于查询和分析 -->
+        <readonly>
+            <password>readonly123</password>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>readonly</profile>
+            <quota>default</quota>
+            <databases>
+                <database>alpha_finance</database>
+            </databases>
+            <readonly>1</readonly>
+        </readonly>
+
+        <!-- 写入用户 - 用于数据采集和更新 -->
+        <writer>
+            <password>writer123</password>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>writer</profile>
+            <quota>writer</quota>
+            <databases>
+                <database>alpha_finance</database>
+            </databases>
+            <allow_ddl>0</allow_ddl>
+        </writer>
+    </users>
+
+    <!-- 配置文件 -->
+    <profiles>
+        <default>
+            <max_memory_usage>10000000000</max_memory_usage>
+            <max_memory_usage_for_all_queries>20000000000</max_memory_usage_for_all_queries>
+            <max_threads>8</max_threads>
+            <max_insert_threads>4</max_insert_threads>
+            <max_block_size>1048576</max_block_size>
+        </default>
+
+        <readonly>
+            <max_memory_usage>5000000000</max_memory_usage>
+            <max_threads>4</max_threads>
+            <max_block_size>65536</max_block_size>
+            <readonly>1</readonly>
+        </readonly>
+
+        <writer>
+            <max_memory_usage>15000000000</max_memory_usage>
+            <max_insert_threads>8</max_insert_threads>
+            <max_block_size>2097152</max_block_size>
+            <max_insert_block_size>1048576</max_insert_block_size>
+        </writer>
+    </profiles>
+
+    <!-- 配额设置 -->
+    <quotas>
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>1000</queries>
+                <errors>100</errors>
+                <result_rows>1000000000</result_rows>
+                <read_rows>10000000000</read_rows>
+                <execution_time>3600</execution_time>
+            </interval>
+        </default>
+
+        <writer>
+            <interval>
+                <duration>3600</duration>
+                <queries>10000</queries>
+                <errors>1000</errors>
+                <result_rows>100000000</result_rows>
+                <read_rows>1000000000</read_rows>
+                <write_rows>1000000000</write_rows>
+                <execution_time>3600</execution_time>
+            </interval>
+        </writer>
+    </quotas>
+</yandex>

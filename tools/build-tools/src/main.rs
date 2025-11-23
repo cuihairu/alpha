@@ -3,7 +3,6 @@
 //! 跨平台项目生成和管理工具
 
 use clap::{Parser, Subcommand};
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -49,7 +48,10 @@ fn main() -> anyhow::Result<()> {
         Commands::GenerateService { name, service_type } => {
             generate_service(&name, &service_type)?;
         }
-        Commands::GenerateComponent { name, component_type } => {
+        Commands::GenerateComponent {
+            name,
+            component_type,
+        } => {
             generate_component(&name, &component_type)?;
         }
         Commands::Validate => {
@@ -97,7 +99,7 @@ fn generate_service(name: &str, service_type: &str) -> anyhow::Result<()> {
 }
 
 /// 生成服务 Cargo.toml
-fn generate_service_cargo_toml(name: &str, service_type: &str) -> anyhow::Result<String> {
+fn generate_service_cargo_toml(name: &str, _service_type: &str) -> anyhow::Result<String> {
     let template = format!(
         r#"[package]
 name = "alpha-{}"
@@ -144,7 +146,7 @@ tokio-test = {{ workspace = true }}
 fn generate_service_main_rs(name: &str, service_type: &str) -> anyhow::Result<String> {
     let main_rs = match service_type {
         "http" => format!(
-            r#"//! {} HTTP Service
+            r#"//! {service} HTTP Service
 
 use axum::{{extract::Query, response::Json, routing::get, Router}};
 use serde::Deserialize;
@@ -157,7 +159,7 @@ struct HealthQuery {{
 
 async fn health_check(Query(params): Query<HealthQuery>) -> Json<serde_json::Value> {{
     Json(serde_json::json! {{
-        "service": "{}",
+        "service": "{service}",
         "status": "healthy",
         "timestamp": chrono::Utc::now(),
         "detailed": params.detailed.unwrap_or(false)
@@ -168,34 +170,33 @@ async fn health_check(Query(params): Query<HealthQuery>) -> Json<serde_json::Val
 async fn main() -> anyhow::Result<()> {{
     tracing_subscriber::fmt::init();
 
-    let app = Router::new()
-        .route("/health", get(health_check));
+    let app = Router::new().route("/health", get(health_check));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
-    tracing::info!("{} 服务监听: {{}}", "{}", addr);
+    tracing::info!("{service} 服务监听: {{}}", addr);
 
     axum::serve(listener, app).await?;
     Ok(())
 }}
 "#,
-            name, name
+            service = name
         ),
         _ => format!(
-            r#"//! {} Service
+            r#"//! {service} Service
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {{
     tracing_subscriber::fmt::init();
-    tracing::info!("启动 {} 服务", "{}");
+    tracing::info!("启动 {service} 服务");
 
     // TODO: 实现服务逻辑
 
     Ok(())
 }}
 "#,
-            name, name
+            service = name
         ),
     };
 
@@ -220,7 +221,9 @@ redis:
 logging:
   level: "info"
 "#,
-        name, name, name.to_lowercase().replace("-", "_")
+        name,
+        name,
+        name.to_lowercase().replace("-", "_")
     );
 
     Ok(config)
@@ -239,7 +242,10 @@ fn generate_component(name: &str, component_type: &str) -> anyhow::Result<()> {
             fs::write(component_dir.join(format!("{}.tsx", name)), component_tsx)?;
 
             let component_test = generate_react_component_test(name)?;
-            fs::write(component_dir.join(format!("{}.test.tsx", name)), component_test)?;
+            fs::write(
+                component_dir.join(format!("{}.test.tsx", name)),
+                component_test,
+            )?;
         }
         "vue" => {
             let component_vue = generate_vue_component(name)?;
@@ -256,33 +262,29 @@ fn generate_component(name: &str, component_type: &str) -> anyhow::Result<()> {
 
 /// 生成 React 组件
 fn generate_react_component(name: &str) -> anyhow::Result<String> {
+    let class_name = name.to_lowercase();
     let component = format!(
         r#"import React from 'react';
-import './{}.css';
+import './{css_file}.css';
 
-interface {}Props {{
+interface {name}Props {{
   // TODO: 定义组件属性
 }}
 
-export const {}: React.FC<{}Props> = (props) => {{
+export const {name}: React.FC<{name}Props> = (props) => {{
   return (
-    <div className="{}">
-      <h1>{} Component</h1>
-      {/* TODO: 实现组件逻辑 */}
+    <div className="{class_name}">
+      <h1>{name} Component</h1>
+      {{/* TODO: 实现组件逻辑 */}}
     </div>
   );
 }};
 
-export default {};
+export default {name};
 "#,
-        name.to_lowercase(),
-        name,
-        name,
-        name,
-        name,
-        name.to_lowercase(),
-        name,
-        name
+        css_file = class_name,
+        class_name = class_name,
+        name = name
     );
 
     Ok(component)
@@ -301,11 +303,7 @@ describe('{}', () => {{
   }});
 }});
 "#,
-        name,
-        name,
-        name,
-        name,
-        name
+        name, name, name, name, name
     );
 
     Ok(test)
@@ -313,10 +311,11 @@ describe('{}', () => {{
 
 /// 生成 Vue 组件
 fn generate_vue_component(name: &str) -> anyhow::Result<String> {
+    let class_name = name.to_lowercase();
     let component = format!(
         r#"<template>
-  <div class="{}">
-    <h1>{{ {{  }} }} Component</h1>
+  <div class="{class_name}">
+    <h1>{component_name} Component</h1>
     <!-- TODO: 实现模板 -->
   </div>
 </template>
@@ -331,13 +330,13 @@ const props = defineProps<Props>();
 </script>
 
 <style scoped>
-.{{
+.{class_name} {{
   /* TODO: 实现样式 */
 }}
 </style>
 "#,
-        name.to_lowercase(),
-        name
+        class_name = class_name,
+        component_name = name
     );
 
     Ok(component)

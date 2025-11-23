@@ -4,7 +4,6 @@ members = [
     "packages/core",
     "packages/protocols",
     "packages/storage",
-    "packages/wasm-analyzer",
 
     # 服务端微服务
     "services/api-gateway",
@@ -13,14 +12,15 @@ members = [
     "services/collector",
 
     # 前端应用
-    "wasm-analyzer/pkg",
+    "wasm-analyzer",
     "desktop",
-    "mobile/android/rust",
-    "mobile/ios/rust",
-    "mobile/shared",
 
     # 开发工具
-    "tools/build-tools",
+    "tools/build-tools"
+]
+
+exclude = [
+    "mobile",
     "tools/benchmark",
     "tools/data-migration"
 ]
@@ -42,9 +42,9 @@ tokio = { version = "1.35", features = ["full"] }
 async-trait = "0.1"
 
 # Web 框架和 HTTP
-axum = { version = "0.7", features = ["macros", "ws", "headers"] }
+axum = { version = "0.7", features = ["macros", "ws"] }
 tower = { version = "0.4", features = ["full"] }
-tower-http = { version = "0.5", features = ["cors", "trace", "compression"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-br"] }
 hyper = { version = "1.0", features = ["full"] }
 
 # 数据处理
@@ -55,7 +55,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # 数据库
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "timescale", "chrono", "uuid"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
+
+# ClickHouse 数据库
+clickhouse = { version = "0.11.6", features = ["tls"] }
+clickhouse-rs = { version = "1.1.0-alpha.1" }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
 # gRPC 和 Protobuf
@@ -77,7 +81,7 @@ jni = "0.21"
 uniffi = "0.25"
 
 # 日期时间
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.37", features = ["serde"] }
 
 # UUID
 uuid = { version = "1.6", features = ["v4", "serde"] }
@@ -88,11 +92,12 @@ thiserror = "1.0"
 
 # 日志和追踪
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # 配置管理
 config = "0.13"
 clap = { version = "4.4", features = ["derive"] }
+url = "2.5"
 
 # 测试
 tokio-test = "0.4"
@@ -106,18 +111,3 @@ prometheus = "0.13"
 alpha-core = { path = "packages/core" }
 alpha-protocols = { path = "packages/protocols" }
 alpha-storage = { path = "packages/storage" }
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
-
-[profile.release.package."*"]
-opt-level = 3
-
-# 优化 WASM 包大小
-[profile.release.package.alpha-wasm-analyzer]
-opt-level = "s"
-lto = true
