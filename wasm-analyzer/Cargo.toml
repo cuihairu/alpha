@@ -55,10 +55,38 @@ web-sys = { version = "0.3", features = [
   "Navigator",
   "History",
   "PerformanceTiming",
+  # IndexedDB 支持
+  "IdbFactory",
+  "IdbDatabase",
+  "IdbObjectStore",
+  "IdbTransaction",
+  "IdbRequest",
+  "IdbOpenDbRequest",
+  "IdbVersionChangeEvent",
+  "IdbCursorWithValue",
+  "IdbKeyRange",
+  "IdbIndex",
+  "IdbTransactionMode",
+  "IdbObjectStoreParameters",
+  "DomException",
+  # WebSocket 支持
+  "WebSocket",
+  "MessageEvent",
+  "CloseEvent",
+  "ErrorEvent",
+  "BinaryType",
+  # Worker 支持
+  "Worker",
+  "WorkerOptions",
 ]}
 
 # 随机数生成（用于模拟数据）
 getrandom = { version = "0.2", features = ["js"] }
+
+# Arrow 列式数据格式支持
+arrow = { workspace = true, default-features = false, features = ["ipc"] }
+arrow-array = "50.0"
+arrow-schema = "50.0"
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-O", "--enable-simd"]

@@ -7,6 +7,18 @@ use chrono::Utc;
 use serde_wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
+mod arrow_adapter;
+mod streaming;
+mod storage;
+mod worker;
+mod websocket;
+
+pub use arrow_adapter::ArrowBatch;
+pub use streaming::{BatchStreamProcessor, StreamProcessor};
+pub use storage::{HybridStorage, IndexedDBStorage};
+pub use worker::{BatchComputer, ParallelScheduler, WorkerPool};
+pub use websocket::WebSocketClient;
+
 // 在浏览器控制台中显示 panic 信息
 #[wasm_bindgen(start)]
 pub fn main() {
