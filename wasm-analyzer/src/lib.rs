@@ -21,7 +21,7 @@ pub use websocket::WebSocketClient;
 
 // 在浏览器控制台中显示 panic 信息
 #[wasm_bindgen(start)]
-pub fn main() {
+pub fn init_panic_hook() {
     console_error_panic_hook::set_once();
 }
 

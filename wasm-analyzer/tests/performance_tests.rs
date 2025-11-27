@@ -5,6 +5,7 @@
 #![cfg(test)]
 
 use alpha_wasm_analyzer::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
@@ -177,7 +178,7 @@ fn bench_batch_computer() {
         .now();
 
     let _result = computer
-        .batch_compute_multiple(&prices_array, 20, 12, 14)
+        .batch_compute_multiple(prices_array, 20, 12, 14)
         .unwrap();
 
     let end = web_sys::window()
@@ -207,21 +208,11 @@ fn bench_memory_usage() {
 
     let prices_array = js_sys::Float64Array::from(&prices[..]);
 
-    let memory_before = if let Some(memory) = wasm_bindgen::memory() {
-        let buffer = js_sys::Uint8Array::new(&memory.buffer());
-        buffer.length()
-    } else {
-        0
-    };
+    let memory_before = current_memory_usage_bytes();
 
     let _result = analyzer.calculate_sma(&prices_array, 20);
 
-    let memory_after = if let Some(memory) = wasm_bindgen::memory() {
-        let buffer = js_sys::Uint8Array::new(&memory.buffer());
-        buffer.length()
-    } else {
-        0
-    };
+    let memory_after = current_memory_usage_bytes();
 
     let memory_used = memory_after.saturating_sub(memory_before);
 
@@ -230,4 +221,14 @@ fn bench_memory_usage() {
         memory_used,
         memory_used as f64 / 1024.0 / 1024.0
     )));
+}
+
+fn current_memory_usage_bytes() -> u32 {
+    wasm_bindgen::memory()
+        .dyn_into::<js_sys::WebAssembly::Memory>()
+        .map(|memory| {
+            let buffer = js_sys::Uint8Array::new(&memory.buffer());
+            buffer.length()
+        })
+        .unwrap_or(0)
 }

@@ -2,7 +2,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 8080;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // MIME 类型映射
 const mimeTypes = {
@@ -59,10 +60,11 @@ const server = http.createServer((req, res) => {
     });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
     console.log(`🚀 Alpha Finance 服务器启动成功！`);
-    console.log(`📍 本地访问: http://localhost:${PORT}`);
-    console.log(`🌐 网络访问: http://0.0.0.0:${PORT}`);
+    const localUrl = HOST === '0.0.0.0' ? `http://localhost:${PORT}` : `http://${HOST}:${PORT}`;
+    console.log(`📍 本地访问: ${localUrl}`);
+    console.log(`🌐 网络访问: http://${HOST}:${PORT}`);
     console.log(`⏰ 启动时间: ${new Date().toLocaleString()}`);
     console.log(`\n📝 说明:`);
     console.log(`   - 首次运行需要先构建 WASM 模块`);

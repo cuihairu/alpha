@@ -2,6 +2,7 @@
 # WASM 构建优化脚本
 
 set -e
+shopt -s nullglob
 
 echo "🚀 开始构建 Alpha WASM 分析引擎..."
 
@@ -11,13 +12,39 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# 检查依赖
+# 优先把 wasm-pack 缓存中的工具加入 PATH，避免在受限环境重复安装
+ensure_tool_in_path() {
+    local tool="$1"
+    shift || true
+
+    if command -v "$tool" &> /dev/null; then
+        return
+    fi
+
+    for dir in "$@"; do
+        if [ -d "$dir" ] && [ -x "$dir/$tool" ]; then
+            export PATH="$dir:$PATH"
+            echo -e "${BLUE}🔧 使用缓存的 $tool: $dir/$tool${NC}"
+            return
+        fi
+    done
+}
+
 echo -e "${BLUE}📦 检查构建依赖...${NC}"
 
 if ! command -v wasm-pack &> /dev/null; then
     echo -e "${YELLOW}⚠️  wasm-pack 未安装，正在安装...${NC}"
     cargo install wasm-pack
 fi
+
+# 在 macOS 和 Linux 上尝试追加 wasm-bindgen / wasm-opt 缓存目录
+ensure_tool_in_path wasm-bindgen \
+    "$HOME/Library/Caches/.wasm-pack/wasm-bindgen-"* \
+    "$HOME/.cache/.wasm-pack/wasm-bindgen-"*
+
+ensure_tool_in_path wasm-opt \
+    "$HOME/Library/Caches/.wasm-pack/wasm-opt-"*/bin \
+    "$HOME/.cache/.wasm-pack/wasm-opt-"*/bin
 
 if ! command -v wasm-opt &> /dev/null; then
     echo -e "${YELLOW}⚠️  wasm-opt 未安装，建议安装 binaryen 工具链${NC}"
@@ -36,18 +63,12 @@ cd wasm-analyzer
 # --target web: 针对 Web 浏览器
 # --release: Release 模式，启用优化
 # --no-typescript: 不生成 TypeScript 定义（可选）
-# -- -C opt-level=3: 最高优化级别
-# -- -C lto=fat: 启用链接时优化
-# -- -C embed-bitcode=yes: 嵌入 LLVM bitcode
+export RUSTFLAGS="-C opt-level=3 -C codegen-units=1 -C embed-bitcode=yes ${RUSTFLAGS:-}"
+
 wasm-pack build \
     --target web \
     --release \
-    --out-dir pkg \
-    -- \
-    -C opt-level=3 \
-    -C lto=fat \
-    -C codegen-units=1 \
-    -C embed-bitcode=yes
+    --out-dir pkg
 
 echo -e "${GREEN}✅ WASM 模块构建完成${NC}"
 
@@ -86,7 +107,7 @@ cat > wasm-analyzer/BUILD_REPORT.md << EOF
 
 ## 优化配置
 - opt-level: 3 (最高优化)
-- LTO: fat (完整链接时优化)
+- LTO: auto (遵循 Cargo profile 配置)
 - codegen-units: 1 (最佳优化，较慢编译)
 - SIMD: enabled (启用 SIMD 指令)
 - wasm-opt: $(command -v wasm-opt &> /dev/null && echo "已使用 -Oz 优化" || echo "未安装")
