@@ -1,0 +1,208 @@
+{
+  "version": "1.0.0",
+  "description": "开源爬虫项目配置库",
+  "last_updated": "2024-01-01",
+  "crawlers": [
+    {
+      "name": "scrapy-redis",
+      "display_name": "Scrapy Redis 集成爬虫",
+      "crawler_type": "Scrapy",
+      "repository_url": "https://github.com/scrapy-redis",
+      "local_path": null,
+      "config_path": "settings.py",
+      "supported_sources": ["ashare", "hkshare", "usshare", "cryptocurrency", "forex", "news"],
+      "start_command": "scrapy crawl",
+      "command_template": "scrapy crawl {spider_name} -s LOG_LEVEL=INFO",
+      "requires_python": true,
+      "requires_nodejs": false,
+      "default_config": {
+        "CONCURRENT_REQUESTS": "16",
+        "DOWNLOAD_DELAY": "0.5",
+        "RANDOMIZE_DOWNLOAD_DELAY": "0.5",
+        "REDIS_HOST": "localhost",
+        "REDIS_PORT": "6379",
+        "COOKIES_ENABLED": true,
+        "TELNETCONSOLE_ENABLED": false,
+        "LOG_LEVEL": "INFO"
+      }
+    },
+    {
+      "name": "puppeteer-crawler-master",
+      "display_name": "Puppeteer 网页爬虫",
+      "crawler_type": "Puppeteer",
+      "repository_url": "https://github.com/puppeteer-crawler-master",
+      "local_path": null,
+      "config_path": "config.js",
+      "supported_sources": ["ashare", "hkshare", "usshare", "news", "social_media"],
+      "start_command": "node crawler.js",
+      "command_template": "node crawler.js --headless --data-source={data_source} --keywords={keywords}",
+      "requires_python": false,
+      "requires_nodejs": true,
+      "default_config": {
+        "HEADLESS": true,
+        "MAX_CONCURRENT_PAGES": 5,
+        "PAGE_TIMEOUT": 30000,
+        "RENDER_DELAY": 1000,
+        "USER_AGENT": "Mozilla/5.0 (compatible; AlphaFinanceBot 1.0)"
+      }
+    },
+    {
+      "name": "scrapy-playwright",
+      "display_name": "Scrapy Playwright 集成爬虫",
+      "crawler_type": "Playwright",
+      "repository_url": "https://github.com/scrapy-playwright",
+      "local_path": null,
+      "config_path": "settings.py",
+      "supported_sources": ["ashare", "hkshare", "usshare", "cryptocurrency", "commodities"],
+      "start_command": "scrapy crawl",
+      "command_template": "scrapy crawl {spider_name} -s LOG_LEVEL=INFO",
+      "requires_python": true,
+      "requires_nodejs": false,
+      "default_config": {
+        "CONCURRENT_REQUESTS": "16",
+        "DOWNLOAD_DELAY": "0.5",
+        "RANDOMIZE_DOWNLOAD_DELAY": "0.5",
+        "PLAYWRIGHT_RUNTIME": "chromium",
+        "LOG_LEVEL": "INFO"
+      }
+    },
+    {
+      "name": "node-crypto-trader",
+      "display_name": "Node.js 数字货币交易分析",
+      "crawler_type": "DirectHttp",
+      "repository_url": "https://github.com/crypto-trader/node-crypto-trader",
+      "local_path": null,
+      "config_path": "config.json",
+      "supported_sources": ["cryptocurrency", "forex", "economic_indicators"],
+      "start_command": "node index.js --collect",
+      "command_template": "node index.js --collect --exchange={exchange} --symbols={symbols}",
+      "requires_python": false,
+      "requires_nodejs": true,
+      "default_config": {
+        "API_KEYS": {
+          "BINANCE": "YOUR_BINANCE_KEY",
+          "COINBASE": "YOUR_COINBASE_KEY",
+          "ALPHA_VANTAGE": "YOUR_ALPHA_VANTAGE_KEY",
+          "KRAKEN": "YOUR_KRAKEN_KEY"
+        },
+        "RATE_LIMIT": {
+          "REQUESTS_PER_MINUTE": 120,
+          "BACKOFF": "exponential"
+        },
+        "COLLECTION_INTERVAL": 60000
+      }
+    },
+    {
+      "name": "python-forex-scraper",
+      "display_name": "Python 外汇数据爬虫",
+      "crawler_type": "BeautifulSoup",
+      "repository_url": "https://github.com/forex-scraper-python",
+      "local_path": null,
+      "config_path": "config.yaml",
+      "supported_sources": ["forex", "economic_indicators"],
+      "start_command": "python -m scraper main",
+      "command_template": "python -m scraper main --pair={pair} --days={days}",
+      "requires_python": true,
+      "requires_nodejs": false,
+      "default_config": {
+        "API_PROVIDER": "OANDA",
+        "TIMEFRAME": "D1",
+        "COUNT": 100
+      }
+    },
+    {
+      "name": "go-commodity-crawler",
+      "display_name": "Go 大宗商品数据爬虫",
+      "crawler_type": "DirectHttp",
+      "repository_url": "https://github.com/commodity-crawler-go",
+      "local_path": null,
+      "config_path": "config.json",
+      "supported_sources": ["commodities", "economic_indicators"],
+      "start_command": "go run main.go",
+      "command_template": "go run main.go --category={category} --symbol={symbol}",
+      "requires_python": false,
+      "requires_nodejs": false,
+      "default_config": {
+        "API_KEYS": {
+          "LME_API_KEY": "YOUR_LME_KEY"
+        },
+        "REQUEST_DELAY": 1000
+      }
+    },
+    {
+      "name": "rust-news-aggregator",
+      "display_name": "Rust 新闻聚合器",
+      "crawler_type": "DirectHttp",
+      "repository_url": "https://github.com/rust-news-aggregator",
+      "local_path": null,
+      "config_path": "config.toml",
+      "supported_sources": ["news", "social_media", "research_reports"],
+      "start_command": "cargo run --release --bin aggregator",
+      "command_template": "cargo run --release --bin aggregator --sources={sources}",
+      "requires_python": false,
+      "requires_nodejs": false,
+      "default_config": {
+        "SOURCES": ["reuters", "bloomberg", "xinhua"],
+        "ARTICLE_LIMIT": 50,
+        "RATE_LIMIT": 10
+      }
+    },
+    {
+      "name": "selenium-finance-crawler",
+      "display_name": "Selenium 金融数据爬虫",
+      "crawler_type": "Selenium",
+      "repository_url": "https://github.com/finance-crawler-selenium",
+      "local_path": null,
+      "config_path": "config.py",
+      "supported_sources": ["ashare", "hkshare", "usshare", "news", "announcements", "financial_reports"],
+      "start_command": "python finance_crawler.py",
+      "command_template": "python finance_crawler.py --source={source} --symbols={symbols} --output={output}",
+      "requires_python": true,
+      "requires_nodejs": false,
+      "default_config": {
+        "HEADLESS": true,
+        "BROWSER": "chrome",
+        "PAGE_LOAD_TIMEOUT": 30000,
+        "SCROLL_PAUSE_TIME": 1000
+      }
+    }
+  ],
+  "auto_discovery": {
+    "search_paths": [
+      "~/github",
+      "~/projects",
+      "/opt/crawlers",
+      "~/.local/share/crawlers"
+    ],
+    "default_settings": {
+      "max_concurrent_crawlers": 5,
+      "heartbeat_interval": 30,
+    "resource_limits": {
+        "max_memory_per_crawler": "2GB",
+        "max_cpu_per_crawler": "50%"
+    },
+    "data_source_mappings": {
+    "ashare": ["scrapy-redis", "selenium-finance-crawler"],
+    "hkshare": ["scrapy-playwright", "puppeteer-crawler-master"],
+    "usshare": ["node-crypto-trader", "python-forex-scraper"],
+    "cryptocurrency": ["scrapy-redis", "node-crypto-trader"],
+    "forex": ["python-forex-scraper"],
+    "commodities": ["go-commodity-crawler", "scrapy-playwright"],
+    "bonds": ["python-forex-scraper"],
+    "funds": ["rust-news-aggregator"],
+    "news": ["puppeteer-crawler-master", "selenium-finance-crawler"],
+    "social_media": ["puppeteer-crawler-master"],
+    "announcements": ["selenium-finance-crawler"],
+    "financial_reports": ["rust-news-aggregator"],
+    "research_reports": ["rust-news-aggregator"],
+    "economic_indicators": ["python-forex-scraper", "node-crypto-trader"]
+  },
+  "integration_commands": {
+    "install_crawler": "pip install -r requirements.txt",
+    "setup_environment": "python setup.py",
+    "test_crawler": "python test.py --crawler={crawler_name}",
+    "deploy_cluster": "docker-compose up -d",
+    "monitor_status": "python monitor.py",
+    "scale_cluster": "python scale.py --crawler={crawler_name} --instances={count}"
+  }
+}

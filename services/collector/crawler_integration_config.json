@@ -1,0 +1,599 @@
+{
+  "version": "1.0.0",
+  "description": "Alpha Finance 集成爬虫配置 - 自动整合多种数据源的开源爬虫项目",
+  "last_updated": "2024-12-01",
+  "workspace_settings": {
+    "root_directory": ".",
+    "crawler_discovery_paths": [
+      "crawlers",
+      "scrapy_projects",
+      "web_scrapers",
+      "data_collectors",
+      "~/.local/share/crawlers",
+      "/opt/crawlers"
+    ],
+    "auto_discovery": true,
+    "max_depth": 3
+  },
+  "cluster_settings": {
+    "max_concurrent_crawlers": 10,
+    "heartbeat_interval": 30,
+    "task_timeout": 3600,
+    "retry_attempts": 3,
+    "resource_limits": {
+      "max_memory_per_crawler": "2GB",
+      "max_cpu_per_crawler": "50%",
+      "max_network_bandwidth": "100MB/s"
+    },
+    "scaling": {
+      "auto_scale": true,
+      "scale_up_threshold": 80,
+      "scale_down_threshold": 20,
+      "min_instances": 2,
+      "max_instances": 20
+    }
+  },
+  "crawler_registrations": [
+    {
+      "name": "scrapy-redis",
+      "display_name": "Scrapy Redis 分布式爬虫",
+      "type": "Scrapy",
+      "category": "general",
+      "priority": 1,
+      "repository": {
+        "url": "https://github.com/scrapy-redis/scrapy-redis",
+        "branch": "master",
+        "auto_clone": true
+      },
+      "installation": {
+        "requirements": ["python>=3.8", "scrapy>=2.5", "redis>=4.0"],
+        "commands": [
+          "pip install scrapy redis",
+          "scrapy startproject generic_crawler"
+        ]
+      },
+      "configuration": {
+        "files": ["settings.py", "middlewares.py"],
+        "templates": {
+          "settings": "scrapy_settings_template.py",
+          "spider": "spider_template.py"
+        }
+      },
+      "capabilities": {
+        "data_sources": [
+          "ashare", "hkshare", "usshare",
+          "cryptocurrency", "forex", "commodities",
+          "news", "announcements"
+        ],
+        "features": [
+          "distributed_crawling",
+          "redis_scheduler",
+          "auto_throttling",
+          "proxy_rotation"
+        ]
+      },
+      "execution": {
+        "start_command": "scrapy crawl {spider_name}",
+        "command_template": "scrapy crawl {spider_name} -a arg1={value1} -s LOG_LEVEL={log_level}",
+        "working_directory": "./scrapy_projects",
+        "environment": {
+          "SCRAPY_SETTINGS_MODULE": "settings",
+          "REDIS_HOST": "localhost",
+          "REDIS_PORT": "6379"
+        }
+      },
+      "monitoring": {
+        "metrics_port": 6800,
+        "log_file": "logs/scrapy.log",
+        "health_check": true,
+        "performance_tracking": true
+      }
+    },
+    {
+      "name": "puppeteer-crawler",
+      "display_name": "Puppeteer 动态网页爬虫",
+      "type": "Puppeteer",
+      "category": "browser_automation",
+      "priority": 2,
+      "repository": {
+        "url": "https://github.com/puppeteer/puppeteer",
+        "branch": "main",
+        "auto_clone": false
+      },
+      "installation": {
+        "requirements": ["node>=16", "npm>=8"],
+        "commands": [
+          "npm install puppeteer",
+          "npm install cheerio axios"
+        ]
+      },
+      "configuration": {
+        "files": ["crawler.js", "config.json"],
+        "templates": {
+          "crawler": "puppeteer_crawler_template.js",
+          "config": "puppeteer_config_template.json"
+        }
+      },
+      "capabilities": {
+        "data_sources": [
+          "news", "social_media", "ashare", "hkshare",
+          "usshare", "announcements", "financial_reports"
+        ],
+        "features": [
+          "javascript_rendering",
+          "screenshot_capture",
+          "pdf_generation",
+          "form_submission",
+          "infinite_scroll"
+        ]
+      },
+      "execution": {
+        "start_command": "node crawler.js",
+        "command_template": "node crawler.js --url={target_url} --output={output_file}",
+        "working_directory": "./puppeteer_crawlers",
+        "environment": {
+          "PUPPETEER_HEADLESS": "true",
+          "PUPPETEER_ARGS": "--no-sandbox --disable-setuid-sandbox"
+        }
+      },
+      "monitoring": {
+        "metrics_port": 9222,
+        "log_file": "logs/puppeteer.log",
+        "health_check": true,
+        "performance_tracking": true
+      }
+    },
+    {
+      "name": "selenium-finance-crawler",
+      "display_name": "Selenium 金融数据专用爬虫",
+      "type": "Selenium",
+      "category": "financial_data",
+      "priority": 1,
+      "repository": {
+        "url": "https://github.com/SeleniumHQ/selenium",
+        "branch": "trunk",
+        "auto_clone": false
+      },
+      "installation": {
+        "requirements": ["python>=3.8", "selenium>=4.0"],
+        "commands": [
+          "pip install selenium beautifulsoup4 requests",
+          "pip install webdriver-manager"
+        ]
+      },
+      "configuration": {
+        "files": ["finance_crawler.py", "config.yaml"],
+        "templates": {
+          "crawler": "selenium_finance_template.py",
+          "config": "selenium_config_template.yaml"
+        }
+      },
+      "capabilities": {
+        "data_sources": [
+          "ashare", "hkshare", "usshare", "forex",
+          "announcements", "financial_reports", "funds"
+        ],
+        "features": [
+          "multi_browser_support",
+          "cloudflare_bypass",
+          "anti_detection",
+          "proxy_rotation",
+          "rate_limiting"
+        ]
+      },
+      "execution": {
+        "start_command": "python finance_crawler.py",
+        "command_template": "python finance_crawler.py --source={data_source} --symbols={symbols}",
+        "working_directory": "./selenium_crawlers",
+        "environment": {
+          "BROWSER_TYPE": "chrome",
+          "HEADLESS": "true",
+          "PAGE_LOAD_TIMEOUT": "30"
+        }
+      },
+      "monitoring": {
+        "metrics_port": 4444,
+        "log_file": "logs/selenium.log",
+        "health_check": true,
+        "performance_tracking": true
+      }
+    },
+    {
+      "name": "node-crypto-trader",
+      "display_name": "Node.js 加密货币交易分析器",
+      "type": "DirectHttp",
+      "category": "cryptocurrency",
+      "priority": 1,
+      "repository": {
+        "url": "https://github.com/crypto-trader/node-crypto-trader",
+        "branch": "main",
+        "auto_clone": true
+      },
+      "installation": {
+        "requirements": ["node>=16", "npm>=8"],
+        "commands": [
+          "npm install axios ccxt websocket",
+          "npm install node-cron dotenv"
+        ]
+      },
+      "configuration": {
+        "files": ["index.js", "config.json", "exchanges/"],
+        "templates": {
+          "main": "crypto_trader_template.js",
+          "config": "crypto_config_template.json"
+        }
+      },
+      "capabilities": {
+        "data_sources": [
+          "cryptocurrency", "forex", "economic_indicators"
+        ],
+        "features": [
+          "real_time_api",
+          "websocket_streams",
+          "technical_analysis",
+          "portfolio_tracking",
+          "alert_system"
+        ]
+      },
+      "execution": {
+        "start_command": "node index.js",
+        "command_template": "node index.js --exchange={exchange} --symbol={symbol} --interval={interval}",
+        "working_directory": "./crypto_crawlers",
+        "environment": {
+          "NODE_ENV": "production",
+          "API_RATE_LIMIT": "100",
+          "WEBSOCKET_RECONNECT": "true"
+        }
+      },
+      "monitoring": {
+        "metrics_port": 3000,
+        "log_file": "logs/crypto.log",
+        "health_check": true,
+        "performance_tracking": true
+      }
+    },
+    {
+      "name": "python-forex-scraper",
+      "display_name": "Python 外汇数据爬虫",
+      "type": "BeautifulSoup",
+      "category": "forex",
+      "priority": 2,
+      "repository": {
+        "url": "https://github.com/forex-scraper/python-forex-scraper",
+        "branch": "develop",
+        "auto_clone": true
+      },
+      "installation": {
+        "requirements": ["python>=3.8"],
+        "commands": [
+          "pip install beautifulsoup4 requests lxml",
+          "pip install pandas numpy"
+        ]
+      },
+      "configuration": {
+        "files": ["forex_scraper.py", "config.yaml"],
+        "templates": {
+          "scraper": "forex_scraper_template.py",
+          "config": "forex_config_template.yaml"
+        }
+      },
+      "capabilities": {
+        "data_sources": [
+          "forex", "economic_indicators", "commodities"
+        ],
+        "features": [
+          "multi_provider_support",
+          "historical_data",
+          "technical_indicators",
+          "data_validation"
+        ]
+      },
+      "execution": {
+        "start_command": "python -m scraper main",
+        "command_template": "python -m scraper main --pair={currency_pair} --timeframe={timeframe}",
+        "working_directory": "./forex_crawlers",
+        "environment": {
+          "API_PROVIDER": "OANDA",
+          "TIMEFRAME": "D1",
+          "HISTORICAL_DAYS": "365"
+        }
+      },
+      "monitoring": {
+        "metrics_port": 5000,
+        "log_file": "logs/forex.log",
+        "health_check": true,
+        "performance_tracking": true
+      }
+    },
+    {
+      "name": "go-commodity-crawler",
+      "display_name": "Go 大宗商品数据爬虫",
+      "type": "DirectHttp",
+      "category": "commodities",
+      "priority": 3,
+      "repository": {
+        "url": "https://github.com/commodity-crawler/go-commodity-crawler",
+        "branch": "main",
+        "auto_clone": true
+      },
+      "installation": {
+        "requirements": ["go>=1.19"],
+        "commands": [
+          "go mod init commodity-crawler",
+          "go get -u github.com/gocolly/colly/v2",
+          "go get -u github.com/go-redis/redis/v8"
+        ]
+      },
+      "configuration": {
+        "files": ["main.go", "config.json"],
+        "templates": {
+          "main": "commodity_crawler_template.go",
+          "config": "commodity_config_template.json"
+        }
+      },
+      "capabilities": {
+        "data_sources": [
+          "commodities", "economic_indicators"
+        ],
+        "features": [
+          "high_performance",
+          "concurrent_processing",
+          "redis_integration",
+          "json_export"
+        ]
+      },
+      "execution": {
+        "start_command": "go run main.go",
+        "command_template": "go run main.go --category={category} --symbol={symbol}",
+        "working_directory": "./commodity_crawlers",
+        "environment": {
+          "GOMAXPROCS": "4",
+          "REQUEST_DELAY": "1s",
+          "MAX_RETRIES": "3"
+        }
+      },
+      "monitoring": {
+        "metrics_port": 8080,
+        "log_file": "logs/commodity.log",
+        "health_check": true,
+        "performance_tracking": true
+      }
+    },
+    {
+      "name": "rust-news-aggregator",
+      "display_name": "Rust 新闻聚合器",
+      "type": "DirectHttp",
+      "category": "news",
+      "priority": 2,
+      "repository": {
+        "url": "https://github.com/rust-news-aggregator/rust-news-aggregator",
+        "branch": "main",
+        "auto_clone": true
+      },
+      "installation": {
+        "requirements": ["rust>=1.70"],
+        "commands": [
+          "cargo new news_aggregator",
+          "cargo add reqwest tokio serde",
+          "cargo add scraper regex"
+        ]
+      },
+      "configuration": {
+        "files": ["src/main.rs", "config.toml"],
+        "templates": {
+          "main": "news_aggregator_template.rs",
+          "config": "news_config_template.toml"
+        }
+      },
+      "capabilities": {
+        "data_sources": [
+          "news", "social_media", "research_reports"
+        ],
+        "features": [
+          "high_speed_parsing",
+          "concurrent_downloads",
+          "memory_efficient",
+          "error_resilient"
+        ]
+      },
+      "execution": {
+        "start_command": "cargo run --release",
+        "command_template": "cargo run --release --bin aggregator --sources={sources}",
+        "working_directory": "./news_crawlers",
+        "environment": {
+          "RUST_LOG": "info",
+          "TOKIO_THREADS": "4",
+          "REQUEST_TIMEOUT": "30"
+        }
+      },
+      "monitoring": {
+        "metrics_port": 9000,
+        "log_file": "logs/news.log",
+        "health_check": true,
+        "performance_tracking": true
+      }
+    }
+  ],
+  "data_source_integrations": {
+    "ashare": {
+      "crawlers": ["scrapy-redis", "selenium-finance-crawler"],
+      "default_crawler": "selenium-finance-crawler",
+      "data_sources": [
+        {
+          "provider": "eastmoney",
+          "url_pattern": "http://quote.eastmoney.com/{symbol}.html",
+          "update_frequency": "5m",
+          "priority": "high"
+        },
+        {
+          "provider": "sina_finance",
+          "url_pattern": "https://finance.sina.com.cn/realstock/company/{symbol}/nc.shtml",
+          "update_frequency": "1m",
+          "priority": "high"
+        }
+      ],
+      "transformation": {
+        "price_fields": ["current_price", "open_price", "high_price", "low_price"],
+        "volume_fields": ["volume", "turnover"],
+        "metadata_fields": ["pe_ratio", "market_cap", "industry"]
+      }
+    },
+    "cryptocurrency": {
+      "crawlers": ["scrapy-redis", "node-crypto-trader"],
+      "default_crawler": "node-crypto-trader",
+      "data_sources": [
+        {
+          "provider": "binance",
+          "api_endpoint": "https://api.binance.com/api/v3",
+          "websocket": "wss://stream.binance.com:9443/ws/{symbol}@ticker",
+          "rate_limit": "1200/min",
+          "priority": "high"
+        },
+        {
+          "provider": "coinbase",
+          "api_endpoint": "https://api.coinbase.com/v2",
+          "rate_limit": "10/min",
+          "priority": "medium"
+        }
+      ],
+      "transformation": {
+        "price_fields": ["price", "volume_24h", "market_cap"],
+        "technical_indicators": ["rsi", "macd", "bollinger_bands"],
+        "market_sentiment": ["fear_greed_index", "social_volume"]
+      }
+    },
+    "forex": {
+      "crawlers": ["python-forex-scraper"],
+      "default_crawler": "python-forex-scraper",
+      "data_sources": [
+        {
+          "provider": "oanda",
+          "api_endpoint": "https://api-fxpractice.oanda.com/v3",
+          "update_frequency": "1s",
+          "priority": "high"
+        },
+        {
+          "provider": "yahoo_finance",
+          "url_pattern": "https://finance.yahoo.com/quote/{pair}",
+          "update_frequency": "5m",
+          "priority": "medium"
+        }
+      ],
+      "transformation": {
+        "price_fields": ["bid", "ask", "mid", "spread"],
+        "technical_data": ["pivot_points", "fibonacci_levels"],
+        "economic_data": ["interest_rates", "cpi", "gdp"]
+      }
+    },
+    "news": {
+      "crawlers": ["puppeteer-crawler", "rust-news-aggregator"],
+      "default_crawler": "rust-news-aggregator",
+      "data_sources": [
+        {
+          "provider": "reuters",
+          "url_pattern": "https://www.reuters.com/markets",
+          "update_frequency": "10m",
+          "priority": "high",
+          "requires_js": true
+        },
+        {
+          "provider": "bloomberg",
+          "url_pattern": "https://www.bloomberg.com/markets",
+          "update_frequency": "15m",
+          "priority": "high",
+          "requires_js": true
+        },
+        {
+          "provider": "xinhua",
+          "url_pattern": "http://www.xinhuanet.com/fortune",
+          "update_frequency": "5m",
+          "priority": "medium"
+        }
+      ],
+      "transformation": {
+        "content_fields": ["title", "summary", "body", "author", "timestamp"],
+        "sentiment_analysis": true,
+        "keyword_extraction": ["finance", "market", "economy", "investment"],
+        "language_detection": true
+      }
+    }
+  },
+  "task_prioritization": {
+    "critical": ["announcements", "financial_reports"],
+    "high": ["ashare", "cryptocurrency", "forex"],
+    "medium": ["news", "commodities", "funds"],
+    "low": ["social_media", "research_reports"]
+  },
+  "integration_commands": {
+    "setup": {
+      "install_dependencies": "python setup.py install",
+      "configure_environment": "python setup_config.py",
+      "test_connectivity": "python test_connections.py"
+    },
+    "crawler_management": {
+      "discover": "python crawler_manager.py --discover",
+      "register": "python crawler_manager.py --register {crawler_name}",
+      "list": "python crawler_manager.py --list",
+      "remove": "python crawler_manager.py --remove {crawler_name}"
+    },
+    "deployment": {
+      "deploy_cluster": "docker-compose up -d",
+      "scale_crawler": "python scaler.py --crawler {name} --instances {count}",
+      "monitor_cluster": "python monitor.py --cluster",
+      "update_config": "python config_manager.py --update {config_file}"
+    }
+  },
+  "error_handling": {
+    "retry_policy": {
+      "max_retries": 3,
+      "backoff_strategy": "exponential",
+      "initial_delay": "1s",
+      "max_delay": "60s"
+    },
+    "fallback_crawlers": {
+      "ashare": ["selenium-finance-crawler", "scrapy-redis"],
+      "cryptocurrency": ["node-crypto-trader", "scrapy-redis"],
+      "forex": ["python-forex-scraper"],
+      "news": ["rust-news-aggregator", "puppeteer-crawler"]
+    },
+    "notification": {
+      "error_threshold": 5,
+      "notification_channels": ["email", "slack", "webhook"],
+      "escalation_policy": "critical"
+    }
+  },
+  "optimization": {
+    "caching": {
+      "redis_cache": true,
+      "cache_ttl": 300,
+      "cache_size": "1GB"
+    },
+    "load_balancing": {
+      "algorithm": "round_robin",
+      "health_check_interval": "30s",
+      "failover_timeout": "10s"
+    },
+    "performance_monitoring": {
+      "metrics_collection": true,
+      "performance_alerts": true,
+      "bottleneck_detection": true
+    }
+  },
+  "security": {
+    "api_key_management": {
+      "encryption": "AES-256",
+      "key_rotation": "monthly",
+      "storage": "encrypted_vault"
+    },
+    "proxy_configuration": {
+      "rotation_policy": "time_based",
+      "rotation_interval": "5m",
+      "geographic_distribution": true
+    },
+    "access_control": {
+      "authentication": "jwt",
+      "authorization": "rbac",
+      "audit_logging": true
+    }
+  }
+}
