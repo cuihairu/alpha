@@ -152,6 +152,9 @@ fn build_router(state: Arc<AppState>) -> Router {
     let mut router = Router::new()
         .route("/health", get(health_check))
         .route("/query", post(execute_query))
+        .route("/clickhouse/exports", get(list_clickhouse_exports))
+        .route("/clickhouse/export.parquet", get(get_clickhouse_export_parquet))
+        // Back-compat (kept for existing links)
         .route("/clickhouse/market-data.parquet", get(get_clickhouse_market_data_parquet))
         .route("/stocks/:symbol/history", get(get_stock_history))
         .route("/stocks/:symbol/indicators", get(get_stock_indicators))
@@ -219,12 +222,67 @@ struct MarketDataParquetParams {
     limit: Option<u64>,
 }
 
-/// 从 ClickHouse 导出市场数据（Parquet）
+#[derive(Debug, Serialize)]
+struct ClickhouseExportDescriptor {
+    id: &'static str,
+    description: &'static str,
+    params: &'static [&'static str],
+}
+
+const CLICKHOUSE_EXPORTS: &[ClickhouseExportDescriptor] = &[ClickhouseExportDescriptor {
+    id: "market_data",
+    description: "OHLCV market data (timestamp, symbol, open/high/low/close, volume)",
+    params: &["symbol", "start|days", "end", "limit"],
+}];
+
+async fn list_clickhouse_exports() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "success": true,
+        "exports": CLICKHOUSE_EXPORTS,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ClickhouseExportParams {
+    query_id: String,
+    symbol: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
+    days: Option<u32>,
+    limit: Option<u64>,
+}
+
+/// 从 ClickHouse 导出预设数据集（Parquet）
 ///
-/// 供 DuckDB-WASM / DuckDB Desktop 直接 `read_parquet()` 使用。
-async fn get_clickhouse_market_data_parquet(
+/// 注意：此接口不接受任意 SQL，仅允许 query_id 白名单。
+async fn get_clickhouse_export_parquet(
     State(state): State<Arc<AppState>>,
-    Query(params): Query<MarketDataParquetParams>,
+    Query(params): Query<ClickhouseExportParams>,
+) -> Result<axum::response::Response, ApiErrorResponse> {
+    match params.query_id.as_str() {
+        "market_data" => {
+            let symbol = params
+                .symbol
+                .ok_or_else(|| ApiErrorResponse::bad_request("missing symbol".to_string()))?;
+            let req = MarketDataParquetParams {
+                symbol,
+                start: params.start,
+                end: params.end,
+                days: params.days,
+                limit: params.limit,
+            };
+            export_market_data_parquet(state, req).await
+        }
+        other => Err(ApiErrorResponse::bad_request(format!(
+            "unknown query_id: {}",
+            other
+        ))),
+    }
+}
+
+async fn export_market_data_parquet(
+    state: Arc<AppState>,
+    params: MarketDataParquetParams,
 ) -> Result<axum::response::Response, ApiErrorResponse> {
     let Some(clickhouse) = state.clickhouse.as_ref() else {
         return Err(ApiErrorResponse::bad_request(
@@ -232,18 +290,21 @@ async fn get_clickhouse_market_data_parquet(
         ));
     };
 
+    // Simple guardrails to avoid accidental huge responses
+    let limit = params.limit.unwrap_or(10_000).clamp(1, 200_000);
+
     let end = params
         .end
         .as_deref()
         .and_then(parse_datetime)
         .unwrap_or_else(Utc::now);
     let start = params.start.as_deref().and_then(parse_datetime).unwrap_or_else(|| {
-        let days = params.days.unwrap_or(state.config.data.lookback_days).max(1);
+        let days = params.days.unwrap_or(state.config.data.lookback_days).max(1).min(3650);
         end - Duration::days(days as i64)
     });
 
     let data = clickhouse
-        .query_market_data_parquet(&params.symbol, start, end, params.limit)
+        .query_market_data_parquet(&params.symbol, start, end, Some(limit))
         .await
         .map_err(ApiErrorResponse::internal)?;
 
@@ -253,6 +314,16 @@ async fn get_clickhouse_market_data_parquet(
         HeaderValue::from_static("application/x-parquet"),
     );
     Ok(response)
+}
+
+/// 从 ClickHouse 导出市场数据（Parquet）
+///
+/// 供 DuckDB-WASM / DuckDB Desktop 直接 `read_parquet()` 使用。
+async fn get_clickhouse_market_data_parquet(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<MarketDataParquetParams>,
+) -> Result<axum::response::Response, ApiErrorResponse> {
+    export_market_data_parquet(state, params).await
 }
 
 fn parse_datetime(input: &str) -> Option<DateTime<Utc>> {
