@@ -229,6 +229,59 @@ impl ClickHouseStorage {
         Ok(bytes.to_vec())
     }
 
+    /// 查询实时报价并返回 Parquet（二进制）
+    pub async fn query_realtime_quotes_parquet(
+        &self,
+        symbols: Option<&[String]>,
+        limit: Option<u64>,
+    ) -> Result<Vec<u8>, String> {
+        let mut query = String::from(
+            "SELECT symbol, last_price, bid_price, ask_price, volume, timestamp, change_amount, change_percent \
+             FROM realtime_quotes",
+        );
+
+        if let Some(symbols) = symbols {
+            if !symbols.is_empty() {
+                let list = symbols
+                    .iter()
+                    .map(|s| format!("'{}'", s.replace('\'', "''")))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                query.push_str(&format!(" WHERE symbol IN ({})", list));
+            }
+        }
+
+        query.push_str(" ORDER BY timestamp DESC");
+        if let Some(limit) = limit {
+            query.push_str(&format!(" LIMIT {}", limit));
+        }
+        query.push_str(" FORMAT Parquet");
+
+        let url = format!(
+            "{}/?database={}&user={}&password={}",
+            self.config.url, self.config.database, self.config.user, self.config.password
+        );
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .body(query)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP 请求失败: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("查询失败: {}", response.status()));
+        }
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| format!("响应读取失败: {}", e))?;
+
+        Ok(bytes.to_vec())
+    }
+
     /// 插入技术指标
     pub async fn insert_technical_indicators(
         &self,

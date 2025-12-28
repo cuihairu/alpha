@@ -233,6 +233,10 @@ const CLICKHOUSE_EXPORTS: &[ClickhouseExportDescriptor] = &[ClickhouseExportDesc
     id: "market_data",
     description: "OHLCV market data (timestamp, symbol, open/high/low/close, volume)",
     params: &["symbol", "start|days", "end", "limit"],
+}, ClickhouseExportDescriptor {
+    id: "realtime_quotes",
+    description: "Realtime quotes snapshot (symbol, last/bid/ask, volume, timestamp, change)",
+    params: &["symbols(optional)", "limit"],
 }];
 
 async fn list_clickhouse_exports() -> Json<serde_json::Value> {
@@ -246,6 +250,7 @@ async fn list_clickhouse_exports() -> Json<serde_json::Value> {
 struct ClickhouseExportParams {
     query_id: String,
     symbol: Option<String>,
+    symbols: Option<String>,
     start: Option<String>,
     end: Option<String>,
     days: Option<u32>,
@@ -273,6 +278,7 @@ async fn get_clickhouse_export_parquet(
             };
             export_market_data_parquet(state, req).await
         }
+        "realtime_quotes" => export_realtime_quotes_parquet(state, params).await,
         other => Err(ApiErrorResponse::bad_request(format!(
             "unknown query_id: {}",
             other
@@ -330,6 +336,41 @@ fn parse_datetime(input: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(input)
         .ok()
         .map(|dt| dt.with_timezone(&Utc))
+}
+
+async fn export_realtime_quotes_parquet(
+    state: Arc<AppState>,
+    params: ClickhouseExportParams,
+) -> Result<axum::response::Response, ApiErrorResponse> {
+    let Some(clickhouse) = state.clickhouse.as_ref() else {
+        return Err(ApiErrorResponse::bad_request(
+            "ClickHouse backend is not enabled".to_string(),
+        ));
+    };
+
+    let limit = params.limit.unwrap_or(5000).clamp(1, 200_000);
+    let symbols = params
+        .symbols
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .map(|part| part.trim().to_string())
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty());
+
+    let data = clickhouse
+        .query_realtime_quotes_parquet(symbols.as_deref(), Some(limit))
+        .await
+        .map_err(ApiErrorResponse::internal)?;
+
+    let mut response = axum::response::Response::new(axum::body::Body::from(data));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/x-parquet"),
+    );
+    Ok(response)
 }
 
 /// 执行 SQL 查询

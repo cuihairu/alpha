@@ -131,7 +131,12 @@
 
             <div class="form-group">
                 <label for="duckdb-sql">SQL</label>
-                <textarea id="duckdb-sql" style="width:100%; min-height: 120px;">SELECT * FROM local_data LIMIT 20;</textarea>
+                <textarea id="duckdb-sql" style="width:100%; min-height: 120px;">-- 示例 1：本地文件加载后
+SELECT * FROM local_data LIMIT 20;
+
+-- 示例 2：服务端 Parquet 加载到 server_data 后
+-- SELECT symbol, close_price, volume FROM server_data ORDER BY timestamp DESC LIMIT 20;
+</textarea>
                 <button class="btn" onclick="duckdbRunSql()" style="margin-top: 8px;">运行 SQL</button>
             </div>
 
