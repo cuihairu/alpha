@@ -111,3 +111,6 @@ prometheus = "0.13"
 alpha-core = { path = "packages/core" }
 alpha-protocols = { path = "packages/protocols" }
 alpha-storage = { path = "packages/storage" }
+
+[patch.crates-io]
+arrow-arith = { path = "patches/arrow-arith-50.0.0" }

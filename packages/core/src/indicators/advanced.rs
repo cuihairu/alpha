@@ -379,6 +379,7 @@ mod tests {
             95.0,  // 下轨
         );
 
-        assert_eq!(bb_percent, 66.67); // ((105-95)/(110-95) * 100
+        let rounded = (bb_percent * 100.0).round() / 100.0;
+        assert_eq!(rounded, 66.67); // ((105-95)/(110-95) * 100
     }
 }

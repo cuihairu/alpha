@@ -5,7 +5,6 @@
 
 use std::{
     collections::{BinaryHeap, HashMap},
-    cmp::Reverse,
     sync::Arc,
     time::Instant,
 };
@@ -27,7 +26,7 @@ use crate::types::{
 /// 任务调度器
 pub struct TaskScheduler {
     /// 任务队列（按优先级排序）
-    task_queue: Arc<RwLock<BinaryHeap<Reverse<TaskPriorityNode>>>>,
+    task_queue: Arc<RwLock<BinaryHeap<TaskPriorityNode>>>,
     /// 等待调度的任务
     pending_tasks: Arc<RwLock<HashMap<String, TaskDefinition>>>,
     /// 正在执行的任务
@@ -59,20 +58,12 @@ struct TaskPriorityNode {
 
 impl Ord for TaskPriorityNode {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // 首先按优先级排序（高优先级在前）
-        match other.priority.cmp(&self.priority) {
-            std::cmp::Ordering::Equal => {
-                // 相同优先级按权重排序
-                match other.weight.cmp(&self.weight) {
-                    std::cmp::Ordering::Equal => {
-                        // 相同权重按提交时间排序（早提交在前）
-                        self.submit_time.cmp(&other.submit_time)
-                    }
-                    other => other,
-                }
-            }
-            other => other,
-        }
+        // BinaryHeap 会弹出最大值，因此这里定义：
+        // 优先级越高 / 权重越大 / 提交越早 => 越“大”
+        self.priority
+            .cmp(&other.priority)
+            .then_with(|| self.weight.cmp(&other.weight))
+            .then_with(|| other.submit_time.cmp(&self.submit_time))
     }
 }
 
@@ -91,6 +82,7 @@ impl PartialEq for TaskPriorityNode {
 impl Eq for TaskPriorityNode {}
 
 /// 运行中任务信息
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct RunningTaskInfo {
     task_id: String,
@@ -101,6 +93,7 @@ struct RunningTaskInfo {
 }
 
 /// 资源需求
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct ResourceRequirements {
     /// CPU需求（1-10）
@@ -114,6 +107,7 @@ struct ResourceRequirements {
 }
 
 /// 语言资源池
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct LanguageResourcePool {
     language: CrawlerLanguage,
@@ -122,6 +116,7 @@ struct LanguageResourcePool {
     /// 当前运行数
     current_running: usize,
     /// 语言特性权重
+    #[allow(dead_code)]
     language_weights: HashMap<String, f64>,
     /// 可用性检查
     is_available: bool,
@@ -135,16 +130,20 @@ pub struct SchedulerConfig {
     /// 调度间隔
     scheduling_interval: Duration,
     /// 任务超时时间
+    #[allow(dead_code)]
     default_task_timeout: Duration,
     /// 资源限制
+    #[allow(dead_code)]
     resource_limits: ResourceLimits,
     /// 负载均衡策略
     load_balancing_strategy: LoadBalancingStrategy,
     /// 语言优先级
+    #[allow(dead_code)]
     language_priorities: Vec<CrawlerLanguage>,
 }
 
 /// 资源限制
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct ResourceLimits {
     /// 总CPU核心数
@@ -172,25 +171,25 @@ pub enum LoadBalancingStrategy {
 
 /// 调度器统计信息
 #[derive(Debug, Clone, Default)]
-struct SchedulerStats {
+pub struct SchedulerStats {
     /// 总调度次数
-    total_scheduled: u64,
+    pub total_scheduled: u64,
     /// 成功执行次数
-    successful_executions: u64,
+    pub successful_executions: u64,
     /// 失败执行次数
-    failed_executions: u64,
+    pub failed_executions: u64,
     /// 平均调度延迟
-    avg_scheduling_latency: Duration,
+    pub avg_scheduling_latency: Duration,
     /// 资源利用率
-    resource_utilization: ResourceUtilization,
+    pub resource_utilization: ResourceUtilization,
 }
 
 /// 资源利用率
 #[derive(Debug, Clone, Default)]
-struct ResourceUtilization {
-    cpu_usage: f64,
-    memory_usage: f64,
-    bandwidth_usage: f64,
+pub struct ResourceUtilization {
+    pub cpu_usage: f64,
+    pub memory_usage: f64,
+    pub bandwidth_usage: f64,
 }
 
 impl TaskScheduler {
@@ -226,7 +225,7 @@ impl TaskScheduler {
         let (shutdown_tx, mut shutdown_rx) = mpsc::unbounded_channel();
         self.shutdown_tx = Some(shutdown_tx);
 
-        let scheduler_handle = tokio::spawn({
+        let _scheduler_handle = tokio::spawn({
             let config = self.config.clone();
             let task_queue = Arc::clone(&self.task_queue);
             let pending_tasks = Arc::clone(&self.pending_tasks);
@@ -311,12 +310,12 @@ impl TaskScheduler {
         // 添加到优先级队列
         {
             let mut queue = self.task_queue.write().await;
-            queue.push(Reverse(TaskPriorityNode {
+            queue.push(TaskPriorityNode {
                 task_id: task.id.clone(),
                 priority: task.priority.clone(),
                 weight: task.weight(),
                 submit_time: Utc::now(),
-            }));
+            });
         }
 
         // 更新依赖关系
@@ -461,7 +460,7 @@ impl TaskScheduler {
 
     /// 调度任务的主循环
     async fn schedule_tasks(
-        task_queue: &Arc<RwLock<BinaryHeap<Reverse<TaskPriorityNode>>>>,
+        task_queue: &Arc<RwLock<BinaryHeap<TaskPriorityNode>>>,
         pending_tasks: &Arc<RwLock<HashMap<String, TaskDefinition>>>,
         running_tasks: &Arc<RwLock<HashMap<String, RunningTaskInfo>>>,
         task_dependencies: &Arc<RwLock<HashMap<String, Vec<String>>>>,
@@ -512,7 +511,6 @@ impl TaskScheduler {
                 // 检查资源可用性
                 if Self::check_resource_availability(&task, language_pools, &language).await? {
                     // 执行任务
-                    let task_id = task.id.clone();
                     let worker_id = Uuid::new_v4().to_string();
 
                     Self::execute_task(
@@ -553,7 +551,7 @@ impl TaskScheduler {
 
     /// 获取可执行的任务
     async fn get_executable_tasks(
-        task_queue: &Arc<RwLock<BinaryHeap<Reverse<TaskPriorityNode>>>>,
+        task_queue: &Arc<RwLock<BinaryHeap<TaskPriorityNode>>>,
         pending_tasks: &Arc<RwLock<HashMap<String, TaskDefinition>>>,
         running_tasks: &Arc<RwLock<HashMap<String, RunningTaskInfo>>>,
         task_dependencies: &Arc<RwLock<HashMap<String, Vec<String>>>>,
@@ -565,7 +563,7 @@ impl TaskScheduler {
 
         // 检查最多10个任务
         for _ in 0..10 {
-            if let Some(Reverse(task_node)) = queue_guard.pop() {
+            if let Some(task_node) = queue_guard.pop() {
                 // 检查任务是否仍在待处理状态
                 let pending_guard = pending_tasks.read().await;
                 if !pending_guard.contains_key(&task_node.task_id) {
@@ -580,7 +578,7 @@ impl TaskScheduler {
 
                     if !deps_satisfied {
                         // 依赖未满足，重新放回队列
-                        queue_guard.push(Reverse(task_node));
+                        queue_guard.push(task_node);
                         continue;
                     }
                 }
@@ -593,8 +591,8 @@ impl TaskScheduler {
 
         // 将未检查的任务重新放回队列
         for _ in executable_tasks.len()..queue_guard.len() {
-            if let Some(Reverse(task_node)) = queue_guard.pop() {
-                queue_guard.push(Reverse(task_node));
+            if let Some(task_node) = queue_guard.pop() {
+                queue_guard.push(task_node);
             }
         }
 
@@ -668,10 +666,11 @@ impl TaskScheduler {
         task: &TaskDefinition,
         language: &CrawlerLanguage,
     ) -> Result<CrawlerConfig> {
+        let source_type = task_source_type_for_script_path(&task.source);
         Ok(CrawlerConfig {
             language: language.clone(),
             script_path: Some(format!("scripts/{}/{}.{}",
-                task.source.source_type(),
+                source_type,
                 task.id,
                 language.extension()).into()),
             inline_code: None,
@@ -709,6 +708,10 @@ impl TaskScheduler {
         worker_id: String,
     ) {
         let task_id = task.id.clone();
+        let task_name = task.name.clone();
+        let task_source = task.source.clone();
+        let started_at = Utc::now();
+        let start = Instant::now();
 
         // 更新运行状态
         {
@@ -754,19 +757,18 @@ impl TaskScheduler {
 
         // 发送结果
         let task_result = match result {
-            Ok(data) => TaskResult {
-                task_id: task.id,
-                status: TaskStatus::Completed,
-                data: Some(serde_json::to_string(&data).unwrap_or_default()),
-                error: None,
-                executed_at: Utc::now(),
-            },
+            Ok(task_result) => task_result,
             Err(error) => TaskResult {
-                task_id: task.id,
+                task_id,
+                task_name,
+                source: task_source,
                 status: TaskStatus::Failed,
                 data: None,
                 error: Some(error.to_string()),
-                executed_at: Utc::now(),
+                start_time: started_at,
+                end_time: Utc::now(),
+                execution_time: Some(start.elapsed().as_secs()),
+                metadata: HashMap::new(),
             },
         };
         let _ = result_tx.send(task_result).expect("Failed to send task result");
@@ -791,35 +793,16 @@ impl TaskScheduler {
     }
 }
 
-// 为TaskSource添加source_type方法
-impl TaskSource {
-    pub fn source_type(&self) -> String {
-        match self {
-            TaskSource::AShare { .. } => "ashare".to_string(),
-            TaskSource::HKShare { .. } => "hkshare".to_string(),
-            TaskSource::USShare { .. } => "usshare".to_string(),
-            TaskSource::Cryptocurrency { .. } => "cryptocurrency".to_string(),
-            TaskSource::Forex { .. } => "forex".to_string(),
-            TaskSource::Commodities { .. } => "commodities".to_string(),
-            TaskSource::Bonds { .. } => "bonds".to_string(),
-            TaskSource::Funds { .. } => "funds".to_string(),
-            TaskSource::Futures { .. } => "futures".to_string(),
-            TaskSource::News { .. } => "news".to_string(),
-            TaskSource::SocialMedia { .. } => "social_media".to_string(),
-            TaskSource::Announcements { .. } => "announcements".to_string(),
-            TaskSource::FinancialReports { .. } => "financials".to_string(),
-            TaskSource::ESGData { .. } => "esg".to_string(),
-            TaskSource::ResearchReports { .. } => "research".to_string(),
-            TaskSource::EconomicIndicators { .. } => "economic".to_string(),
-            TaskSource::Custom { source_type, .. } => source_type.clone(),
-        }
+fn task_source_type_for_script_path(source: &TaskSource) -> String {
+    match source {
+        TaskSource::Custom { source_type, .. } => source_type.clone(),
+        other => other.source_type().to_string(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     #[test]
     fn test_task_priority_node_ordering() {

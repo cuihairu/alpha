@@ -33,6 +33,11 @@ yarn-error.log*
 wasm-analyzer/pkg/
 wasm-analyzer/node_modules/
 
+# Web (build output)
+web/dist/*
+web/pkg/*
+!web/dist/.gitkeep
+
 # Desktop
 desktop/src-tauri/target/
 desktop/target/

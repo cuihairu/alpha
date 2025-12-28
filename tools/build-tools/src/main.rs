@@ -100,6 +100,7 @@ fn generate_service(name: &str, service_type: &str) -> anyhow::Result<()> {
 
 /// 生成服务 Cargo.toml
 fn generate_service_cargo_toml(name: &str, _service_type: &str) -> anyhow::Result<String> {
+    let package_name = name.trim().to_lowercase();
     let template = format!(
         r#"[package]
 name = "alpha-{}"
@@ -115,6 +116,9 @@ tokio = {{ workspace = true }}
 
 # Web 框架
 axum = {{ workspace = true }}
+
+# 时间处理
+chrono = {{ workspace = true }}
 
 # 序列化
 serde = {{ workspace = true }}
@@ -136,7 +140,7 @@ alpha-core = {{ workspace = true }}
 [dev-dependencies]
 tokio-test = {{ workspace = true }}
 "#,
-        name.to_lowercase().replace("-", "_")
+        package_name
     );
 
     Ok(template)

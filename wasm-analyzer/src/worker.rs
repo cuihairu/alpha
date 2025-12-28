@@ -304,6 +304,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), ignore = "requires wasm32 (web-sys)")]
     fn test_worker_pool_creation() {
         let pool = WorkerPool::new(4);
         assert!(pool.get_worker_count() <= 4);

@@ -15,7 +15,11 @@ async fn main() -> Result<()> {
 
     info!("Starting Alpha Collector Service...");
 
-    let collector = alpha_collector::main_simple::SimpleCollector::new("/tmp/alpha-collector");
+    let workspace_root = std::env::var("ALPHA_WORKSPACE_ROOT")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .unwrap_or(std::env::current_dir()?);
+    let collector = alpha_collector::main_simple::SimpleCollector::new(workspace_root);
     collector.start().await?;
 
     let router = alpha_collector::main_simple::build_router(Arc::new(collector));
@@ -29,4 +33,3 @@ async fn main() -> Result<()> {
     info!("Alpha Collector Service stopped");
     Ok(())
 }
-

@@ -238,6 +238,7 @@ mod tests {
     use chrono::Utc;
 
     #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), ignore = "requires wasm32 (js-sys/wasm-bindgen)")]
     fn test_stream_processor() {
         let mut processor = StreamProcessor::new(10);
 
@@ -250,6 +251,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), ignore = "requires wasm32 (js-sys/wasm-bindgen)")]
     fn test_window_overflow() {
         let mut processor = StreamProcessor::new(3);
 

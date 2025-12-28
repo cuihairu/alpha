@@ -84,7 +84,7 @@ web-sys = { version = "0.3", features = [
 getrandom = { version = "0.2", features = ["js"] }
 
 # Arrow 列式数据格式支持
-arrow = { workspace = true, default-features = false, features = ["ipc"] }
+arrow = { workspace = true, features = ["ipc"] }
 arrow-array = "50.0"
 arrow-schema = "50.0"
 

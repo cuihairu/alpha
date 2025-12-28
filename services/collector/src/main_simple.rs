@@ -7,7 +7,7 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use axum::{
@@ -48,6 +48,8 @@ use crate::types::{
 
 /// 简化版的数据收集器
 pub struct SimpleCollector {
+    /// 工作空间根目录（用于脚本路径、工作目录等）
+    workspace_root: PathBuf,
     /// 任务存储
     tasks: Arc<RwLock<HashMap<String, TaskDefinition>>>,
     /// 运行中任务
@@ -56,6 +58,8 @@ pub struct SimpleCollector {
     crawler: Arc<MultilangCrawler>,
     /// 事件广播
     event_tx: broadcast::Sender<CollectorEvent>,
+    /// 启动时间（用于 uptime 统计）
+    started_at: Instant,
 }
 
 /// 收集器事件
@@ -146,13 +150,16 @@ pub struct TaskStats {
 impl SimpleCollector {
     /// 创建新的简化收集器
     pub fn new<P: AsRef<std::path::Path>>(workspace_root: P) -> Self {
+        let workspace_root = workspace_root.as_ref().to_path_buf();
         let (event_tx, _) = broadcast::channel(1000);
 
         Self {
+            workspace_root: workspace_root.clone(),
             tasks: Arc::new(RwLock::new(HashMap::new())),
             running_tasks: Arc::new(RwLock::new(HashMap::new())),
-            crawler: Arc::new(MultilangCrawler::new(workspace_root)),
+            crawler: Arc::new(MultilangCrawler::new(&workspace_root)),
             event_tx,
+            started_at: Instant::now(),
         }
     }
 
@@ -300,18 +307,38 @@ impl SimpleCollector {
         };
         let _ = self.event_tx.send(status_event);
 
+        let working_directory = PathBuf::from(format!("workspaces/{}", task_id));
+        let working_directory_abs = self.workspace_root.join(&working_directory);
+        if let Err(e) = tokio::fs::create_dir_all(&working_directory_abs).await {
+            return Err(format!("Failed to create working directory: {}", e));
+        }
+
         // 选择执行语言
         let language = self.select_language_for_task(&task);
 
-        // 创建爬虫配置（优先使用 inline_code）
-        let crawler_config = CrawlerConfig {
-            language: language.clone(),
-            script_path: None,
-            inline_code: Some(self.generate_script_code(&task, &language)),
-            working_directory: Some(PathBuf::from(format!("workspaces/{}", task_id))),
-            environment: task.config.request.headers.clone(),
-            timeout: task.timeout,
-            arguments: vec![],
+        // 创建爬虫配置：A 股默认使用本地 Python 爬虫脚本；其余任务走 inline_code（零依赖实现）
+        let crawler_config = match &task.source {
+            TaskSource::AShare { symbols, .. } => CrawlerConfig {
+                language: CrawlerLanguage::Python,
+                script_path: Some(PathBuf::from("crawlers/python/eastmoney_quote.py")),
+                inline_code: None,
+                working_directory: Some(working_directory),
+                environment: HashMap::new(),
+                timeout: task.timeout,
+                arguments: vec![
+                    "--symbols".to_string(),
+                    symbols.join(","),
+                ],
+            },
+            _ => CrawlerConfig {
+                language: language.clone(),
+                script_path: None,
+                inline_code: Some(self.generate_script_code(&task, &language)),
+                working_directory: Some(working_directory),
+                environment: HashMap::new(),
+                timeout: task.timeout,
+                arguments: vec![],
+            },
         };
 
         // 执行任务
@@ -378,7 +405,7 @@ impl SimpleCollector {
     async fn parse_task_source(&self, source_type: &str, url: &str) -> Result<TaskSource, String> {
         match source_type.to_lowercase().as_str() {
             "ashare" | "a-share" => Ok(TaskSource::AShare {
-                source: AShareDataSource::Sina,
+                source: AShareDataSource::EastMoney,
                 symbols: vec!["000001".to_string()], // 默认示例
             }),
             "hkshare" | "hk-share" => Ok(TaskSource::HKShare {
@@ -443,30 +470,36 @@ impl SimpleCollector {
         match language {
             CrawlerLanguage::Python => {
                 format!(r#"
-import requests
-import json
-from datetime import datetime
+	import json
+	import urllib.request
+	import urllib.error
+	from datetime import datetime
 
-def main():
-    url = "{}"
-    headers = {}
+	def main():
+	    url = "{}"
+	    headers = {}
 
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        print(json.dumps(data, ensure_ascii=False, indent=2))
-        return data
-    except Exception as e:
-        print(f"Error: {{e}}")
-        return None
+	    try:
+	        req = urllib.request.Request(url, headers=headers, method="GET")
+	        with urllib.request.urlopen(req, timeout=30) as resp:
+	            raw = resp.read().decode("utf-8", errors="replace")
+	            try:
+	                data = json.loads(raw)
+	                print(json.dumps(data, ensure_ascii=False, indent=2))
+	                return data
+	            except Exception:
+	                print(raw)
+	                return {{"text": raw}}
+	    except Exception as e:
+	        print(f"Error: {{e}}")
+	        return None
 
-if __name__ == "__main__":
-    main()
-"#,
-                    task.config.request.url,
-                    format!("{:?}", task.config.request.headers)
-                )
+	if __name__ == "__main__":
+	    main()
+	"#,
+	                    task.config.request.url,
+	                    format!("{:?}", task.config.request.headers)
+	                )
             }
             CrawlerLanguage::NodeJs => {
                 format!(r#"
@@ -648,7 +681,7 @@ async fn health_check(
     let response = HealthResponse {
         status: "healthy".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime_seconds: 0, // TODO: 实际计算运行时间
+        uptime_seconds: collector.started_at.elapsed().as_secs(),
         task_stats: stats,
     };
 
@@ -840,7 +873,7 @@ mod tests {
         );
 
         let python_code = collector.generate_script_code(&task, &CrawlerLanguage::Python);
-        assert!(python_code.contains("import requests"));
+        assert!(python_code.contains("import urllib.request"));
         assert!(python_code.contains(&task.config.request.url));
 
         let nodejs_code = collector.generate_script_code(&task, &CrawlerLanguage::NodeJs);
