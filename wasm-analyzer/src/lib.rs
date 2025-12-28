@@ -287,7 +287,9 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_utils_functions() {
-        assert!(Utils::round_to(3.14159, 2) - 3.14 < f64::EPSILON);
+        let pi = std::f64::consts::PI;
+        let expected = (pi * 100.0).round() / 100.0;
+        assert!((Utils::round_to(pi, 2) - expected).abs() < f64::EPSILON);
         assert_eq!(Utils::percent_change(100.0, 110.0), 10.0);
         assert!(Utils::validate_symbol("AAPL"));
         assert!(!Utils::validate_symbol(""));
@@ -296,10 +298,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_analyzer_creation() {
-        let analyzer = WasmAnalyzer::new(None);
-        let analyzer_with_precision = WasmAnalyzer::new(Some(4));
-
-        // 这些应该能成功创建
-        assert!(true);
+        let _analyzer = WasmAnalyzer::new(None);
+        let _analyzer_with_precision = WasmAnalyzer::new(Some(4));
     }
 }

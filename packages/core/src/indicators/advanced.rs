@@ -365,8 +365,8 @@ mod tests {
         ];
 
         let waves = indicators.identify_elliott_waves(&prices);
-        // 由于是简化实现，可能不会检测到波浪
-        assert!(waves.len() >= 0);
+        // 输入长度不足时，应返回空结果
+        assert!(waves.is_empty());
     }
 
     #[test]

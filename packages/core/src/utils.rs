@@ -154,7 +154,9 @@ mod tests {
 
     #[test]
     fn test_numeric_utils() {
-        assert_eq!(numeric::round_to(3.14159, 2), 3.14);
+        let pi = std::f64::consts::PI;
+        let expected = (pi * 100.0).round() / 100.0;
+        assert!((numeric::round_to(pi, 2) - expected).abs() < f64::EPSILON);
         assert_eq!(numeric::percent_change(100.0, 110.0), 10.0);
         assert_eq!(numeric::safe_divide(10.0, 2.0, 0.0), 5.0);
         assert_eq!(numeric::safe_divide(10.0, 0.0, -1.0), -1.0);
