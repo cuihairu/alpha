@@ -10,10 +10,13 @@ use alpha_core::{
     indicators::TechnicalIndicators,
     models::{AnalysisResult, MarketData},
 };
-use alpha_storage::{TimeSeriesPoint, TimeSeriesStorage};
+use alpha_storage::{
+    clickhouse::{ClickHouseConfig, ClickHouseStorage},
+    TimeSeriesPoint, TimeSeriesStorage,
+};
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, HeaderValue, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -36,22 +39,25 @@ use tower_http::{
 
 mod grpc;
 mod settings;
-use settings::{AppConfig, TelemetryConfig};
+use settings::{AppConfig, ClickHouseSettings, TelemetryConfig};
 
 #[derive(Clone)]
 struct AppState {
     session: SessionContext,
     storage: Arc<TimeSeriesStorage>,
+    clickhouse: Option<Arc<ClickHouseStorage>>,
     indicators: TechnicalIndicators,
     analysis: AnalysisEngine,
     config: Arc<AppConfig>,
 }
 
 impl AppState {
-    fn new(config: Arc<AppConfig>) -> Self {
+    async fn new(config: Arc<AppConfig>) -> Self {
+        let clickhouse = initialize_clickhouse(&config.clickhouse).await;
         Self {
             session: SessionContext::new(),
             storage: Arc::new(TimeSeriesStorage::new()),
+            clickhouse,
             indicators: TechnicalIndicators::new(),
             analysis: AnalysisEngine::new(),
             config,
@@ -115,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Arc::new(AppConfig::load()?);
     init_tracing(&config.telemetry)?;
 
-    let state = Arc::new(AppState::new(config.clone()));
+    let state = Arc::new(AppState::new(config.clone()).await);
 
     state.register_custom_functions().await?;
     if let Err(err) = state.seed_demo_data().await {
@@ -146,6 +152,7 @@ fn build_router(state: Arc<AppState>) -> Router {
     let mut router = Router::new()
         .route("/health", get(health_check))
         .route("/query", post(execute_query))
+        .route("/clickhouse/market-data.parquet", get(get_clickhouse_market_data_parquet))
         .route("/stocks/:symbol/history", get(get_stock_history))
         .route("/stocks/:symbol/indicators", get(get_stock_indicators))
         .route("/indicators/calculate", post(calculate_indicators))
@@ -165,6 +172,31 @@ fn build_router(state: Arc<AppState>) -> Router {
     router
 }
 
+async fn initialize_clickhouse(settings: &ClickHouseSettings) -> Option<Arc<ClickHouseStorage>> {
+    if !settings.enabled {
+        return None;
+    }
+
+    let cfg = ClickHouseConfig {
+        url: settings.url.clone(),
+        native_url: "tcp://localhost:9000".to_string(),
+        database: settings.database.clone(),
+        user: settings.user.clone(),
+        password: settings.password.clone(),
+    };
+
+    match ClickHouseStorage::new(cfg).await {
+        Ok(storage) => {
+            tracing::info!("ClickHouse backend enabled");
+            Some(Arc::new(storage))
+        }
+        Err(err) => {
+            tracing::warn!("ClickHouse enabled but connection failed: {}", err);
+            None
+        }
+    }
+}
+
 /// 健康检查
 async fn health_check(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let stats = state.storage.get_statistics().await.ok();
@@ -176,6 +208,57 @@ async fn health_check(State(state): State<Arc<AppState>>) -> Json<serde_json::Va
         "version": env!("CARGO_PKG_VERSION"),
         "time_series": stats,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct MarketDataParquetParams {
+    symbol: String,
+    start: Option<String>,
+    end: Option<String>,
+    days: Option<u32>,
+    limit: Option<u64>,
+}
+
+/// 从 ClickHouse 导出市场数据（Parquet）
+///
+/// 供 DuckDB-WASM / DuckDB Desktop 直接 `read_parquet()` 使用。
+async fn get_clickhouse_market_data_parquet(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<MarketDataParquetParams>,
+) -> Result<axum::response::Response, ApiErrorResponse> {
+    let Some(clickhouse) = state.clickhouse.as_ref() else {
+        return Err(ApiErrorResponse::bad_request(
+            "ClickHouse backend is not enabled".to_string(),
+        ));
+    };
+
+    let end = params
+        .end
+        .as_deref()
+        .and_then(parse_datetime)
+        .unwrap_or_else(Utc::now);
+    let start = params.start.as_deref().and_then(parse_datetime).unwrap_or_else(|| {
+        let days = params.days.unwrap_or(state.config.data.lookback_days).max(1);
+        end - Duration::days(days as i64)
+    });
+
+    let data = clickhouse
+        .query_market_data_parquet(&params.symbol, start, end, params.limit)
+        .await
+        .map_err(ApiErrorResponse::internal)?;
+
+    let mut response = axum::response::Response::new(axum::body::Body::from(data));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/x-parquet"),
+    );
+    Ok(response)
+}
+
+fn parse_datetime(input: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(input)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
 }
 
 /// 执行 SQL 查询

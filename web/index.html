@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Alpha Finance - 金融数据分析平台</title>
     <link rel="stylesheet" href="style.css">
+    <script type="importmap">
+        {
+            "imports": {
+                "apache-arrow": "./vendor/apache-arrow/Arrow.dom.mjs"
+            }
+        }
+    </script>
 </head>
 <body>
     <div class="container">
@@ -94,6 +101,43 @@
             <div id="performance-results" class="results"></div>
         </div>
 
+        <!-- DuckDB 临时查询 -->
+        <div class="card">
+            <h3>🦆 DuckDB 临时查询（Web/桌面通用）</h3>
+            <div id="duckdb-status"></div>
+
+            <div class="form-group">
+                <label for="duckdb-parquet-url">加载 Parquet（来自服务端/任意 URL）</label>
+                <input
+                    type="text"
+                    id="duckdb-parquet-url"
+                    placeholder="例如: http://localhost:8081/clickhouse/market-data.parquet?symbol=AAPL&days=30&limit=5000"
+                    value="http://localhost:8081/clickhouse/market-data.parquet?symbol=AAPL&days=30&limit=5000"
+                >
+                <div style="display:flex; gap: 8px; margin-top: 8px;">
+                    <input type="text" id="duckdb-parquet-table" value="server_data" placeholder="表名">
+                    <button class="btn" onclick="duckdbLoadParquetFromUrl()">加载到表</button>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="duckdb-file">加载本地文件（CSV/Parquet/JSON）</label>
+                <input type="file" id="duckdb-file" accept=".parquet,.csv,.json">
+                <div style="display:flex; gap: 8px; margin-top: 8px;">
+                    <input type="text" id="duckdb-file-table" value="local_data" placeholder="表名">
+                    <button class="btn" onclick="duckdbLoadLocalFile()">加载文件</button>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="duckdb-sql">SQL</label>
+                <textarea id="duckdb-sql" style="width:100%; min-height: 120px;">SELECT * FROM local_data LIMIT 20;</textarea>
+                <button class="btn" onclick="duckdbRunSql()" style="margin-top: 8px;">运行 SQL</button>
+            </div>
+
+            <div id="duckdb-results" class="results"></div>
+        </div>
+
         <footer class="footer">
             <p>© 2024 Alpha Finance - 基于 Rust + WebAssembly 的高性能金融分析平台</p>
         </footer>
@@ -170,6 +214,9 @@
         // 页面加载完成后初始化
         document.addEventListener('DOMContentLoaded', initializeWasm);
     </script>
+
+    <!-- DuckDB-WASM 临时查询（同一套页面在 Tauri 桌面端也会加载） -->
+    <script type="module" src="duckdb-ui.mjs"></script>
 
     <!-- 演示数据生成器 -->
     <script src="demo-data.js"></script>

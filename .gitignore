@@ -38,6 +38,11 @@ web/dist/*
 web/pkg/*
 !web/dist/.gitkeep
 
+# Web (generated vendor bundles)
+web/vendor/*
+!web/vendor/.gitkeep
+!web/vendor/**/.gitkeep
+
 # Desktop
 desktop/src-tauri/target/
 desktop/target/

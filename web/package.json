@@ -4,12 +4,14 @@
   "description": "Alpha Finance Web 前端 - 基于 Rust WebAssembly 的高性能金融分析平台",
   "main": "server.js",
   "scripts": {
+    "postinstall": "npm run prepare:vendors",
     "start": "node server.js",
     "dev": "node server.js",
     "build": "npm run build:wasm && npm run build:prod",
     "build:wasm": "cd ../wasm-analyzer && wasm-pack build --target web --out-dir ../web/pkg",
-    "build:prod": "mkdir -p dist && cp -r *.html *.css *.js server.js pkg/ dist/ && cp dist/index.html dist/app.html",
-    "clean": "rm -rf pkg/ node_modules/ dist/",
+    "build:prod": "npm run prepare:vendors && mkdir -p dist && cp -r *.html *.css *.js server.js pkg/ vendor/ dist/ && cp dist/index.html dist/app.html",
+    "prepare:vendors": "node scripts/prepare-vendors.mjs",
+    "clean": "rm -rf pkg/ node_modules/ vendor/ dist/",
     "install:wasm-pack": "curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh",
     "serve": "python3 -m http.server 8080",
     "serve:dist": "cd dist && python3 -m http.server 8080"
@@ -31,6 +33,7 @@
     "type": "git",
     "url": "https://github.com/alpha-finance/alpha-finance.git"
   },
-  "devDependencies": {},
-  "dependencies": {}
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.33.1-dev5.0"
+  }
 }

@@ -9,13 +9,16 @@ const HOST = process.env.HOST || '0.0.0.0';
 const mimeTypes = {
     '.html': 'text/html',
     '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+    '.cjs': 'text/javascript',
     '.css': 'text/css',
     '.json': 'application/json',
     '.png': 'image/png',
     '.jpg': 'image/jpg',
     '.gif': 'image/gif',
     '.svg': 'image/svg+xml',
-    '.wasm': 'application/wasm'
+    '.wasm': 'application/wasm',
+    '.map': 'application/json'
 };
 
 const server = http.createServer((req, res) => {

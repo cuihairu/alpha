@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub telemetry: TelemetryConfig,
     pub data: DataConfig,
     pub storage: StorageConfig,
+    pub clickhouse: ClickHouseSettings,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -38,6 +39,15 @@ pub struct DataConfig {
 pub struct StorageConfig {
     pub persistence_enabled: bool,
     pub timescale_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClickHouseSettings {
+    pub enabled: bool,
+    pub url: String,
+    pub database: String,
+    pub user: String,
+    pub password: String,
 }
 
 impl AppConfig {
@@ -75,6 +85,16 @@ impl AppConfig {
             .expect("failed to set persistence default")
             .set_default("storage.timescale_url", "")
             .expect("failed to set timescale_url default")
+            .set_default("clickhouse.enabled", false)
+            .expect("failed to set clickhouse.enabled default")
+            .set_default("clickhouse.url", "http://localhost:8123")
+            .expect("failed to set clickhouse.url default")
+            .set_default("clickhouse.database", "alpha_finance")
+            .expect("failed to set clickhouse.database default")
+            .set_default("clickhouse.user", "admin")
+            .expect("failed to set clickhouse.user default")
+            .set_default("clickhouse.password", "admin123")
+            .expect("failed to set clickhouse.password default")
     }
 
     fn load_from_builder(builder: ConfigBuilder<DefaultState>) -> Result<Self, ConfigError> {
@@ -121,6 +141,7 @@ mod tests {
         assert!(!cfg.data.seed_symbols.is_empty());
         assert!(!cfg.storage.persistence_enabled);
         assert!(cfg.storage.timescale_url.is_none());
+        assert!(!cfg.clickhouse.enabled);
     }
 
     #[test]
@@ -137,6 +158,9 @@ mod tests {
                 storage:
                   persistence_enabled: true
                   timescale_url: "postgres://demo"
+                clickhouse:
+                  enabled: true
+                  url: "http://127.0.0.1:8123"
             "#,
             FileFormat::Yaml,
         ));
@@ -148,5 +172,7 @@ mod tests {
         assert_eq!(cfg.server.grpc_addr, "127.0.0.1:50060");
         assert!(cfg.storage.persistence_enabled);
         assert_eq!(cfg.storage.timescale_url.as_deref(), Some("postgres://demo"));
+        assert!(cfg.clickhouse.enabled);
+        assert_eq!(cfg.clickhouse.url, "http://127.0.0.1:8123");
     }
 }

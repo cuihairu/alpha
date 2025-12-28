@@ -177,6 +177,58 @@ impl ClickHouseStorage {
         Ok(results)
     }
 
+    /// 查询市场数据并返回 Parquet（二进制）
+    ///
+    /// 适用于 DuckDB (Web/Desktop) 直接 `read_parquet()` 加载。
+    pub async fn query_market_data_parquet(
+        &self,
+        symbol: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        limit: Option<u64>,
+    ) -> Result<Vec<u8>, String> {
+        let mut query = format!(
+            "SELECT timestamp, symbol, open_price, high_price, low_price, close_price, volume \
+             FROM market_data \
+             WHERE symbol = '{}' \
+             AND timestamp BETWEEN '{}' AND '{}' \
+             ORDER BY timestamp ASC",
+            symbol.replace('\'', "''"),
+            start.format("%Y-%m-%d %H:%M:%S"),
+            end.format("%Y-%m-%d %H:%M:%S")
+        );
+
+        if let Some(limit) = limit {
+            query.push_str(&format!(" LIMIT {}", limit));
+        }
+
+        query.push_str(" FORMAT Parquet");
+
+        let url = format!(
+            "{}/?database={}&user={}&password={}",
+            self.config.url, self.config.database, self.config.user, self.config.password
+        );
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .body(query)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP 请求失败: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("查询失败: {}", response.status()));
+        }
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| format!("响应读取失败: {}", e))?;
+
+        Ok(bytes.to_vec())
+    }
+
     /// 插入技术指标
     pub async fn insert_technical_indicators(
         &self,
