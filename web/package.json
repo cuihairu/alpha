@@ -13,8 +13,8 @@
     "prepare:vendors": "node scripts/prepare-vendors.mjs",
     "clean": "rm -rf pkg/ node_modules/ vendor/ dist/",
     "install:wasm-pack": "curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh",
-    "serve": "python3 -m http.server 8080",
-    "serve:dist": "cd dist && python3 -m http.server 8080"
+    "serve": "python3 -m http.server 8080 --bind 127.0.0.1",
+    "serve:dist": "cd dist && python3 -m http.server 8080 --bind 127.0.0.1"
   },
   "keywords": [
     "finance",

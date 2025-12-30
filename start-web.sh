@@ -2,6 +2,14 @@
 
 # Alpha Finance Web 应用启动脚本
 
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WEB_DIR="$ROOT_DIR/web"
+WASM_DIR="$ROOT_DIR/wasm-analyzer"
+HOST="${HOST:-127.0.0.1}"
+PORT="${PORT:-8080}"
+
 echo "🚀 启动 Alpha Finance Web 应用..."
 
 # 检查 Node.js 是否安装
@@ -13,6 +21,8 @@ fi
 
 echo "✅ Node.js 已安装: $(node --version)"
 
+cd "$WEB_DIR"
+
 # 检查是否需要构建 WASM
 if [ ! -d "pkg" ] || [ ! -f "pkg/alpha_wasm_analyzer_bg.wasm" ]; then
     echo "📦 WASM 模块未找到，开始构建..."
@@ -21,14 +31,15 @@ if [ ! -d "pkg" ] || [ ! -f "pkg/alpha_wasm_analyzer_bg.wasm" ]; then
     if ! command -v wasm-pack &> /dev/null; then
         echo "🔧 安装 wasm-pack..."
         curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-        source ~/.cargo/env
+        # shellcheck disable=SC1090
+        source "$HOME/.cargo/env" || true
     fi
 
     # 构建 WASM
     echo "🔨 构建 WASM 模块..."
-    cd ../wasm-analyzer
-    wasm-pack build --target web --out-dir ../web/pkg
-    cd ../web
+    cd "$WASM_DIR"
+    wasm-pack build --target web --out-dir "$WEB_DIR/pkg"
+    cd "$WEB_DIR"
 
     if [ $? -eq 0 ]; then
         echo "✅ WASM 模块构建成功"
@@ -42,8 +53,12 @@ fi
 
 # 启动 Web 服务器
 echo "🌐 启动 Web 服务器..."
-echo "📍 访问地址: http://localhost:8080"
-echo "📍 本地网络地址: http://0.0.0.0:8080"
+echo "📍 访问地址: http://localhost:${PORT}"
+if [ "$HOST" = "0.0.0.0" ]; then
+    echo "📍 局域网访问: http://<你的IP>:${PORT}"
+else
+    echo "📍 如需局域网访问: HOST=0.0.0.0 PORT=${PORT} ./start-web.sh"
+fi
 echo ""
 echo "📝 功能说明:"
 echo "   • 股票技术分析 (RSI, MACD, 移动平均线等)"
@@ -55,4 +70,4 @@ echo "⏹️  按 Ctrl+C 停止服务器"
 echo ""
 
 # 启动服务器
-node server.js
+HOST="$HOST" PORT="$PORT" node server.js

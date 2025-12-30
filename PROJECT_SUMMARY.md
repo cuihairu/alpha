@@ -131,7 +131,7 @@ alpha/
 ## 🛠️ 开发工具和脚本
 
 ### 构建脚本
-- **`build-wasm.sh`**: WASM 模块构建和部署
+- **`build-wasm.sh`**: WASM 模块构建（`--serve` 可选启动静态服务器）
 - **`start-web.sh`**: Web 应用启动脚本
 - **`start-dev.sh`**: 开发环境快速启动
 

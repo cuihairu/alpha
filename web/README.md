@@ -35,15 +35,20 @@ wasm-pack build --target web --out-dir ../web/pkg
 npm start
 
 # 方法2: 使用 Python 服务器 (如果系统有 Python 3)
-python3 -m http.server 8080
+python3 -m http.server 8080 --bind 127.0.0.1
 
-# 方法3: 直接运行构建脚本 (包含服务器启动)
-../build-wasm.sh
+# 方法3: 构建并启动 Python 静态服务器
+../build-wasm.sh --serve
 ```
 
 ### 4. 访问应用
 
 打开浏览器访问: http://localhost:8080
+
+如需局域网访问（监听所有网卡）：
+```bash
+HOST=0.0.0.0 PORT=8080 npm start
+```
 
 ## 📊 功能特性
 

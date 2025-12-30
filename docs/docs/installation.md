@@ -86,6 +86,12 @@ cd web
 npm start
 ```
 
+默认仅监听本机（`127.0.0.1`）。如需局域网访问：
+```bash
+cd web
+HOST=0.0.0.0 PORT=8080 npm start
+```
+
 ## 🐳 Docker 安装
 
 ### 1. 使用 Docker Compose
