@@ -2,13 +2,13 @@
 
 ## 🎉 项目完成状态
 
-✅ **项目已成功完成所有核心功能实现**
+⚠️ **项目已完成一批核心模块，但整体仍处于持续开发中**
 
 ---
 
 ## 📋 项目概览
 
-Alpha Finance 是一个基于 Rust + WebAssembly 的高性能金融数据分析平台，提供实时技术指标计算、智能股票分析和多平台数据管理功能。
+Alpha Finance 是一个基于 Rust workspace 的金融数据分析平台，包含采集、协议、存储、WebAssembly 分析、桌面端和多服务原型。当前仓库已经具备可编译、可测试的核心存储层与分析模块，但仍有大量路线图项目待完成。
 
 ### 🏗️ 技术架构
 
@@ -42,9 +42,15 @@ alpha/
 │   │   │   └── utils.rs        # 工具函数
 │   ├── storage/                # 存储抽象层
 │   │   ├── src/
-│   │   │   ├── memory.rs       # 内存存储
+│   │   │   ├── memory.rs       # 内存 KV
+│   │   │   ├── disk_kv.rs      # 本地磁盘 KV
+│   │   │   ├── redis_kv.rs     # Redis KV
+│   │   │   ├── postgres_kv.rs  # PostgreSQL KV
+│   │   │   ├── cloud.rs        # 对象存储兼容层
 │   │   │   ├── timeseries.rs   # 时间序列存储
-│   │   │   └── lib.rs          # 存储接口
+│   │   │   ├── dal.rs          # 数据访问层
+│   │   │   └── lib.rs          # 存储接口和工厂
+│   │   └── README.md           # 存储后端说明
 │   └── protocols/              # 通信协议 (待实现)
 ├── services/                    # 微服务
 │   ├── api-gateway/            # API 网关
@@ -94,17 +100,20 @@ alpha/
 
 ### 💾 存储层 (alpha-storage)
 
-#### ⚡ 内存存储
-- **高性能**: 基于内存的快速读写
-- **并发安全**: Arc + RwLock 保护
-- **类型安全**: 泛型接口设计
-- **完整测试**: 单元测试覆盖
+#### ⚡ KV 与对象存储
+- **MemoryStorage**: 进程内高速 KV
+- **DiskKvStorage**: 本地目录层级 KV，支持 key 编码和清理
+- **RedisKvStorage**: 支持 TTL、`SCAN` 列举和可选集成测试
+- **PostgresKvStorage**: 支持自动建表、TTL 和前缀查询
+- **CloudStorage**: 兼容简单 HTTP 对象接口，支持对象索引和清空
+- **StorageFactory**: 统一按配置创建后端
 
-#### 📊 时间序列存储
-- **专用优化**: 金融数据结构设计
-- **时间范围查询**: 高效的时间切片
-- **数据聚合**: 可配置的重采样
-- **统计管理**: 存储使用统计
+#### 📊 时间序列与 DAL
+- **TimeSeriesStorage**: 内存时间序列管理
+- **TimescaleTimeSeriesStorage**: SQLx/TimescaleDB 落盘
+- **DataAccessLayer**: 组合时间序列、缓存和元数据存储
+- **QueryBuilder**: 提供简单范围查询、限制和重采样
+- **完整测试**: `alpha-storage` 当前已具备 25 个通过的测试
 
 ### 🌐 Web 前端
 

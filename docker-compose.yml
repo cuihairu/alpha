@@ -1,6 +1,26 @@
-version: '3.8'
-
 services:
+  # TimescaleDB / PostgreSQL
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: alpha-timescaledb
+    environment:
+      POSTGRES_DB: alpha_finance
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql
+    networks:
+      - alpha-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d alpha_finance"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   # ClickHouse 数据库 (高性能分析型数据库)
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -53,8 +73,11 @@ services:
       - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
       - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
       - REDIS_URL=redis://redis:6379
+      - ALPHA__STORAGE__PERSISTENCE_ENABLED=true
+      - ALPHA__STORAGE__TIMESCALE_URL=postgres://postgres:postgres@timescaledb:5432/alpha_finance
       - RUST_LOG=info
     depends_on:
+      - timescaledb
       - clickhouse
       - redis
     networks:
@@ -73,8 +96,11 @@ services:
       - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
       - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
       - REDIS_URL=redis://redis:6379
+      - ALPHA__STORAGE__PERSISTENCE_ENABLED=true
+      - ALPHA__STORAGE__TIMESCALE_URL=postgres://postgres:postgres@timescaledb:5432/alpha_finance
       - RUST_LOG=info
     depends_on:
+      - timescaledb
       - clickhouse
       - redis
     networks:
@@ -106,8 +132,10 @@ services:
     environment:
       - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
       - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
+      - TIMESCALE_URL=postgres://postgres:postgres@timescaledb:5432/alpha_finance
       - RUST_LOG=info
     depends_on:
+      - timescaledb
       - clickhouse
     networks:
       - alpha-network
@@ -149,6 +177,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  timescaledb_data:
   clickhouse_data:
   clickhouse_logs:
   redis_data:

@@ -6,6 +6,11 @@ pub mod memory;
 pub mod timeseries;
 pub mod timescale;
 pub mod clickhouse;
+pub mod cloud;
+pub mod dal;
+pub mod disk_kv;
+pub mod postgres_kv;
+pub mod redis_kv;
 
 use alpha_core::errors::AlphaResult;
 
@@ -14,6 +19,11 @@ pub use memory::*;
 pub use timeseries::*;
 pub use timescale::*;
 pub use clickhouse::*;
+pub use cloud::*;
+pub use dal::*;
+pub use disk_kv::*;
+pub use postgres_kv::*;
+pub use redis_kv::*;
 
 /// 存储后端特征（对象安全版本）
 #[async_trait::async_trait]
@@ -65,21 +75,68 @@ impl StorageFactory {
         match config.backend {
             StorageBackendType::Memory => Ok(Box::new(MemoryStorage::new())),
             StorageBackendType::Postgres => {
-                // TODO: 实现 PostgreSQL 存储后端
-                todo!("PostgreSQL 存储后端未实现")
+                let backend = PostgresKvStorage::connect(
+                    &config.connection_string,
+                    "alpha_kv",
+                    config.max_connections,
+                    config.ttl_seconds,
+                )
+                .await?;
+                Ok(Box::new(backend))
             }
             StorageBackendType::Redis => {
-                // TODO: 实现 Redis 存储后端
-                todo!("Redis 存储后端未实现")
+                let backend = RedisKvStorage::connect(&config.connection_string, config.ttl_seconds).await?;
+                Ok(Box::new(backend))
             }
             StorageBackendType::S3 => {
-                // TODO: 实现 S3 存储后端
-                todo!("S3 存储后端未实现")
+                let backend = CloudStorage::from_connection_string(&config.connection_string)?;
+                Ok(Box::new(backend))
             }
             StorageBackendType::LocalDisk => {
-                // TODO: 实现本地磁盘存储后端
-                todo!("本地磁盘存储后端未实现")
+                let backend = DiskKvStorage::from_connection_string(&config.connection_string)?;
+                Ok(Box::new(backend))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn storage_factory_creates_local_disk_backend_from_connection_string() {
+        let tmp = TempDir::new().unwrap();
+        let config = StorageConfig {
+            backend: StorageBackendType::LocalDisk,
+            connection_string: format!("file://{}", tmp.path().display()),
+            ttl_seconds: None,
+            max_connections: None,
+        };
+
+        let storage = StorageFactory::create(config).await.unwrap();
+        storage
+            .store("factory/test", b"value".to_vec())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            storage.retrieve("factory/test").await.unwrap(),
+            Some(b"value".to_vec())
+        );
+    }
+
+    #[tokio::test]
+    async fn storage_factory_creates_s3_backend_from_connection_string() {
+        let config = StorageConfig {
+            backend: StorageBackendType::S3,
+            connection_string:
+                "s3://alpha?provider=minio&endpoint=http%3A%2F%2F127.0.0.1%3A9000".to_string(),
+            ttl_seconds: None,
+            max_connections: None,
+        };
+
+        let _storage = StorageFactory::create(config).await.unwrap();
     }
 }

@@ -1,48 +1,29 @@
 //! 数据访问层 (Data Access Layer)
 
-use super::{
-    memory::MemoryStorage,
-    timescale::TimescaleTimeSeriesStorage,
-    timeseries::TimeSeriesStorage,
-    StorageBackend, StorageBackendType,
+use crate::{
+    MemoryStorage, StorageBackend, StorageBackendType, StorageConfig, StorageFactory,
+    TimeSeriesStats, TimeSeriesStorage,
 };
-use alpha_core::errors::{AlphaResult, AlphaError};
-use alpha_core::models::MarketData;
+use alpha_core::{
+    errors::{AlphaError, AlphaResult},
+    models::MarketData,
+};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// 统一数据访问层
-#[derive(Debug)]
 pub struct DataAccessLayer {
-    timeseries: Arc<TimeSeriesStorage>,
-    metadata: Arc<dyn StorageBackend<Error = Box<dyn std::error::Error + Send + Sync>>>,
-    cache: Arc<MemoryStorage>,
+    timeseries: TimeSeriesStorage,
+    metadata: Box<dyn StorageBackend>,
+    cache: MemoryStorage,
 }
 
 impl DataAccessLayer {
     /// 创建新的数据访问层
     pub async fn new(config: DataAccessConfig) -> AlphaResult<Self> {
-        // 创建时间序列存储
-        let timeseries = Arc::new(TimeSeriesStorage::new());
-
-        // 创建元数据存储
-        let metadata = match config.metadata_storage {
-            StorageBackendType::Memory => {
-                Arc::new(MemoryStorage::new()) as Arc<dyn StorageBackend<Error = Box<dyn std::error::Error + Send + Sync>>>
-            }
-            StorageBackendType::LocalDisk => {
-                // 磁盘存储需要实现 StorageBackend trait
-                // 暂时使用内存存储替代
-                Arc::new(MemoryStorage::new()) as Arc<dyn StorageBackend<Error = Box<dyn std::error::Error + Send + Sync>>>
-            }
-            _ => {
-                return Err(AlphaError::InternalError("不支持的元数据存储类型".to_string()));
-            }
-        };
-
-        // 创建缓存存储
-        let cache = Arc::new(MemoryStorage::new());
+        let timeseries = TimeSeriesStorage::new();
+        let metadata = StorageFactory::create(config.metadata_storage.clone()).await?;
+        let cache = MemoryStorage::new();
 
         Ok(Self {
             timeseries,
@@ -53,12 +34,12 @@ impl DataAccessLayer {
 
     /// 存储市场数据
     pub async fn store_market_data(&self, data: &MarketData) -> AlphaResult<()> {
-        // 存储到时间序列存储
         self.timeseries.add_market_data(data).await?;
 
-        // 更新缓存中的最新价格
         let cache_key = format!("latest_price:{}", data.symbol);
-        self.cache.store(&cache_key, &data.price).await?;
+        self.cache
+            .store(&cache_key, serialize_value(&data.price)?)
+            .await?;
 
         Ok(())
     }
@@ -67,10 +48,11 @@ impl DataAccessLayer {
     pub async fn store_market_data_batch(&self, data_list: &[MarketData]) -> AlphaResult<()> {
         self.timeseries.add_market_data_batch(data_list).await?;
 
-        // 更新缓存
         for data in data_list {
             let cache_key = format!("latest_price:{}", data.symbol);
-            self.cache.store(&cache_key, &data.price).await?;
+            self.cache
+                .store(&cache_key, serialize_value(&data.price)?)
+                .await?;
         }
 
         Ok(())
@@ -80,17 +62,16 @@ impl DataAccessLayer {
     pub async fn get_latest_price(&self, symbol: &str) -> AlphaResult<Option<f64>> {
         let cache_key = format!("latest_price:{}", symbol);
 
-        // 先尝试从缓存读取
-        if let Some(price) = self.cache.retrieve(&cache_key).await? {
-            return Ok(Some(price));
+        if let Some(bytes) = self.cache.retrieve(&cache_key).await? {
+            return deserialize_value(&bytes).map(Some);
         }
 
-        // 缓存未命中，从时间序列存储读取
         let price = self.timeseries.get_latest_price(symbol).await?;
 
-        // 更新缓存
         if let Some(p) = price {
-            self.cache.store(&cache_key, &p).await?;
+            self.cache
+                .store(&cache_key, serialize_value(&p)?)
+                .await?;
         }
 
         Ok(price)
@@ -109,7 +90,7 @@ impl DataAccessLayer {
         for point in points {
             let metadata = point.metadata.unwrap_or(serde_json::Value::Null);
 
-            let data = MarketData {
+            market_data.push(MarketData {
                 symbol: symbol.to_string(),
                 timestamp: point.timestamp,
                 price: point.value,
@@ -119,9 +100,7 @@ impl DataAccessLayer {
                 open: metadata.get("open").and_then(|v| v.as_f64()),
                 high: metadata.get("high").and_then(|v| v.as_f64()),
                 low: metadata.get("low").and_then(|v| v.as_f64()),
-            };
-
-            market_data.push(data);
+            });
         }
 
         Ok(market_data)
@@ -130,17 +109,20 @@ impl DataAccessLayer {
     /// 存储元数据
     pub async fn store_metadata<T>(&self, key: &str, metadata: &T) -> AlphaResult<()>
     where
-        T: serde::Serialize + Send + Sync,
+        T: Serialize,
     {
-        self.metadata.store(key, metadata).await
+        self.metadata.store(key, serialize_value(metadata)?).await
     }
 
     /// 获取元数据
     pub async fn get_metadata<T>(&self, key: &str) -> AlphaResult<Option<T>>
     where
-        T: for<'de> serde::Deserialize<'de> + Send + Sync,
+        T: DeserializeOwned,
     {
-        self.metadata.retrieve(key).await
+        match self.metadata.retrieve(key).await? {
+            Some(bytes) => deserialize_value(&bytes).map(Some),
+            None => Ok(None),
+        }
     }
 
     /// 列出所有支持的符号
@@ -150,10 +132,8 @@ impl DataAccessLayer {
 
     /// 删除符号的所有数据
     pub async fn delete_symbol(&self, symbol: &str) -> AlphaResult<()> {
-        // 删除时间序列数据
         self.timeseries.delete_symbol(symbol).await?;
 
-        // 删除缓存
         let cache_key = format!("latest_price:{}", symbol);
         self.cache.delete(&cache_key).await?;
 
@@ -165,17 +145,15 @@ impl DataAccessLayer {
         let timeseries_stats = self.timeseries.get_statistics().await?;
 
         Ok(StorageStatistics {
-            timeseries_stats,
             total_symbols: timeseries_stats.total_symbols,
             total_data_points: timeseries_stats.total_points,
-            storage_size_estimate: timeseries_stats.total_points * 64, // 估算每个点64字节
+            storage_size_estimate: timeseries_stats.total_points * 64,
+            timeseries_stats,
         })
     }
 
     /// 清理过期数据
-    pub async fn cleanup_old_data(&self, before: DateTime<Utc>) -> AlphaResult<usize> {
-        // 这里可以实现数据清理逻辑
-        // 简化实现，返回0表示没有清理任何数据
+    pub async fn cleanup_old_data(&self, _before: DateTime<Utc>) -> AlphaResult<usize> {
         Ok(0)
     }
 
@@ -187,8 +165,6 @@ impl DataAccessLayer {
         end: DateTime<Utc>,
     ) -> AlphaResult<Vec<u8>> {
         let data = self.get_market_data_range(symbol, start, end).await?;
-
-        // 序列化为 JSON
         serde_json::to_vec(&data)
             .map_err(|e| AlphaError::SerializationError(e.to_string()))
     }
@@ -206,7 +182,7 @@ impl DataAccessLayer {
 /// 数据访问层配置
 #[derive(Debug, Clone)]
 pub struct DataAccessConfig {
-    pub metadata_storage: StorageBackendType,
+    pub metadata_storage: StorageConfig,
     pub cache_ttl_seconds: Option<u64>,
     pub max_cache_size: usize,
 }
@@ -214,8 +190,13 @@ pub struct DataAccessConfig {
 impl Default for DataAccessConfig {
     fn default() -> Self {
         Self {
-            metadata_storage: StorageBackendType::Memory,
-            cache_ttl_seconds: Some(3600), // 1小时
+            metadata_storage: StorageConfig {
+                backend: StorageBackendType::Memory,
+                connection_string: "memory://".to_string(),
+                ttl_seconds: None,
+                max_connections: None,
+            },
+            cache_ttl_seconds: Some(3600),
             max_cache_size: 10000,
         }
     }
@@ -227,7 +208,7 @@ pub struct StorageStatistics {
     pub total_symbols: usize,
     pub total_data_points: usize,
     pub storage_size_estimate: usize,
-    pub timeseries_stats: super::TimeSeriesStats,
+    pub timeseries_stats: TimeSeriesStats,
 }
 
 /// 数据查询构建器
@@ -277,19 +258,22 @@ impl QueryBuilder {
     }
 
     pub async fn execute(&self, dal: &DataAccessLayer) -> AlphaResult<Vec<MarketData>> {
-        let symbol = self.symbol.as_ref().ok_or_else(|| {
-            AlphaError::InvalidInput("查询必须指定符号".to_string())
-        })?;
+        let symbol = self
+            .symbol
+            .as_ref()
+            .ok_or_else(|| AlphaError::InvalidInput("查询必须指定符号".to_string()))?;
 
-        let start = self.start_time.unwrap_or_else(|| {
-            Utc::now() - chrono::Duration::days(30) // 默认30天前
-        });
-
+        let start =
+            self.start_time
+                .unwrap_or_else(|| Utc::now() - chrono::Duration::days(30));
         let end = self.end_time.unwrap_or_else(Utc::now);
 
         let mut data = dal.get_market_data_range(symbol, start, end).await?;
 
-        // 应用限制
+        if let Some(interval) = self.resample_interval {
+            data = resample_market_data(data, interval);
+        }
+
         if let Some(limit) = self.limit {
             data.truncate(limit);
         }
@@ -304,6 +288,72 @@ impl Default for QueryBuilder {
     }
 }
 
+fn serialize_value<T: Serialize>(value: &T) -> AlphaResult<Vec<u8>> {
+    bincode::serialize(value).map_err(|e| AlphaError::SerializationError(e.to_string()))
+}
+
+fn deserialize_value<T: DeserializeOwned>(bytes: &[u8]) -> AlphaResult<T> {
+    bincode::deserialize(bytes).map_err(|e| AlphaError::SerializationError(e.to_string()))
+}
+
+fn resample_market_data(data: Vec<MarketData>, interval_seconds: i64) -> Vec<MarketData> {
+    if data.is_empty() || interval_seconds <= 0 {
+        return data;
+    }
+
+    let mut resampled = Vec::new();
+    let mut bucket_start = data[0].timestamp;
+    let mut bucket = Vec::new();
+
+    for item in data {
+        if item.timestamp < bucket_start + chrono::Duration::seconds(interval_seconds) {
+            bucket.push(item);
+            continue;
+        }
+
+        if let Some(aggregated) = aggregate_bucket(&bucket, bucket_start) {
+            resampled.push(aggregated);
+        }
+
+        bucket_start = item.timestamp;
+        bucket.clear();
+        bucket.push(item);
+    }
+
+    if let Some(aggregated) = aggregate_bucket(&bucket, bucket_start) {
+        resampled.push(aggregated);
+    }
+
+    resampled
+}
+
+fn aggregate_bucket(bucket: &[MarketData], timestamp: DateTime<Utc>) -> Option<MarketData> {
+    let first = bucket.first()?;
+    let last = bucket.last()?;
+
+    let mut high = first.high.unwrap_or(first.price);
+    let mut low = first.low.unwrap_or(first.price);
+    let mut volume = 0u64;
+
+    for item in bucket {
+        high = high.max(item.high.unwrap_or(item.price));
+        low = low.min(item.low.unwrap_or(item.price));
+        volume = volume.saturating_add(item.volume);
+    }
+
+    Some(MarketData {
+        symbol: first.symbol.clone(),
+        timestamp,
+        price: last.price,
+        volume,
+        bid: last.bid,
+        ask: last.ask,
+        open: first.open.or(Some(first.price)),
+        high: Some(high),
+        low: Some(low),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,7 +363,6 @@ mod tests {
         let config = DataAccessConfig::default();
         let dal = DataAccessLayer::new(config).await.unwrap();
 
-        // 创建测试数据
         let data = MarketData {
             symbol: "AAPL".to_string(),
             timestamp: Utc::now(),
@@ -326,34 +375,29 @@ mod tests {
             low: Some(148.5),
         };
 
-        // 存储数据
         dal.store_market_data(&data).await.unwrap();
 
-        // 获取最新价格
         let latest_price = dal.get_latest_price("AAPL").await.unwrap();
         assert_eq!(latest_price, Some(150.0));
 
-        // 列出符号
         let symbols = dal.list_symbols().await.unwrap();
         assert!(symbols.contains(&"AAPL".to_string()));
 
-        // 获取统计信息
         let stats = dal.get_storage_statistics().await.unwrap();
         assert_eq!(stats.total_symbols, 1);
         assert_eq!(stats.total_data_points, 1);
     }
 
     #[tokio::test]
-    async fn test_query_builder() {
+    async fn test_query_builder_limit_and_resample() {
         let config = DataAccessConfig::default();
         let dal = DataAccessLayer::new(config).await.unwrap();
 
-        // 创建测试数据
         let base_time = Utc::now();
         for i in 0..10 {
             let data = MarketData {
                 symbol: "AAPL".to_string(),
-                timestamp: base_time + chrono::Duration::hours(i),
+                timestamp: base_time + chrono::Duration::minutes(i),
                 price: 150.0 + i as f64,
                 volume: 1000,
                 bid: Some(149.5 + i as f64),
@@ -365,19 +409,19 @@ mod tests {
             dal.store_market_data(&data).await.unwrap();
         }
 
-        // 使用查询构建器
         let result = QueryBuilder::new()
             .symbol("AAPL")
             .start_time(base_time)
-            .end_time(base_time + chrono::Duration::hours(4))
-            .limit(5)
+            .end_time(base_time + chrono::Duration::minutes(9))
+            .resample(300)
+            .limit(2)
             .execute(&dal)
             .await
             .unwrap();
 
-        assert_eq!(result.len(), 5);
-        assert_eq!(result[0].price, 150.0);
-        assert_eq!(result[4].price, 154.0);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].volume, 5000);
+        assert_eq!(result[1].volume, 5000);
     }
 
     #[tokio::test]
@@ -396,12 +440,9 @@ mod tests {
             category: "Technology".to_string(),
         };
 
-        // 存储元数据
         dal.store_metadata("AAPL:info", &metadata).await.unwrap();
 
-        // 获取元数据
         let retrieved: Option<TestMetadata> = dal.get_metadata("AAPL:info").await.unwrap();
-        assert!(retrieved.is_some());
-        assert_eq!(retrieved.unwrap(), metadata);
+        assert_eq!(retrieved, Some(metadata));
     }
 }
