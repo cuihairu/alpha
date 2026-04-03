@@ -24,10 +24,14 @@ use axum::{
 use chrono::{DateTime, Duration, Utc};
 use datafusion::{
     arrow::{
-        array::{ArrayRef, Float64Array, StringArray, TimestampMillisecondArray},
+        array::{
+            ArrayRef, Float64Array, Int64Array, StringArray, TimestampMillisecondArray,
+            UInt64Array,
+        },
         datatypes::{DataType, TimeUnit},
         record_batch::RecordBatch,
     },
+    datasource::MemTable,
     prelude::SessionContext,
 };
 use serde::{Deserialize, Serialize};
@@ -68,6 +72,14 @@ impl AppState {
         // 实际项目中在此注册自定义 UDF/UDAF。
         // 目前我们只记录日志以确保 DataFusion 会话可正常工作。
         tracing::info!("DataFusion session ready; custom UDF registration placeholder");
+        Ok(())
+    }
+
+    async fn refresh_query_tables(&self) -> anyhow::Result<()> {
+        let batch = build_market_data_record_batch(&self.storage).await?;
+        let schema = batch.schema();
+        let table = MemTable::try_new(schema, vec![vec![batch]])?;
+        self.session.register_table("market_data", Arc::new(table))?;
         Ok(())
     }
 
@@ -380,9 +392,13 @@ async fn execute_query(
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, ApiErrorResponse> {
     let start = Instant::now();
-    let session = state.session.clone();
+    state
+        .refresh_query_tables()
+        .await
+        .map_err(|err| ApiErrorResponse::internal(err.to_string()))?;
 
-    let dataframe = session
+    let dataframe = state
+        .session
         .sql(&request.query)
         .await
         .map_err(|err| ApiErrorResponse::internal(err.to_string()))?;
@@ -795,6 +811,72 @@ async fn fetch_points(
         .await
 }
 
+async fn build_market_data_record_batch(
+    storage: &TimeSeriesStorage,
+) -> anyhow::Result<RecordBatch> {
+    let symbols = storage.list_symbols().await?;
+
+    let mut timestamps = Vec::new();
+    let mut out_symbols = Vec::new();
+    let mut prices = Vec::new();
+    let mut volumes = Vec::new();
+    let mut bids = Vec::new();
+    let mut asks = Vec::new();
+    let mut opens = Vec::new();
+    let mut highs = Vec::new();
+    let mut lows = Vec::new();
+
+    for symbol in symbols {
+        if let Some(series) = storage.get_series(&symbol).await? {
+            for point in series.data {
+                let metadata = point.metadata.as_ref().and_then(|meta| meta.as_object());
+
+                timestamps.push(point.timestamp.timestamp_millis());
+                out_symbols.push(symbol.clone());
+                prices.push(point.value);
+                volumes.push(point.volume);
+                bids.push(metadata.and_then(|m| m.get("bid").and_then(|v| v.as_f64())));
+                asks.push(metadata.and_then(|m| m.get("ask").and_then(|v| v.as_f64())));
+                opens.push(metadata.and_then(|m| m.get("open").and_then(|v| v.as_f64())));
+                highs.push(metadata.and_then(|m| m.get("high").and_then(|v| v.as_f64())));
+                lows.push(metadata.and_then(|m| m.get("low").and_then(|v| v.as_f64())));
+            }
+        }
+    }
+
+    let schema = Arc::new(datafusion::arrow::datatypes::Schema::new(vec![
+        datafusion::arrow::datatypes::Field::new(
+            "timestamp",
+            DataType::Timestamp(TimeUnit::Millisecond, None),
+            false,
+        ),
+        datafusion::arrow::datatypes::Field::new("symbol", DataType::Utf8, false),
+        datafusion::arrow::datatypes::Field::new("price", DataType::Float64, false),
+        datafusion::arrow::datatypes::Field::new("volume", DataType::UInt64, true),
+        datafusion::arrow::datatypes::Field::new("bid", DataType::Float64, true),
+        datafusion::arrow::datatypes::Field::new("ask", DataType::Float64, true),
+        datafusion::arrow::datatypes::Field::new("open", DataType::Float64, true),
+        datafusion::arrow::datatypes::Field::new("high", DataType::Float64, true),
+        datafusion::arrow::datatypes::Field::new("low", DataType::Float64, true),
+    ]));
+
+    RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(TimestampMillisecondArray::from(timestamps)) as ArrayRef,
+            Arc::new(StringArray::from(out_symbols)) as ArrayRef,
+            Arc::new(Float64Array::from(prices)) as ArrayRef,
+            Arc::new(UInt64Array::from(volumes)) as ArrayRef,
+            Arc::new(Float64Array::from(bids)) as ArrayRef,
+            Arc::new(Float64Array::from(asks)) as ArrayRef,
+            Arc::new(Float64Array::from(opens)) as ArrayRef,
+            Arc::new(Float64Array::from(highs)) as ArrayRef,
+            Arc::new(Float64Array::from(lows)) as ArrayRef,
+        ],
+    )
+    .map_err(Into::into)
+}
+
 fn record_batches_to_json(batches: &[RecordBatch]) -> anyhow::Result<serde_json::Value> {
     let mut rows = Vec::new();
 
@@ -824,6 +906,14 @@ fn array_value_to_json(array: &ArrayRef, row_idx: usize) -> anyhow::Result<serde
         DataType::Utf8 => {
             let array = array.as_any().downcast_ref::<StringArray>().unwrap();
             Ok(serde_json::Value::String(array.value(row_idx).to_string()))
+        }
+        DataType::Int64 => {
+            let array = array.as_any().downcast_ref::<Int64Array>().unwrap();
+            Ok(serde_json::Value::Number(array.value(row_idx).into()))
+        }
+        DataType::UInt64 => {
+            let array = array.as_any().downcast_ref::<UInt64Array>().unwrap();
+            Ok(serde_json::Value::Number(array.value(row_idx).into()))
         }
         DataType::Float64 => {
             let array = array.as_any().downcast_ref::<Float64Array>().unwrap();
@@ -863,6 +953,7 @@ fn init_tracing(config: &TelemetryConfig) -> anyhow::Result<()> {
 }
 
 /// 统一的 API 错误响应
+#[derive(Debug)]
 struct ApiErrorResponse {
     status: StatusCode,
     message: String,
@@ -912,6 +1003,12 @@ impl IntoResponse for ApiErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::extract::State;
+    use std::sync::Arc;
+
+    fn test_config() -> Arc<AppConfig> {
+        Arc::new(AppConfig::default())
+    }
 
     #[test]
     fn test_performance_metrics_basic() {
@@ -931,5 +1028,55 @@ mod tests {
         assert!(metrics.total_return > 0.0);
         assert!(metrics.annualized_return > 0.0);
         assert!(metrics.volatility >= 0.0);
+    }
+
+    #[tokio::test]
+    async fn execute_query_reads_registered_market_data_table() {
+        let state = Arc::new(AppState::new(test_config()).await);
+        let now = Utc::now();
+
+        state
+            .storage
+            .add_market_data_batch(&[
+                MarketData {
+                    symbol: "AAPL".to_string(),
+                    timestamp: now,
+                    price: 100.0,
+                    volume: 10,
+                    bid: Some(99.5),
+                    ask: Some(100.5),
+                    open: Some(98.0),
+                    high: Some(101.0),
+                    low: Some(97.5),
+                },
+                MarketData {
+                    symbol: "AAPL".to_string(),
+                    timestamp: now + Duration::minutes(1),
+                    price: 102.0,
+                    volume: 20,
+                    bid: Some(101.5),
+                    ask: Some(102.5),
+                    open: Some(100.0),
+                    high: Some(103.0),
+                    low: Some(99.0),
+                },
+            ])
+            .await
+            .unwrap();
+
+        let Json(response) = execute_query(
+            State(state),
+            Json(QueryRequest {
+                query: "SELECT symbol, MAX(price) AS max_price, SUM(volume) AS total_volume FROM market_data GROUP BY symbol".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(response.success);
+        assert_eq!(response.row_count, 1);
+        assert_eq!(response.data[0]["symbol"], "AAPL");
+        assert_eq!(response.data[0]["max_price"], 102.0);
+        assert_eq!(response.data[0]["total_volume"], 30);
     }
 }

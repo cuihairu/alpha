@@ -57,7 +57,7 @@
 
 ## 💾 存储与数据处理
 - [x] 集成 SQLx + TimescaleDB 实现时序数据存储
-- [ ] 使用 DataFusion + Arrow 构建内存分析引擎
+- [x] 使用 DataFusion + Arrow 构建内存分析引擎
 - [ ] 设计 Parquet 格式的数据湖存储架构
 - [ ] 实现基于 Redis 的分布式缓存和限流系统
 - [ ] 开发智能数据分区策略（时间、股票、交易所维度）
