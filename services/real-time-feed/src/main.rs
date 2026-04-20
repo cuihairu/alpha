@@ -11,6 +11,8 @@ use axum::{
     routing::get,
     Router,
 };
+use alpha_protocols::websocket::{channels, DataMessage, WsMessage};
+use alpha_storage::{RedisStreamQueue, StreamEnvelope};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -67,6 +69,12 @@ struct AppState {
     data_sender: broadcast::Sender<RealTimeData>,
 }
 
+const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
+const QUOTES_STREAM: &str = "quotes.raw";
+const NORMALIZED_QUOTES_STREAM: &str = "quotes.normalized";
+const QUOTES_DLQ_STREAM: &str = "quotes.dlq";
+const REALTIME_GROUP: &str = "real-time-feed";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 初始化日志
@@ -83,8 +91,14 @@ async fn main() -> anyhow::Result<()> {
         data_sender,
     });
 
-    // 启动数据生成器
-    start_data_generator(app_state.clone());
+    // 优先从 Redis Streams 消费；不可用时回退到本地模拟数据。
+    if let Err(err) = start_stream_consumer(app_state.clone()).await {
+        tracing::warn!(
+            "Redis stream consumer unavailable ({}), falling back to simulated feed",
+            err
+        );
+        start_data_generator(app_state.clone());
+    }
 
     // 构建 HTTP 路由
     let app = Router::new()
@@ -178,7 +192,13 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
     // 发送数据的任务
     let send_task = tokio::spawn(async move {
         while let Ok(data) = data_receiver.recv().await {
-            let message = match serde_json::to_string(&data) {
+            let ws_message = WsMessage::Data(DataMessage {
+                channel: channels::REAL_TIME_QUOTES.to_string(),
+                data: serde_json::to_value(&data).unwrap_or_default(),
+                timestamp: data.timestamp.timestamp_millis(),
+            });
+
+            let message = match serde_json::to_string(&ws_message) {
                 Ok(json) => Message::Text(json),
                 Err(e) => {
                     tracing::error!("Failed to serialize real-time data: {}", e);
@@ -245,6 +265,90 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
     tracing::info!("WebSocket connection closed: {}", connection_id);
 }
 
+async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
+    let redis_url = std::env::var("ALPHA_REDIS_URL")
+        .or_else(|_| std::env::var("REDIS_URL"))
+        .unwrap_or_else(|_| DEFAULT_REDIS_URL.to_string());
+    let queue = RedisStreamQueue::connect(&redis_url)?;
+    queue.ensure_consumer_group(QUOTES_STREAM, REALTIME_GROUP).await?;
+    let _ = queue
+        .ensure_consumer_group(NORMALIZED_QUOTES_STREAM, REALTIME_GROUP)
+        .await;
+    let consumer = format!("rtf-{}", uuid::Uuid::new_v4());
+
+    tokio::spawn(async move {
+        loop {
+            let normalized_messages = queue
+                .read_group(NORMALIZED_QUOTES_STREAM, REALTIME_GROUP, &consumer, 20, 1000)
+                .await;
+            let messages = match normalized_messages {
+                Ok(messages) if !messages.is_empty() => messages,
+                _ => match queue
+                    .read_group(QUOTES_STREAM, REALTIME_GROUP, &consumer, 20, 1000)
+                    .await
+                {
+                    Ok(messages) => messages,
+                    Err(err) => {
+                        tracing::warn!("Failed to poll Redis stream: {}", err);
+                        continue;
+                    }
+                },
+            };
+
+            for message in messages {
+                let stream_name = message.envelope.stream.clone();
+                if let Some(data) = envelope_to_realtime(&message.envelope) {
+                    if let Err(err) = app_state.data_sender.send(data) {
+                        tracing::debug!("Failed to fan out realtime data: {}", err);
+                    }
+                    if let Err(err) = queue.ack(&stream_name, REALTIME_GROUP, &message.id).await {
+                        tracing::warn!("Failed to ack stream message {}: {}", message.id, err);
+                    }
+                } else if let Err(err) = send_to_dlq(&queue, &message.envelope, "invalid realtime quote payload").await {
+                    tracing::warn!("Failed to send message {} to DLQ: {}", message.id, err);
+                } else if let Err(err) = queue.ack(&stream_name, REALTIME_GROUP, &message.id).await {
+                    tracing::warn!("Failed to ack DLQ'd message {}: {}", message.id, err);
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+fn envelope_to_realtime(envelope: &StreamEnvelope) -> Option<RealTimeData> {
+    let payload = envelope.payload.as_object()?;
+    Some(RealTimeData {
+        symbol: payload.get("symbol")?.as_str()?.to_string(),
+        price: payload.get("price")?.as_f64()?,
+        volume: payload.get("volume")?.as_u64()?,
+        change: payload.get("change")?.as_f64()?,
+        change_percent: payload.get("change_percent")?.as_f64()?,
+        timestamp: envelope.created_at,
+    })
+}
+
+async fn send_to_dlq(
+    queue: &RedisStreamQueue,
+    envelope: &StreamEnvelope,
+    reason: &str,
+) -> anyhow::Result<()> {
+    let mut payload = envelope.payload.clone();
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("dlq_reason".to_string(), serde_json::json!(reason));
+    }
+
+    let dlq_envelope = StreamEnvelope::new(
+        QUOTES_DLQ_STREAM,
+        envelope.event_type.clone(),
+        envelope.source.clone(),
+        envelope.symbol.clone(),
+        payload,
+    );
+    queue.publish(QUOTES_DLQ_STREAM, &dlq_envelope).await?;
+    Ok(())
+}
+
 /// 订阅消息
 #[derive(Debug, Deserialize)]
 struct SubscribeMessage {
@@ -304,5 +408,26 @@ mod tests {
 
         assert_eq!(data.symbol, deserialized.symbol);
         assert_eq!(data.price, deserialized.price);
+    }
+
+    #[test]
+    fn test_envelope_to_realtime() {
+        let envelope = StreamEnvelope::new(
+            QUOTES_STREAM,
+            "quote",
+            "collector",
+            Some("sz000001".to_string()),
+            serde_json::json!({
+                "symbol": "sz000001",
+                "price": 12.34,
+                "volume": 5000,
+                "change": 0.12,
+                "change_percent": 0.98
+            }),
+        );
+
+        let data = envelope_to_realtime(&envelope).unwrap();
+        assert_eq!(data.symbol, "sz000001");
+        assert_eq!(data.price, 12.34);
     }
 }

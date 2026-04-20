@@ -11,6 +11,7 @@ pub mod dal;
 pub mod disk_kv;
 pub mod postgres_kv;
 pub mod redis_kv;
+pub mod redis_streams;
 
 use alpha_core::errors::AlphaResult;
 
@@ -24,6 +25,7 @@ pub use dal::*;
 pub use disk_kv::*;
 pub use postgres_kv::*;
 pub use redis_kv::*;
+pub use redis_streams::*;
 
 /// 存储后端特征（对象安全版本）
 #[async_trait::async_trait]

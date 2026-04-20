@@ -35,7 +35,9 @@ anyhow = { workspace = true }
 # 内部包
 alpha-core = { workspace = true }
 alpha-protocols = { workspace = true }
+alpha-storage = { workspace = true }
 
 # 随机数生成（用于模拟数据）
 rand = "0.8"
 uuid = { workspace = true }
+redis = { workspace = true }

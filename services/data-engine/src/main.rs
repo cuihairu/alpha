@@ -12,7 +12,7 @@ use alpha_core::{
 };
 use alpha_storage::{
     clickhouse::{ClickHouseConfig, ClickHouseStorage},
-    TimeSeriesPoint, TimeSeriesStorage,
+    RedisStreamQueue, StreamEnvelope, TimeSeriesPoint, TimeSeriesStorage,
 };
 use axum::{
     extract::{Path, Query, State},
@@ -44,6 +44,11 @@ use tower_http::{
 mod grpc;
 mod settings;
 use settings::{AppConfig, ClickHouseSettings, TelemetryConfig};
+
+const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
+const RAW_QUOTES_STREAM: &str = "quotes.raw";
+const NORMALIZED_QUOTES_STREAM: &str = "quotes.normalized";
+const NORMALIZER_GROUP: &str = "data-engine-normalizer";
 
 #[derive(Clone)]
 struct AppState {
@@ -139,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
     if let Err(err) = state.seed_demo_data().await {
         tracing::warn!("Failed to seed demo data: {}", err);
     }
+    start_quote_normalizer(state.clone()).await?;
 
     let router = build_router(state.clone());
     let addr = config.server.addr.clone();
@@ -210,6 +216,90 @@ async fn initialize_clickhouse(settings: &ClickHouseSettings) -> Option<Arc<Clic
             None
         }
     }
+}
+
+async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
+    let redis_url = std::env::var("ALPHA_REDIS_URL")
+        .or_else(|_| std::env::var("REDIS_URL"))
+        .unwrap_or_else(|_| DEFAULT_REDIS_URL.to_string());
+    let queue = RedisStreamQueue::connect(&redis_url)?;
+    queue
+        .ensure_consumer_group(RAW_QUOTES_STREAM, NORMALIZER_GROUP)
+        .await?;
+    let consumer = format!("de-{}", uuid::Uuid::new_v4());
+
+    tokio::spawn(async move {
+        loop {
+            match queue
+                .read_group(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &consumer, 50, 1000)
+                .await
+            {
+                Ok(messages) => {
+                    for message in messages {
+                        match normalize_quote(&message.envelope) {
+                            Some(market_data) => {
+                                if let Err(err) = state.storage.add_market_data(&market_data).await {
+                                    tracing::warn!("Failed to write normalized quote to storage: {}", err);
+                                    continue;
+                                }
+
+                                let normalized = StreamEnvelope::new(
+                                    NORMALIZED_QUOTES_STREAM,
+                                    "normalized_quote",
+                                    "data-engine",
+                                    Some(market_data.symbol.clone()),
+                                    serde_json::to_value(&market_data).unwrap_or_default(),
+                                );
+
+                                if let Err(err) = queue.publish(NORMALIZED_QUOTES_STREAM, &normalized).await {
+                                    tracing::warn!("Failed to publish normalized quote: {}", err);
+                                    continue;
+                                }
+
+                                if let Err(err) = state.refresh_query_tables().await {
+                                    tracing::debug!("Failed to refresh query tables: {}", err);
+                                }
+
+                                if let Err(err) = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await {
+                                    tracing::warn!("Failed to ack raw quote {}: {}", message.id, err);
+                                }
+                            }
+                            None => {
+                                tracing::warn!("Skipping invalid raw quote message {}", message.id);
+                                let _ = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await;
+                            }
+                        }
+                    }
+                }
+                Err(err) => tracing::warn!("Quote normalizer read failed: {}", err),
+            }
+        }
+    });
+
+    Ok(())
+}
+
+fn normalize_quote(envelope: &StreamEnvelope) -> Option<MarketData> {
+    let payload = envelope.payload.as_object()?;
+    let symbol = payload.get("symbol")?.as_str()?.to_string();
+    let price = payload.get("price")?.as_f64()?;
+    let volume = payload.get("volume")?.as_u64()?;
+
+    if price <= 0.0 {
+        return None;
+    }
+
+    Some(MarketData {
+        symbol,
+        timestamp: envelope.ingest_ts,
+        price,
+        volume,
+        bid: payload.get("bid1").and_then(|v| v.as_f64()),
+        ask: payload.get("ask1").and_then(|v| v.as_f64()),
+        open: payload.get("open").and_then(|v| v.as_f64()),
+        high: payload.get("high").and_then(|v| v.as_f64()),
+        low: payload.get("low").and_then(|v| v.as_f64()),
+    })
 }
 
 /// 健康检查

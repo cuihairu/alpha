@@ -24,6 +24,7 @@ use axum::{
     middleware::Next,
     Router,
 };
+use alpha_storage::{RedisStreamQueue, StreamEnvelope};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -39,12 +40,16 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::multilang_simple::{CrawlerConfig, CrawlerLanguage, MultilangCrawler};
+use crate::sources::{CrawlerConfig as SourceCrawlerConfig, CrawlerError, DataSource, EastmoneySource};
 use crate::types::{
     TaskDefinition, TaskResult, TaskSource, TaskStatus, TaskPriority,
     TaskConfig, RequestConfig, ParserConfig, StorageConfig, RetryPolicy,
     AShareDataSource, HKShareDataSource, USShareDataSource,
     NewsDataSource,
 };
+
+const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
+const QUOTES_STREAM: &str = "quotes.raw";
 
 /// 简化版的数据收集器
 pub struct SimpleCollector {
@@ -119,6 +124,18 @@ pub struct TaskResponse {
     pub message: Option<String>,
     /// 创建时间
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PublishQuotesRequest {
+    pub symbols: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PublishQuotesResponse {
+    pub stream: String,
+    pub requested: usize,
+    pub published: usize,
 }
 
 /// 健康检查响应
@@ -401,6 +418,54 @@ impl SimpleCollector {
         }
     }
 
+    pub async fn publish_realtime_quotes(
+        &self,
+        symbols: &[String],
+    ) -> Result<PublishQuotesResponse, String> {
+        if symbols.is_empty() {
+            return Err("symbols cannot be empty".to_string());
+        }
+
+        let quotes = self.fetch_quotes(symbols).await?;
+        let redis_url = std::env::var("ALPHA_REDIS_URL")
+            .or_else(|_| std::env::var("REDIS_URL"))
+            .unwrap_or_else(|_| DEFAULT_REDIS_URL.to_string());
+        let queue = RedisStreamQueue::connect(&redis_url).map_err(|e| e.to_string())?;
+
+        let mut published = 0usize;
+        for quote in quotes {
+            let envelope = StreamEnvelope::new(
+                QUOTES_STREAM,
+                "quote",
+                quote.source.clone(),
+                Some(quote.symbol.clone()),
+                serde_json::to_value(&quote).map_err(|e| e.to_string())?,
+            );
+            queue
+                .publish(QUOTES_STREAM, &envelope)
+                .await
+                .map_err(|e| e.to_string())?;
+            published += 1;
+        }
+
+        Ok(PublishQuotesResponse {
+            stream: QUOTES_STREAM.to_string(),
+            requested: symbols.len(),
+            published,
+        })
+    }
+
+    async fn fetch_quotes(
+        &self,
+        symbols: &[String],
+    ) -> Result<Vec<crate::sources::RealtimeQuote>, String> {
+        let source = EastmoneySource::new(SourceCrawlerConfig::default());
+        source
+            .get_realtime_quotes(symbols)
+            .await
+            .map_err(map_crawler_error)
+    }
+
     /// 解析任务来源
     async fn parse_task_source(&self, source_type: &str, url: &str) -> Result<TaskSource, String> {
         match source_type.to_lowercase().as_str() {
@@ -657,6 +722,7 @@ pub fn build_router(collector: Arc<SimpleCollector>) -> Router {
         .route("/tasks/:id", get(get_task_status))
         .route("/tasks", get(list_tasks))
         .route("/tasks/:id/execute", post(execute_task))
+        .route("/streams/quotes/publish", post(publish_quotes))
         .route("/stats", get(get_stats))
         .route("/events", get(sse_events))
         .with_state(collector)
@@ -776,6 +842,19 @@ async fn execute_task(
     }
 }
 
+async fn publish_quotes(
+    State(collector): State<Arc<SimpleCollector>>,
+    Json(request): Json<PublishQuotesRequest>,
+) -> impl IntoResponse {
+    match collector.publish_realtime_quotes(&request.symbols).await {
+        Ok(response) => (StatusCode::OK, Json(serde_json::to_value(response).unwrap_or_default())),
+        Err(error) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "error": error })),
+        ),
+    }
+}
+
 /// 获取统计信息端点
 async fn get_stats(
     State(collector): State<Arc<SimpleCollector>>,
@@ -858,6 +937,13 @@ mod tests {
         assert_eq!(language, CrawlerLanguage::Python);
     }
 
+    #[tokio::test]
+    async fn publish_quotes_rejects_empty_symbols() {
+        let collector = SimpleCollector::new("/tmp/test_collector");
+        let err = collector.publish_realtime_quotes(&[]).await.unwrap_err();
+        assert!(err.contains("symbols cannot be empty"));
+    }
+
     #[test]
     fn test_script_code_generation() {
         let collector = SimpleCollector::new("/tmp");
@@ -883,5 +969,16 @@ mod tests {
         let shell_code = collector.generate_script_code(&task, &CrawlerLanguage::Shell);
         assert!(shell_code.contains("curl"));
         assert!(shell_code.contains(&task.config.request.url));
+    }
+}
+
+fn map_crawler_error(err: CrawlerError) -> String {
+    match err {
+        CrawlerError::RequestError(msg) => format!("request error: {}", msg),
+        CrawlerError::ParseError(msg) => format!("parse error: {}", msg),
+        CrawlerError::SourceError(msg) => format!("source error: {}", msg),
+        CrawlerError::RateLimited => "rate limited".to_string(),
+        CrawlerError::Timeout => "crawler timeout".to_string(),
+        CrawlerError::InvalidData(msg) => format!("invalid data: {}", msg),
     }
 }

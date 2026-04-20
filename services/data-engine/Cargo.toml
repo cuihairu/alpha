@@ -41,6 +41,7 @@ anyhow = { workspace = true }
 
 # 时间处理
 chrono = { workspace = true }
+uuid = { workspace = true }
 
 # 内部包
 alpha-core = { workspace = true }
