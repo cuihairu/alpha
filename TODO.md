@@ -1,5 +1,26 @@
 # TODO
 
+## 🎯 优先级行动清单（2026-09-27 现状分析产出，详见 docs/analysis.md）
+
+### P0 打通并守住端到端管线
+- [ ] 修复 normalized 行情被误入 DLQ（real-time-feed 对 change/change_percent 容错 + data-engine 保留原始字段）
+- [ ] 新增 Redis Streams 管线集成测试（REDIS_TEST_URL 门控）：raw→normalized→realtime 全链路断言
+- [ ] normalize_quote 抽纯函数并补单测
+
+### P1 修部署口径
+- [ ] collector 端口统一为 8083（env 可配），对齐 compose/Dockerfile/dev-start
+- [ ] compose 补 REDIS_URL（real-time-feed/collector）与 ALPHA__CLICKHOUSE__*（data-engine）
+- [ ] 修 collector Dockerfile workspace 拷贝不完整问题
+
+### P2 数据落地
+- [ ] data-engine 按 storage.persistence_enabled/timescale_url 装配 Timescale 落库（当前配置项存在但从未使用）
+- [ ] normalized 层去重（payload_hash）与 MemTable 全量重建热点优化
+
+### P3 补对外链路
+- [ ] api-gateway 真实反代 data-engine/real-time-feed（当前 health/proxy 全是 mock）
+- [ ] web 前端接 real-time-feed WS + data-engine REST
+- [ ] 清理 collector 未挂载死模块与根目录孤儿文件（src/、tests/clickhouse_test.rs）
+
 ## 🌍 跨平台 Rust 架构设计
 - [ ] 设计统一跨平台架构（packages/、services/、web/、desktop/、mobile/）
 - [ ] 配置 Cargo workspace 支持多目标平台构建
