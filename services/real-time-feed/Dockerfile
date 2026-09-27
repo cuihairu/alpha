@@ -9,10 +9,8 @@ RUN apt-get update && apt-get install -y \
 # 设置工作目录
 WORKDIR /app
 
-# 复制 Cargo 文件
-COPY Cargo.toml Cargo.lock ./
-COPY packages/ ./packages/
-COPY services/real-time-feed ./services/real-time-feed/
+# 复制完整 workspace（workspace 成员清单在根 Cargo.toml，其他成员的 manifest 也必须存在才能解析）
+COPY . .
 
 # 构建实时数据流服务
 RUN cargo build --release -p alpha-real-time-feed

@@ -2,15 +2,18 @@
 
 ## 🎯 优先级行动清单（2026-09-27 现状分析产出，详见 docs/analysis.md）
 
-### P0 打通并守住端到端管线
-- [ ] 修复 normalized 行情被误入 DLQ（real-time-feed 对 change/change_percent 容错 + data-engine 保留原始字段）
-- [ ] 新增 Redis Streams 管线集成测试（REDIS_TEST_URL 门控）：raw→normalized→realtime 全链路断言
-- [ ] normalize_quote 抽纯函数并补单测
+### P0 打通并守住端到端管线 ✅ 2026-09-27
+- [x] 修复 normalized 行情被误入 DLQ（real-time-feed 对 change/change_percent 容错 + data-engine 保留原始字段）
+- [x] 新增 Redis Streams 管线集成测试（REDIS_TEST_URL 门控）：raw→normalized→realtime 全链路断言
+- [x] normalize_quote 抽纯函数并补单测
+- [x] 修 read_latest 的 XREVRANGE 解析崩溃（StreamRangeReply）
+- [x] 本机真实 Redis 进程级 E2E 验证：raw→normalized→API history，DLQ 为空
 
-### P1 修部署口径
-- [ ] collector 端口统一为 8083（env 可配），对齐 compose/Dockerfile/dev-start
-- [ ] compose 补 REDIS_URL（real-time-feed/collector）与 ALPHA__CLICKHOUSE__*（data-engine）
-- [ ] 修 collector Dockerfile workspace 拷贝不完整问题
+### P1 修部署口径 ✅ 2026-09-27
+- [x] collector 端口统一为 8083（env 可配：ALPHA_COLLECTOR_BIND），对齐 compose/Dockerfile/dev-start
+- [x] compose 补 REDIS_URL（real-time-feed/collector）与 ALPHA__CLICKHOUSE__*（data-engine），并加 depends_on redis
+- [x] 修 4 个服务 Dockerfile workspace 拷贝不完整问题（改为 COPY . + .dockerignore）
+- [ ] （新发现）normalize 解码失败的消息滞留消费组 PEL 永不清理：需解码失败 → DLQ + ack，或周期 XAUTOCLAIM
 
 ### P2 数据落地
 - [ ] data-engine 按 storage.persistence_enabled/timescale_url 装配 Timescale 落库（当前配置项存在但从未使用）

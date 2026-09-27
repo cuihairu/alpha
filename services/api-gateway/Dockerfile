@@ -9,10 +9,8 @@ RUN apt-get update && apt-get install -y \
 # 设置工作目录
 WORKDIR /app
 
-# 复制 Cargo 文件
-COPY Cargo.toml Cargo.lock ./
-COPY packages/ ./packages/
-COPY services/api-gateway ./services/api-gateway/
+# 复制完整 workspace（workspace 成员清单在根 Cargo.toml，其他成员的 manifest 也必须存在才能解析）
+COPY . .
 
 # 构建 API 网关
 RUN cargo build --release -p alpha-api-gateway

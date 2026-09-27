@@ -24,7 +24,10 @@ async fn main() -> Result<()> {
 
     let router = alpha_collector::main_simple::build_router(Arc::new(collector));
 
-    let addr: SocketAddr = "0.0.0.0:3000".parse()?;
+    // 与 docker-compose/Dockerfile/dev-start 的约定一致（8083），可用 ALPHA_COLLECTOR_BIND 覆盖
+    let addr: SocketAddr = std::env::var("ALPHA_COLLECTOR_BIND")
+        .unwrap_or_else(|_| "0.0.0.0:8083".to_string())
+        .parse()?;
     info!("Collector service listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

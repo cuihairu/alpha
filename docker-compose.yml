@@ -98,6 +98,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - ALPHA__STORAGE__PERSISTENCE_ENABLED=true
       - ALPHA__STORAGE__TIMESCALE_URL=postgres://postgres:postgres@timescaledb:5432/alpha_finance
+      # settings.rs 前缀是 ALPHA__，CLICKHOUSE_* 直通变量不会生效；显式打开 ClickHouse 后端
+      - ALPHA__CLICKHOUSE__ENABLED=true
+      - ALPHA__CLICKHOUSE__URL=http://admin:admin123@clickhouse:8123
+      - ALPHA__CLICKHOUSE__DATABASE=alpha_finance
+      - ALPHA__CLICKHOUSE__USER=admin
+      - ALPHA__CLICKHOUSE__PASSWORD=admin123
       - RUST_LOG=info
     depends_on:
       - timescaledb
@@ -116,7 +122,10 @@ services:
     ports:
       - "8082:8082"
     environment:
+      - REDIS_URL=redis://redis:6379
       - RUST_LOG=info
+    depends_on:
+      - redis
     networks:
       - alpha-network
     restart: unless-stopped
@@ -130,11 +139,13 @@ services:
     ports:
       - "8083:8083"
     environment:
+      - REDIS_URL=redis://redis:6379
       - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
       - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
       - TIMESCALE_URL=postgres://postgres:postgres@timescaledb:5432/alpha_finance
       - RUST_LOG=info
     depends_on:
+      - redis
       - timescaledb
       - clickhouse
     networks:
