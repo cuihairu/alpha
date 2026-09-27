@@ -57,6 +57,35 @@ pub struct StreamMessage {
     pub envelope: StreamEnvelope,
 }
 
+/// 一条无法解码为 `StreamEnvelope` 的流条目。
+/// 由消费者按 DLQ 契约处置（publish_dlq + ack），避免滞留消费组 PEL。
+#[derive(Debug, Clone)]
+pub struct InvalidMessage {
+    /// Redis stream 条目 ID
+    pub id: String,
+    /// 来源 stream
+    pub stream: String,
+    /// 解码失败原因（人类可读，写入 DLQ 载荷的 dlq_reason）
+    pub reason: String,
+    /// 原始 payload 内容（存在且为字符串时保留，便于回溯）
+    pub raw_payload: Option<String>,
+    /// 条目其余原始字段（source/symbol 等顶层字段仍可提取）
+    pub fields: BTreeMap<String, String>,
+}
+
+/// 一次消费组读取的结果：可正常解码的消息 + 无法解码的条目。
+#[derive(Debug, Clone)]
+pub struct GroupRead {
+    pub messages: Vec<StreamMessage>,
+    pub invalid: Vec<InvalidMessage>,
+}
+
+impl GroupRead {
+    pub fn is_empty(&self) -> bool {
+        self.messages.is_empty() && self.invalid.is_empty()
+    }
+}
+
 impl RedisStreamQueue {
     pub fn connect(connection_string: &str) -> AlphaResult<Self> {
         let client = redis::Client::open(connection_string)
@@ -167,7 +196,7 @@ impl RedisStreamQueue {
         consumer: &str,
         count: usize,
         block_ms: usize,
-    ) -> AlphaResult<Vec<StreamMessage>> {
+    ) -> AlphaResult<GroupRead> {
         let mut conn = self.get_conn().await?;
         let options = StreamReadOptions::default()
             .group(group, consumer)
@@ -178,23 +207,76 @@ impl RedisStreamQueue {
             .await
             .map_err(|e| AlphaError::StorageError(format!("redis XREADGROUP failed: {e}")))?;
 
-        let mut messages = Vec::new();
+        let mut result = GroupRead {
+            messages: Vec::new(),
+            invalid: Vec::new(),
+        };
         for key in entries.keys {
             for entry in key.ids {
-                let fields = entry
+                let field_pairs = entry
                     .map
                     .into_iter()
-                    .filter_map(|(k, v)| redis::from_redis_value::<String>(&v).ok().map(|vv| (k, vv)))
+                    .filter_map(|(k, v)| {
+                        redis::from_redis_value::<String>(&v)
+                            .ok()
+                            .map(|vv| (k, vv))
+                    })
                     .collect::<Vec<_>>();
-                if let Some(envelope) = Self::decode_envelope(&key.key, &entry.id, fields)? {
-                    messages.push(StreamMessage {
+                let fields: BTreeMap<String, String> =
+                    field_pairs.iter().cloned().collect();
+
+                match Self::decode_envelope(&key.key, &entry.id, field_pairs) {
+                    Ok(Some(envelope)) => result.messages.push(StreamMessage {
                         id: entry.id,
                         envelope,
-                    });
+                    }),
+                    // 单条条目解码失败不再让整批读取报错（此前会导致消息滞留 PEL 永不清理），
+                    // 而是作为 invalid 交给消费者按 DLQ 契约处置。
+                    Ok(None) => result.invalid.push(InvalidMessage {
+                        id: entry.id,
+                        stream: key.key.clone(),
+                        reason: "missing `payload` field".to_string(),
+                        raw_payload: None,
+                        fields,
+                    }),
+                    Err(err) => result.invalid.push(InvalidMessage {
+                        id: entry.id,
+                        stream: key.key.clone(),
+                        reason: err.to_string(),
+                        raw_payload: fields.get("payload").cloned(),
+                        fields,
+                    }),
                 }
             }
         }
-        Ok(messages)
+        Ok(result)
+    }
+
+    /// 将一条无法解码的条目投递到独立 DLQ stream（仓库契约：`quotes.dlq` 这类独立 stream）。
+    /// 载荷保留失败原因、原始 stream/条目 ID 与原 payload，便于回溯与人工排查。
+    pub async fn publish_dlq(
+        &self,
+        dlq_stream: &str,
+        invalid: &InvalidMessage,
+    ) -> AlphaResult<String> {
+        let payload = serde_json::json!({
+            "dlq_reason": invalid.reason,
+            "original_stream": invalid.stream,
+            "entry_id": invalid.id,
+            "original_payload": invalid.raw_payload,
+        });
+        let envelope = StreamEnvelope::new(
+            dlq_stream,
+            "invalid_message",
+            invalid
+                .fields
+                .get("source")
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string()),
+            invalid.fields.get("symbol").cloned(),
+            payload,
+        );
+        self.publish(dlq_stream, &envelope).await
     }
 
     pub async fn ack(&self, stream: &str, group: &str, id: &str) -> AlphaResult<()> {

@@ -141,17 +141,19 @@ async fn consumer_group_delivers_and_acks_messages() {
         .read_group(&stream, "grp", "consumer-1", 10, 100)
         .await
         .unwrap();
-    assert_eq!(batch1.len(), 2);
+    assert_eq!(batch1.messages.len(), 2);
+    assert!(batch1.invalid.is_empty());
 
     // ack 后同一消费者再次读取不应拿到已确认消息
-    for message in &batch1 {
+    for message in &batch1.messages {
         queue.ack(&stream, "grp", &message.id).await.unwrap();
     }
     let batch2 = queue
         .read_group(&stream, "grp", "consumer-1", 10, 100)
         .await
         .unwrap();
-    assert!(batch2.is_empty());
+    assert!(batch2.messages.is_empty());
+    assert!(batch2.invalid.is_empty());
 
     // 空读应在 block 窗口内快速返回而不是挂死
     let started = std::time::Instant::now();
@@ -178,8 +180,103 @@ async fn group_created_at_zero_reads_history() {
         .read_group(&stream, "late-grp", "consumer-1", 10, 100)
         .await
         .unwrap();
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].envelope.payload["symbol"], "600519");
+    assert_eq!(messages.messages.len(), 1);
+    assert_eq!(messages.messages[0].envelope.payload["symbol"], "600519");
 
     cleanup(&url, &[&stream]).await;
+}
+
+/// 读取消费组 PEL 中未确认消息数（XPENDING 摘要的第一个元素）。
+async fn pending_count(url: &str, stream: &str, group: &str) -> i64 {
+    let mut conn = raw_conn(url).await;
+    let reply: redis::Value = redis::cmd("XPENDING")
+        .arg(stream)
+        .arg(group)
+        .query_async(&mut conn)
+        .await
+        .expect("XPENDING");
+    match reply {
+        redis::Value::Bulk(items) => match items.first() {
+            Some(redis::Value::Int(n)) => *n,
+            other => panic!("unexpected XPENDING first element: {other:?}"),
+        },
+        other => panic!("unexpected XPENDING reply: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn undecodable_entries_are_surfaced_not_poisoning_the_group() {
+    let Some((queue, url)) = test_queue() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+
+    let stream = unique_stream("quarantine");
+    let dlq_stream = unique_stream("quarantine-dlq");
+    queue.ensure_consumer_group(&stream, "grp").await.unwrap();
+
+    // 1 条合法消息 + 1 条 payload 为垃圾 JSON + 1 条完全没有 payload 字段
+    queue.publish(&stream, &sample_envelope(&stream, "000001", 10.0)).await.unwrap();
+    let mut conn = raw_conn(&url).await;
+    let _: String = redis::cmd("XADD")
+        .arg(&stream)
+        .arg("*")
+        .arg("event_type")
+        .arg("quote")
+        .arg("payload")
+        .arg("this is not json")
+        .query_async(&mut conn)
+        .await
+        .unwrap();
+    let _: String = redis::cmd("XADD")
+        .arg(&stream)
+        .arg("*")
+        .arg("event_type")
+        .arg("quote")
+        .arg("note")
+        .arg("no payload field")
+        .query_async(&mut conn)
+        .await
+        .unwrap();
+
+    let result = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    assert_eq!(result.messages.len(), 1, "valid message must still be delivered");
+    assert_eq!(result.invalid.len(), 2, "both undecodable entries must be surfaced");
+
+    // 消费者按 DLQ 契约隔离（publish_dlq + ack）
+    for invalid in &result.invalid {
+        if invalid.raw_payload.is_some() {
+            assert!(invalid.reason.contains("decode"), "reason: {}", invalid.reason);
+            assert_eq!(invalid.raw_payload.as_deref(), Some("this is not json"));
+        } else {
+            assert!(invalid.reason.contains("payload"), "reason: {}", invalid.reason);
+        }
+        queue.publish_dlq(&dlq_stream, invalid).await.unwrap();
+        queue.ack(&stream, "grp", &invalid.id).await.unwrap();
+    }
+    for message in &result.messages {
+        queue.ack(&stream, "grp", &message.id).await.unwrap();
+    }
+
+    // PEL 清空：解码失败的消息不再永久滞留
+    assert_eq!(pending_count(&url, &stream, "grp").await, 0);
+
+    // 再次读取：合法与非法条目都已被消费，组内无剩余
+    let again = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    assert!(again.is_empty());
+
+    // DLQ 上能看到两条带原因的隔离条目
+    let dlq_messages = queue.read_latest(&dlq_stream, 10).await.unwrap();
+    assert_eq!(dlq_messages.len(), 2);
+    for message in &dlq_messages {
+        assert_eq!(message.envelope.event_type, "invalid_message");
+        let reason = message.envelope.payload["dlq_reason"].as_str().unwrap();
+        assert!(
+            reason.contains("decode") || reason.contains("payload"),
+            "unexpected dlq_reason: {reason}"
+        );
+        assert!(!message.envelope.payload["entry_id"].is_null());
+    }
+
+    cleanup(&url, &[&stream, &dlq_stream]).await;
 }

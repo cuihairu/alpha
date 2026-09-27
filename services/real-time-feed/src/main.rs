@@ -278,16 +278,16 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
 
     tokio::spawn(async move {
         loop {
-            let normalized_messages = queue
+            let normalized_result = queue
                 .read_group(NORMALIZED_QUOTES_STREAM, REALTIME_GROUP, &consumer, 20, 1000)
                 .await;
-            let messages = match normalized_messages {
-                Ok(messages) if !messages.is_empty() => messages,
+            let result = match normalized_result {
+                Ok(result) if !result.is_empty() => result,
                 _ => match queue
                     .read_group(QUOTES_STREAM, REALTIME_GROUP, &consumer, 20, 1000)
                     .await
                 {
-                    Ok(messages) => messages,
+                    Ok(result) => result,
                     Err(err) => {
                         tracing::warn!("Failed to poll Redis stream: {}", err);
                         continue;
@@ -295,7 +295,25 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
                 },
             };
 
-            for message in messages {
+            // 无法解码的条目：按 DLQ 契约隔离（quotes.dlq）并 ack，
+            // 避免滞留消费组 PEL 永不清理；DLQ 发布失败则不 ack，留待下轮重试。
+            for invalid in result.invalid {
+                tracing::warn!(
+                    "Quarantining undecodable message {} on {}: {}",
+                    invalid.id,
+                    invalid.stream,
+                    invalid.reason
+                );
+                if let Err(err) = queue.publish_dlq(QUOTES_DLQ_STREAM, &invalid).await {
+                    tracing::warn!("Failed to publish undecodable message to DLQ: {}", err);
+                    continue;
+                }
+                if let Err(err) = queue.ack(&invalid.stream, REALTIME_GROUP, &invalid.id).await {
+                    tracing::warn!("Failed to ack quarantined message {}: {}", invalid.id, err);
+                }
+            }
+
+            for message in result.messages {
                 let stream_name = message.envelope.stream.clone();
                 if let Some(data) = envelope_to_realtime(&message.envelope) {
                     if let Err(err) = app_state.data_sender.send(data) {

@@ -13,7 +13,8 @@
 - [x] collector 端口统一为 8083（env 可配：ALPHA_COLLECTOR_BIND），对齐 compose/Dockerfile/dev-start
 - [x] compose 补 REDIS_URL（real-time-feed/collector）与 ALPHA__CLICKHOUSE__*（data-engine），并加 depends_on redis
 - [x] 修 4 个服务 Dockerfile workspace 拷贝不完整问题（改为 COPY . + .dockerignore）
-- [ ] （新发现）normalize 解码失败的消息滞留消费组 PEL 永不清理：需解码失败 → DLQ + ack，或周期 XAUTOCLAIM
+- [x] （新发现）解码失败的消息滞留消费组 PEL 永不清理：read_group 改为返回 GroupRead{messages, invalid}，消费者按 DLQ 契约隔离（publish_dlq + ack，quotes.dlq），DLQ 发布失败时不 ack 留待重试（✅ 2026-09-27，见 P2）
+- [ ] （未来项）消费端崩溃遗留的孤儿 pending 消息：数据引擎/实时推送进程若在处理中崩溃，已投递未 ack 的消息会滞留 PEL，需周期 XAUTOCLAIM 兜底（与解码失败是两回事，本轮明确不做）
 
 ### P2 数据落地
 - [ ] data-engine 按 storage.persistence_enabled/timescale_url 装配 Timescale 落库（当前配置项存在但从未使用）

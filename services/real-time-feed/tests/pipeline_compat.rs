@@ -92,14 +92,15 @@ async fn consume_and_convert(
 ) -> Option<(String, f64, u64, f64, f64)> {
     queue.ensure_consumer_group(stream, "real-time-feed").await.unwrap();
     let consumer = format!("rtf-test-{}", uuid::Uuid::new_v4());
-    let messages = queue
+    let result = queue
         .read_group(stream, "real-time-feed", &consumer, 10, 500)
         .await
         .unwrap();
-    assert_eq!(messages.len(), 1, "expected exactly one message on {}", stream);
+    assert!(result.invalid.is_empty(), "expected no undecodable entries on {}", stream);
+    assert_eq!(result.messages.len(), 1, "expected exactly one message on {}", stream);
 
-    let converted = realtime_from_payload(&messages[0].envelope.payload);
-    queue.ack(stream, "real-time-feed", &messages[0].id).await.unwrap();
+    let converted = realtime_from_payload(&result.messages[0].envelope.payload);
+    queue.ack(stream, "real-time-feed", &result.messages[0].id).await.unwrap();
     converted
 }
 
@@ -184,33 +185,114 @@ async fn malformed_message_follows_dlq_policy() {
     queue.publish(&stream, &envelope).await.unwrap();
 
     queue.ensure_consumer_group(&stream, "real-time-feed").await.unwrap();
-    let messages = queue
+    let result = queue
         .read_group(&stream, "real-time-feed", "rtf-test", 10, 500)
         .await
         .unwrap();
-    assert_eq!(messages.len(), 1);
+    assert_eq!(result.messages.len(), 1);
 
-    let converted = realtime_from_payload(&messages[0].envelope.payload);
+    let converted = realtime_from_payload(&result.messages[0].envelope.payload);
     assert!(converted.is_none(), "malformed message must fail conversion and hit DLQ path");
 
-    let mut payload = messages[0].envelope.payload.clone();
+    let mut payload = result.messages[0].envelope.payload.clone();
     if let Some(obj) = payload.as_object_mut() {
         obj.insert("dlq_reason".to_string(), serde_json::json!("invalid realtime quote payload"));
     }
     let dlq_envelope = StreamEnvelope::new(
         &dlq_stream,
-        messages[0].envelope.event_type.clone(),
-        messages[0].envelope.source.clone(),
-        messages[0].envelope.symbol.clone(),
+        result.messages[0].envelope.event_type.clone(),
+        result.messages[0].envelope.source.clone(),
+        result.messages[0].envelope.symbol.clone(),
         payload,
     );
     queue.publish(&dlq_stream, &dlq_envelope).await.unwrap();
-    queue.ack(&stream, "real-time-feed", &messages[0].id).await.unwrap();
+    queue.ack(&stream, "real-time-feed", &result.messages[0].id).await.unwrap();
 
     let dlq_messages = queue.read_latest(&dlq_stream, 10).await.unwrap();
     assert_eq!(dlq_messages.len(), 1);
     assert_eq!(dlq_messages[0].envelope.payload["dlq_reason"], "invalid realtime quote payload");
     assert_eq!(dlq_messages[0].envelope.payload["symbol"], "000001");
+
+    cleanup(&url, &[&stream, &dlq_stream]).await;
+}
+
+#[tokio::test]
+async fn undecodable_entry_is_quarantined_and_acked() {
+    // 回归守护：损坏生产者写出的垃圾 payload 曾导致整批读取失败、
+    // 消息滞留消费组 PEL 永不清理；现在应被隔离到 DLQ 并 ack（与 main.rs 消费循环同构）。
+    let Some(url) = test_redis_url() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+    let queue = RedisStreamQueue::connect(&url).unwrap();
+
+    let stream = unique_stream("undecodable");
+    let dlq_stream = unique_stream("undecodable-dlq");
+
+    let mut conn = redis::Client::open(url.as_str())
+        .unwrap()
+        .get_connection_manager()
+        .await
+        .unwrap();
+    let _: String = redis::cmd("XADD")
+        .arg(&stream)
+        .arg("*")
+        .arg("event_type")
+        .arg("quote")
+        .arg("payload")
+        .arg("{not json")
+        .query_async(&mut conn)
+        .await
+        .unwrap();
+
+    queue.ensure_consumer_group(&stream, "real-time-feed").await.unwrap();
+    let result = queue
+        .read_group(&stream, "real-time-feed", "rtf-test", 10, 500)
+        .await
+        .unwrap();
+    assert!(result.messages.is_empty());
+    assert_eq!(result.invalid.len(), 1, "undecodable entry must be surfaced, not fail the batch");
+
+    // 消费者隔离路径：publish_dlq + ack
+    let invalid = &result.invalid[0];
+    assert!(invalid.reason.contains("decode"), "reason: {}", invalid.reason);
+    assert_eq!(invalid.raw_payload.as_deref(), Some("{not json"));
+    queue.publish_dlq(&dlq_stream, invalid).await.unwrap();
+    queue.ack(&stream, "real-time-feed", &invalid.id).await.unwrap();
+
+    // PEL 清空，组内无剩余条目
+    let pending: redis::Value = redis::cmd("XPENDING")
+        .arg(&stream)
+        .arg("real-time-feed")
+        .query_async(&mut conn)
+        .await
+        .unwrap();
+    let count = match &pending {
+        redis::Value::Bulk(items) => match items.first() {
+            Some(redis::Value::Int(n)) => *n,
+            other => panic!("unexpected XPENDING first element: {other:?}"),
+        },
+        other => panic!("unexpected XPENDING reply: {other:?}"),
+    };
+    assert_eq!(count, 0, "quarantined message must not remain pending");
+    let again = queue
+        .read_group(&stream, "real-time-feed", "rtf-test-2", 10, 100)
+        .await
+        .unwrap();
+    assert!(again.is_empty());
+
+    // DLQ 条目带原因与原载荷
+    let dlq_messages = queue.read_latest(&dlq_stream, 10).await.unwrap();
+    assert_eq!(dlq_messages.len(), 1);
+    assert_eq!(dlq_messages[0].envelope.event_type, "invalid_message");
+    assert!(
+        dlq_messages[0].envelope.payload["dlq_reason"]
+            .as_str()
+            .unwrap()
+            .contains("decode")
+    );
+    assert_eq!(dlq_messages[0].envelope.payload["original_payload"], "{not json");
+    assert_eq!(dlq_messages[0].envelope.payload["original_stream"], stream);
 
     cleanup(&url, &[&stream, &dlq_stream]).await;
 }

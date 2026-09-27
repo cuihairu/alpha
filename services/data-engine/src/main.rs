@@ -49,6 +49,7 @@ const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
 const RAW_QUOTES_STREAM: &str = "quotes.raw";
 const NORMALIZED_QUOTES_STREAM: &str = "quotes.normalized";
 const NORMALIZER_GROUP: &str = "data-engine-normalizer";
+const QUOTES_DLQ_STREAM: &str = "quotes.dlq";
 
 #[derive(Clone)]
 struct AppState {
@@ -234,8 +235,33 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
                 .read_group(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &consumer, 50, 1000)
                 .await
             {
-                Ok(messages) => {
-                    for message in messages {
+                Ok(result) => {
+                    // 无法解码的条目：按 DLQ 契约隔离（quotes.dlq）并 ack，
+                    // 避免滞留消费组 PEL 永不清理；DLQ 发布失败则不 ack，留待下轮重试。
+                    for invalid in result.invalid {
+                        tracing::warn!(
+                            "Quarantining undecodable message {} on {}: {}",
+                            invalid.id,
+                            invalid.stream,
+                            invalid.reason
+                        );
+                        if let Err(err) = queue.publish_dlq(QUOTES_DLQ_STREAM, &invalid).await {
+                            tracing::warn!("Failed to publish undecodable message to DLQ: {}", err);
+                            continue;
+                        }
+                        if let Err(err) = queue
+                            .ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &invalid.id)
+                            .await
+                        {
+                            tracing::warn!(
+                                "Failed to ack quarantined message {}: {}",
+                                invalid.id,
+                                err
+                            );
+                        }
+                    }
+
+                    for message in result.messages {
                         match normalize_quote(&message.envelope) {
                             Some(market_data) => {
                                 if let Err(err) = state.storage.add_market_data(&market_data).await {
