@@ -3,7 +3,7 @@
 use alpha_core::errors::{AlphaError, AlphaResult};
 use chrono::{DateTime, Utc};
 use redis::{
-    streams::{StreamReadOptions, StreamReadReply},
+    streams::{StreamRangeReply, StreamReadOptions, StreamReadReply},
     AsyncCommands,
 };
 use serde::{Deserialize, Serialize};
@@ -109,7 +109,7 @@ impl RedisStreamQueue {
         count: usize,
     ) -> AlphaResult<Vec<StreamMessage>> {
         let mut conn = self.get_conn().await?;
-        let entries: Vec<(String, Vec<(String, String)>)> = redis::cmd("XREVRANGE")
+        let entries: StreamRangeReply = redis::cmd("XREVRANGE")
             .arg(stream)
             .arg("+")
             .arg("-")
@@ -120,9 +120,17 @@ impl RedisStreamQueue {
             .map_err(|e| AlphaError::StorageError(format!("redis XREVRANGE failed: {e}")))?;
 
         let mut result = Vec::new();
-        for (id, fields) in entries {
-            if let Some(envelope) = Self::decode_envelope(stream, &id, fields)? {
-                result.push(StreamMessage { id, envelope });
+        for entry in entries.ids {
+            let fields = entry
+                .map
+                .into_iter()
+                .filter_map(|(k, v)| redis::from_redis_value::<String>(&v).ok().map(|vv| (k, vv)))
+                .collect::<Vec<_>>();
+            if let Some(envelope) = Self::decode_envelope(stream, &entry.id, fields)? {
+                result.push(StreamMessage {
+                    id: entry.id,
+                    envelope,
+                });
             }
         }
         Ok(result)

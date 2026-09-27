@@ -322,8 +322,13 @@ fn envelope_to_realtime(envelope: &StreamEnvelope) -> Option<RealTimeData> {
         symbol: payload.get("symbol")?.as_str()?.to_string(),
         price: payload.get("price")?.as_f64()?,
         volume: payload.get("volume")?.as_u64()?,
-        change: payload.get("change")?.as_f64()?,
-        change_percent: payload.get("change_percent")?.as_f64()?,
+        // data-engine 的 normalized payload 可能不含涨跌幅字段（如非行情类事件），
+        // 这里缺省为 0 而不是把整条消息打进 DLQ。
+        change: payload.get("change").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        change_percent: payload
+            .get("change_percent")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
         timestamp: envelope.created_at,
     })
 }
@@ -429,5 +434,48 @@ mod tests {
         let data = envelope_to_realtime(&envelope).unwrap();
         assert_eq!(data.symbol, "sz000001");
         assert_eq!(data.price, 12.34);
+    }
+
+    #[test]
+    fn test_envelope_to_realtime_without_change_fields() {
+        // data-engine 的 normalized payload 即 MarketData 序列化，不含 change/change_percent，
+        // 不应被误判为无效消息进入 DLQ。
+        let envelope = StreamEnvelope::new(
+            NORMALIZED_QUOTES_STREAM,
+            "normalized_quote",
+            "data-engine",
+            Some("sz000001".to_string()),
+            serde_json::json!({
+                "symbol": "sz000001",
+                "timestamp": "2026-09-27T08:00:00Z",
+                "price": 12.34,
+                "volume": 5000,
+                "bid": 12.3,
+                "ask": 12.4,
+                "open": 12.1,
+                "high": 12.5,
+                "low": 12.0
+            }),
+        );
+
+        let data = envelope_to_realtime(&envelope).unwrap();
+        assert_eq!(data.symbol, "sz000001");
+        assert_eq!(data.price, 12.34);
+        assert_eq!(data.volume, 5000);
+        assert_eq!(data.change, 0.0);
+        assert_eq!(data.change_percent, 0.0);
+    }
+
+    #[test]
+    fn test_envelope_to_realtime_rejects_missing_price() {
+        let envelope = StreamEnvelope::new(
+            QUOTES_STREAM,
+            "quote",
+            "collector",
+            None,
+            serde_json::json!({ "symbol": "sz000001", "volume": 5000 }),
+        );
+
+        assert!(envelope_to_realtime(&envelope).is_none());
     }
 }

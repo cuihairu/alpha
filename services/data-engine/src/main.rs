@@ -248,7 +248,7 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
                                     "normalized_quote",
                                     "data-engine",
                                     Some(market_data.symbol.clone()),
-                                    serde_json::to_value(&market_data).unwrap_or_default(),
+                                    normalized_payload(&message.envelope, &market_data),
                                 );
 
                                 if let Err(err) = queue.publish(NORMALIZED_QUOTES_STREAM, &normalized).await {
@@ -300,6 +300,25 @@ fn normalize_quote(envelope: &StreamEnvelope) -> Option<MarketData> {
         high: payload.get("high").and_then(|v| v.as_f64()),
         low: payload.get("low").and_then(|v| v.as_f64()),
     })
+}
+
+/// 构建 normalized payload：保留上游原始字段（change/change_percent/pre_close/name/source 等，
+/// 供 real-time-feed 与审计回溯使用），再以规范化后的 MarketData 字段覆盖同名字段。
+fn normalized_payload(envelope: &StreamEnvelope, market_data: &MarketData) -> serde_json::Value {
+    let mut payload = match envelope.payload.as_object() {
+        Some(obj) => obj.clone(),
+        None => serde_json::Map::new(),
+    };
+
+    if let Ok(normalized) = serde_json::to_value(market_data) {
+        if let Some(fields) = normalized.as_object() {
+            for (key, value) in fields {
+                payload.insert(key.clone(), value.clone());
+            }
+        }
+    }
+
+    serde_json::Value::Object(payload)
 }
 
 /// 健康检查
@@ -1168,5 +1187,121 @@ mod tests {
         assert_eq!(response.data[0]["symbol"], "AAPL");
         assert_eq!(response.data[0]["max_price"], 102.0);
         assert_eq!(response.data[0]["total_volume"], 30);
+    }
+
+    fn quote_envelope(payload: serde_json::Value) -> StreamEnvelope {
+        StreamEnvelope::new("quotes.raw", "quote", "eastmoney", None, payload)
+    }
+
+    #[test]
+    fn normalize_quote_maps_bid_ask_fields() {
+        let envelope = quote_envelope(serde_json::json!({
+            "symbol": "000001",
+            "price": 12.34,
+            "volume": 5000,
+            "bid1": 12.30,
+            "ask1": 12.40,
+            "open": 12.10,
+            "high": 12.50,
+            "low": 12.00
+        }));
+
+        let market_data = normalize_quote(&envelope).unwrap();
+        assert_eq!(market_data.symbol, "000001");
+        assert_eq!(market_data.price, 12.34);
+        assert_eq!(market_data.volume, 5000);
+        assert_eq!(market_data.bid, Some(12.30));
+        assert_eq!(market_data.ask, Some(12.40));
+        assert_eq!(market_data.open, Some(12.10));
+        assert_eq!(market_data.high, Some(12.50));
+        assert_eq!(market_data.low, Some(12.00));
+    }
+
+    #[test]
+    fn normalize_quote_rejects_invalid_payloads() {
+        let missing_price = quote_envelope(serde_json::json!({ "symbol": "000001", "volume": 1 }));
+        assert!(normalize_quote(&missing_price).is_none());
+
+        let negative_price =
+            quote_envelope(serde_json::json!({ "symbol": "000001", "price": -1.0, "volume": 1 }));
+        assert!(normalize_quote(&negative_price).is_none());
+
+        let not_an_object = StreamEnvelope::new(
+            "quotes.raw",
+            "quote",
+            "eastmoney",
+            None,
+            serde_json::json!("scalar"),
+        );
+        assert!(normalize_quote(&not_an_object).is_none());
+    }
+
+    #[test]
+    fn normalized_payload_preserves_upstream_and_overrides_normalized_fields() {
+        let envelope = quote_envelope(serde_json::json!({
+            "symbol": "000001",
+            "name": "平安银行",
+            "price": 12.0,
+            "volume": 1000,
+            "change": 0.12,
+            "change_percent": 0.98,
+            "pre_close": 12.22,
+            "source": "eastmoney"
+        }));
+
+        // 规范化结果与上游原始值不同（例如标准化/修正后），应覆盖上游同名字段
+        let market_data = MarketData {
+            symbol: "000001".to_string(),
+            timestamp: Utc::now(),
+            price: 12.34,
+            volume: 5000,
+            bid: Some(12.30),
+            ask: Some(12.40),
+            open: Some(12.10),
+            high: Some(12.50),
+            low: Some(12.00),
+        };
+
+        let payload = normalized_payload(&envelope, &market_data);
+        let obj = payload.as_object().unwrap();
+
+        // 上游独有字段保留（real-time-feed 依赖 change/change_percent，审计依赖 name/pre_close/source）
+        assert_eq!(obj["change"], 0.12);
+        assert_eq!(obj["change_percent"], 0.98);
+        assert_eq!(obj["pre_close"], 12.22);
+        assert_eq!(obj["name"], "平安银行");
+        assert_eq!(obj["source"], "eastmoney");
+        // 规范化字段覆盖上游同名字段
+        assert_eq!(obj["price"], 12.34);
+        assert_eq!(obj["volume"], 5000);
+        assert_eq!(obj["bid"], 12.30);
+        assert_eq!(obj["ask"], 12.40);
+        assert_eq!(obj["timestamp"], serde_json::to_value(&market_data.timestamp).unwrap());
+    }
+
+    #[test]
+    fn normalized_payload_handles_non_object_upstream() {
+        let envelope = StreamEnvelope::new(
+            "quotes.raw",
+            "quote",
+            "eastmoney",
+            None,
+            serde_json::json!("garbage"),
+        );
+        let market_data = MarketData {
+            symbol: "000001".to_string(),
+            timestamp: Utc::now(),
+            price: 12.34,
+            volume: 1,
+            bid: None,
+            ask: None,
+            open: None,
+            high: None,
+            low: None,
+        };
+
+        let payload = normalized_payload(&envelope, &market_data);
+        assert_eq!(payload["symbol"], "000001");
+        assert_eq!(payload["price"], 12.34);
     }
 }

@@ -1,0 +1,216 @@
+//! 管线兼容性集成测试
+//!
+//! 守护 real-time-feed 与上游 stream（collector 的 raw 行情、data-engine 的 normalized 行情）
+//! 之间的 payload 契约：真实 Redis 上发布 → 消费组读取 → 行情转换 → ack，
+//! 确保合法消息不会被误送入 quotes.dlq。
+//!
+//! 转换逻辑与 main.rs 的 `envelope_to_realtime`/`send_to_dlq` 保持一致（二进制 crate 无法
+//! 被测试直接引用，字段级行为由 main.rs 单元测试覆盖；本测试聚焦真实 stream 语义 + payload 形状）。
+//!
+//! 仅在设置 `REDIS_TEST_URL` 时运行，未设置时自动跳过。
+
+use alpha_storage::{RedisStreamQueue, StreamEnvelope};
+
+/// 与 main.rs `envelope_to_realtime` 相同的必填/缺省口径：
+/// symbol/price/volume 必填；change/change_percent 缺省 0。
+fn realtime_from_payload(payload: &serde_json::Value) -> Option<(String, f64, u64, f64, f64)> {
+    let obj = payload.as_object()?;
+    Some((
+        obj.get("symbol")?.as_str()?.to_string(),
+        obj.get("price")?.as_f64()?,
+        obj.get("volume")?.as_u64()?,
+        obj.get("change").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        obj.get("change_percent").and_then(|v| v.as_f64()).unwrap_or(0.0),
+    ))
+}
+
+fn test_redis_url() -> Option<String> {
+    std::env::var("REDIS_TEST_URL").ok()
+}
+
+fn unique_stream(prefix: &str) -> String {
+    format!("test:pipeline:{}:{}", prefix, uuid::Uuid::new_v4())
+}
+
+async fn cleanup(url: &str, streams: &[&str]) {
+    let mut conn = redis::Client::open(url)
+        .expect("open test redis client")
+        .get_connection_manager()
+        .await
+        .expect("connect test redis");
+    let _: Result<i64, _> = redis::AsyncCommands::del(&mut conn, streams).await;
+}
+
+/// 模拟 data-engine normalized payload 的形状：
+/// 上游原始字段（change/change_percent/pre_close/name/source）+ 规范化 MarketData 字段。
+fn normalized_payload_like_data_engine() -> serde_json::Value {
+    serde_json::json!({
+        "symbol": "000001",
+        "name": "平安银行",
+        "pre_close": 12.22,
+        "change": 0.12,
+        "change_percent": 0.98,
+        "source": "eastmoney",
+        "timestamp": "2026-09-27T08:00:00Z",
+        "price": 12.34,
+        "volume": 5000,
+        "bid": 12.3,
+        "ask": 12.4,
+        "open": 12.1,
+        "high": 12.5,
+        "low": 12.0
+    })
+}
+
+/// collector 写入 quotes.raw 的 RealtimeQuote 形状。
+fn raw_payload_like_collector() -> serde_json::Value {
+    serde_json::json!({
+        "symbol": "sz000001",
+        "name": "平安银行",
+        "price": 12.34,
+        "pre_close": 12.22,
+        "open": 12.1,
+        "high": 12.5,
+        "low": 12.0,
+        "volume": 5000,
+        "amount": 61700000.0,
+        "change": 0.12,
+        "change_percent": 0.98,
+        "bid1": 12.33,
+        "ask1": 12.35,
+        "bid1_volume": 1200,
+        "ask1_volume": 900,
+        "timestamp": "2026-09-27T08:00:00Z",
+        "source": "eastmoney"
+    })
+}
+
+/// 消费组读取唯一消息、转换、ack（与 main.rs 消费循环同构）。
+async fn consume_and_convert(
+    queue: &RedisStreamQueue,
+    stream: &str,
+) -> Option<(String, f64, u64, f64, f64)> {
+    queue.ensure_consumer_group(stream, "real-time-feed").await.unwrap();
+    let consumer = format!("rtf-test-{}", uuid::Uuid::new_v4());
+    let messages = queue
+        .read_group(stream, "real-time-feed", &consumer, 10, 500)
+        .await
+        .unwrap();
+    assert_eq!(messages.len(), 1, "expected exactly one message on {}", stream);
+
+    let converted = realtime_from_payload(&messages[0].envelope.payload);
+    queue.ack(stream, "real-time-feed", &messages[0].id).await.unwrap();
+    converted
+}
+
+#[tokio::test]
+async fn normalized_stream_message_is_consumable_not_dlqd() {
+    // 回归守护：normalized payload 无 change 字段时，整条消息曾被误送 quotes.dlq。
+    let Some(url) = test_redis_url() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+    let queue = RedisStreamQueue::connect(&url).unwrap();
+
+    let stream = unique_stream("normalized");
+    let envelope = StreamEnvelope::new(
+        &stream,
+        "normalized_quote",
+        "data-engine",
+        Some("000001".to_string()),
+        normalized_payload_like_data_engine(),
+    );
+    queue.publish(&stream, &envelope).await.unwrap();
+
+    let (symbol, price, volume, change, change_percent) =
+        consume_and_convert(&queue, &stream).await.expect("normalized quote must be consumable");
+    assert_eq!(symbol, "000001");
+    assert_eq!(price, 12.34);
+    assert_eq!(volume, 5000);
+    assert_eq!(change, 0.12);
+    assert_eq!(change_percent, 0.98);
+
+    cleanup(&url, &[&stream]).await;
+}
+
+#[tokio::test]
+async fn raw_stream_message_is_consumable_not_dlqd() {
+    let Some(url) = test_redis_url() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+    let queue = RedisStreamQueue::connect(&url).unwrap();
+
+    let stream = unique_stream("raw");
+    let envelope = StreamEnvelope::new(
+        &stream,
+        "quote",
+        "eastmoney",
+        Some("sz000001".to_string()),
+        raw_payload_like_collector(),
+    );
+    queue.publish(&stream, &envelope).await.unwrap();
+
+    let (symbol, price, volume, change, change_percent) =
+        consume_and_convert(&queue, &stream).await.expect("raw quote must be consumable");
+    assert_eq!(symbol, "sz000001");
+    assert_eq!(price, 12.34);
+    assert_eq!(volume, 5000);
+    assert_eq!(change, 0.12);
+    assert_eq!(change_percent, 0.98);
+
+    cleanup(&url, &[&stream]).await;
+}
+
+#[tokio::test]
+async fn malformed_message_follows_dlq_policy() {
+    // 缺 price 的消息转换失败 → 走 DLQ：转发 quotes.dlq（带原因）后 ack 原消息，
+    // 与 main.rs 的 `send_to_dlq` + ack 语义一致。
+    let Some(url) = test_redis_url() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+    let queue = RedisStreamQueue::connect(&url).unwrap();
+
+    let stream = unique_stream("malformed");
+    let dlq_stream = unique_stream("malformed-dlq");
+    let envelope = StreamEnvelope::new(
+        &stream,
+        "quote",
+        "eastmoney",
+        None,
+        serde_json::json!({ "symbol": "000001", "volume": 10 }),
+    );
+    queue.publish(&stream, &envelope).await.unwrap();
+
+    queue.ensure_consumer_group(&stream, "real-time-feed").await.unwrap();
+    let messages = queue
+        .read_group(&stream, "real-time-feed", "rtf-test", 10, 500)
+        .await
+        .unwrap();
+    assert_eq!(messages.len(), 1);
+
+    let converted = realtime_from_payload(&messages[0].envelope.payload);
+    assert!(converted.is_none(), "malformed message must fail conversion and hit DLQ path");
+
+    let mut payload = messages[0].envelope.payload.clone();
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("dlq_reason".to_string(), serde_json::json!("invalid realtime quote payload"));
+    }
+    let dlq_envelope = StreamEnvelope::new(
+        &dlq_stream,
+        messages[0].envelope.event_type.clone(),
+        messages[0].envelope.source.clone(),
+        messages[0].envelope.symbol.clone(),
+        payload,
+    );
+    queue.publish(&dlq_stream, &dlq_envelope).await.unwrap();
+    queue.ack(&stream, "real-time-feed", &messages[0].id).await.unwrap();
+
+    let dlq_messages = queue.read_latest(&dlq_stream, 10).await.unwrap();
+    assert_eq!(dlq_messages.len(), 1);
+    assert_eq!(dlq_messages[0].envelope.payload["dlq_reason"], "invalid realtime quote payload");
+    assert_eq!(dlq_messages[0].envelope.payload["symbol"], "000001");
+
+    cleanup(&url, &[&stream, &dlq_stream]).await;
+}
