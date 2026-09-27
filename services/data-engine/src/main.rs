@@ -6,14 +6,14 @@ use std::{net::SocketAddr, sync::Arc, time::Instant};
 
 use alpha_core::{
     analytics::AnalysisEngine,
-    errors::AlphaError,
+    errors::{AlphaError, AlphaResult},
     indicators::TechnicalIndicators,
     models::{AnalysisResult, MarketData},
 };
 use alpha_storage::{
     clickhouse::{ClickHouseConfig, ClickHouseStorage},
     InvalidMessage, RedisStreamQueue, StreamEnvelope, StreamMessage, TimeSeriesPoint,
-    TimeSeriesStorage,
+    TimeSeriesStorage, TimescaleTimeSeriesStorage,
 };
 use axum::{
     extract::{Path, Query, State},
@@ -45,7 +45,7 @@ use tower_http::{
 
 mod grpc;
 mod settings;
-use settings::{AppConfig, ClickHouseSettings, TelemetryConfig};
+use settings::{AppConfig, ClickHouseSettings, StorageConfig, TelemetryConfig};
 
 const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
 const RAW_QUOTES_STREAM: &str = "quotes.raw";
@@ -57,6 +57,8 @@ const QUOTES_DLQ_STREAM: &str = "quotes.dlq";
 struct AppState {
     session: SessionContext,
     storage: Arc<TimeSeriesStorage>,
+    /// TimescaleDB 持久化镜像（storage.persistence_enabled 装配；None = 仅内存）
+    persistence: Option<Arc<TimescaleTimeSeriesStorage>>,
     clickhouse: Option<Arc<ClickHouseStorage>>,
     indicators: TechnicalIndicators,
     analysis: AnalysisEngine,
@@ -66,14 +68,28 @@ struct AppState {
 impl AppState {
     async fn new(config: Arc<AppConfig>) -> Self {
         let clickhouse = initialize_clickhouse(&config.clickhouse).await;
+        let persistence = initialize_persistence(&config.storage).await;
         Self {
             session: SessionContext::new(),
             storage: Arc::new(TimeSeriesStorage::new()),
+            persistence,
             clickhouse,
             indicators: TechnicalIndicators::new(),
             analysis: AnalysisEngine::new(),
             config,
         }
+    }
+
+    /// 写入规范化行情：内存时序为主（服务查询层），启用持久化时镜像写 Timescale。
+    /// Timescale 写失败只告警不阻断管线（内存仍是 serving 层，不因落库失败回灌消费组）。
+    async fn write_normalized(&self, market_data: &MarketData) -> AlphaResult<()> {
+        self.storage.add_market_data(market_data).await?;
+        if let Some(persistence) = self.persistence.as_ref() {
+            if let Err(err) = persistence.insert_market_data(market_data).await {
+                tracing::warn!("Failed to persist normalized quote to Timescale: {}", err);
+            }
+        }
+        Ok(())
     }
 
     async fn register_custom_functions(&self) -> anyhow::Result<()> {
@@ -221,6 +237,37 @@ async fn initialize_clickhouse(settings: &ClickHouseSettings) -> Option<Arc<Clic
     }
 }
 
+/// 按配置装配 Timescale 持久化（与 ClickHouse 装配同口径的三态降级）：
+/// - 未启用（persistence_enabled=false）→ None，纯内存；
+/// - 启用但 URL 缺失/无效、连接失败 → 告警后降级为 None（服务不因落库不可用而拒绝启动）；
+/// - 正常 → Some，规范化写入经 write_normalized 镜像落库。
+async fn initialize_persistence(settings: &StorageConfig) -> Option<Arc<TimescaleTimeSeriesStorage>> {
+    if !settings.persistence_enabled {
+        return None;
+    }
+
+    let Some(url) = settings.timescale_url.as_deref() else {
+        tracing::warn!(
+            "Persistence enabled but storage.timescale_url is not set; falling back to memory-only"
+        );
+        return None;
+    };
+
+    match TimescaleTimeSeriesStorage::connect(url).await {
+        Ok(storage) => {
+            tracing::info!("Timescale persistence enabled");
+            Some(Arc::new(storage))
+        }
+        Err(err) => {
+            tracing::warn!(
+                "Persistence enabled but Timescale connect failed: {}; falling back to memory-only",
+                err
+            );
+            None
+        }
+    }
+}
+
 async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
     let redis_url = std::env::var("ALPHA_REDIS_URL")
         .or_else(|_| std::env::var("REDIS_URL"))
@@ -307,7 +354,7 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
 async fn process_normalizer_message(state: &Arc<AppState>, queue: &RedisStreamQueue, message: &StreamMessage) {
     match normalize_quote(&message.envelope) {
         Some(market_data) => {
-            if let Err(err) = state.storage.add_market_data(&market_data).await {
+            if let Err(err) = state.write_normalized(&market_data).await {
                 tracing::warn!("Failed to write normalized quote to storage: {}", err);
                 return; // 不 ack：留待 XAUTOCLAIM 兜底重放
             }
@@ -1382,5 +1429,107 @@ mod tests {
         let payload = normalized_payload(&envelope, &market_data);
         assert_eq!(payload["symbol"], "000001");
         assert_eq!(payload["price"], 12.34);
+    }
+
+    fn storage_settings(enabled: bool, url: Option<&str>) -> StorageConfig {
+        StorageConfig {
+            persistence_enabled: enabled,
+            timescale_url: url.map(|s| s.to_string()),
+        }
+    }
+
+    /// 三态之一：未启用 → 不装配持久化，写入仅走内存 serving 层。
+    #[tokio::test]
+    async fn persistence_disabled_writes_memory_only() {
+        let disabled = storage_settings(false, Some("postgres://would-be-ignored"));
+        assert!(initialize_persistence(&disabled).await.is_none());
+
+        let state = Arc::new(AppState::new(test_config()).await);
+        assert!(state.persistence.is_none(), "default config must not assemble persistence");
+
+        let market_data = MarketData {
+            symbol: "E2E-DISABLED".to_string(),
+            timestamp: Utc::now(),
+            price: 10.0,
+            volume: 1,
+            bid: None,
+            ask: None,
+            open: None,
+            high: None,
+            low: None,
+        };
+        state.write_normalized(&market_data).await.unwrap();
+        assert!(state
+            .storage
+            .list_symbols()
+            .await
+            .unwrap()
+            .contains(&"E2E-DISABLED".to_string()));
+    }
+
+    /// 三态之二：启用但 URL 缺失/无效 → 降级为内存模式，服务不拒绝启动。
+    #[tokio::test]
+    async fn persistence_enabled_with_bad_url_degrades_to_memory() {
+        let missing = storage_settings(true, None);
+        assert!(initialize_persistence(&missing).await.is_none());
+
+        let invalid = storage_settings(true, Some("postgres://invalid"));
+        // 直接连接必须报错（与 timescale 模块的 connect_returns_error_without_db 同口径）
+        assert!(TimescaleTimeSeriesStorage::connect("postgres://invalid").await.is_err());
+        // 装配层吞掉错误降级为 None，而不是让服务崩溃
+        assert!(initialize_persistence(&invalid).await.is_none());
+
+        // 降级后写入路径照常可用
+        let mut config = AppConfig::default();
+        config.storage = invalid;
+        let state = Arc::new(AppState::new(Arc::new(config)).await);
+        assert!(state.persistence.is_none());
+    }
+
+    /// 三态之三：正常连接 → write_normalized 镜像落库（需真实 TimescaleDB，无库自动跳过）。
+    #[tokio::test]
+    async fn write_through_persists_to_timescale() -> AlphaResult<()> {
+        let Some(url) = std::env::var("TIMESCALE_TEST_URL").ok() else {
+            eprintln!("skipping: TIMESCALE_TEST_URL not set");
+            return Ok(());
+        };
+
+        let persistence = Arc::new(TimescaleTimeSeriesStorage::connect(&url).await?);
+        let state = Arc::new(AppState {
+            session: SessionContext::new(),
+            storage: Arc::new(TimeSeriesStorage::new()),
+            persistence: Some(persistence.clone()),
+            clickhouse: None,
+            indicators: TechnicalIndicators::new(),
+            analysis: AnalysisEngine::new(),
+            config: test_config(),
+        });
+
+        let symbol = format!("E2E-{}", uuid::Uuid::new_v4());
+        let now = Utc::now();
+        for (offset, price) in [(0_i64, 42.5_f64), (1, 43.0)] {
+            state
+                .write_normalized(&MarketData {
+                    symbol: symbol.clone(),
+                    timestamp: now + Duration::minutes(offset),
+                    price,
+                    volume: 100,
+                    bid: Some(price - 0.2),
+                    ask: Some(price + 0.2),
+                    open: None,
+                    high: None,
+                    low: None,
+                })
+                .await?;
+        }
+
+        // 内存 serving 层可见
+        assert!(state.storage.list_symbols().await?.contains(&symbol));
+        // Timescale 镜像同样落库
+        assert_eq!(persistence.count(&symbol).await?, 2);
+        let latest = persistence.latest(&symbol).await?.expect("persisted row");
+        assert_eq!(latest.price, 43.0);
+
+        Ok(())
     }
 }

@@ -17,10 +17,12 @@
 - [x] （新发现）消费端崩溃遗留的孤儿 pending 消息：storage 层新增 `claim_stale`（XAUTOCLAIM，Redis ≥6.2；已被 XDEL 的 PEL 空壳直接 ack 清理），data-engine/real-time-feed 各起独立 sweeper 周期认领重放，处理路径与实时消费完全共用（与解码失败→DLQ 仍是两条独立路径，互不混写）；data-engine 走 ALPHA__SWEEPER__* 配置、real-time-feed 走 ALPHA_CLAIM_MIN_IDLE_MS/ALPHA_CLAIM_SWEEP_SECS env（默认闲置 30s、每 30s 扫一轮）（✅ 2026-09-27，见 P2）
 
 ### P2 数据落地
-- [ ] data-engine 按 storage.persistence_enabled/timescale_url 装配 Timescale 落库（当前配置项存在但从未使用）
+- [x] data-engine 按 storage.persistence_enabled/timescale_url 装配 Timescale 落库：AppState 增 persistence 镜像，initialize_persistence 三态降级（与 ClickHouse 装配同口径：未启用→内存；URL 缺失/连接失败→告警降级内存，服务不拒启；正常→write_normalized 写内存后镜像落库）。三态单测齐备（正常写入 TIMESCALE_TEST_URL 门控），实机 PG15 进程级 E2E 验证 raw→normalized→内存+落库全链路（✅ 2026-09-27）
 - [ ] normalized 层去重（payload_hash）与 MemTable 全量重建热点优化
 - [ ] （新发现 2026-09-27）重投递无上限：claim_stale 未设 delivery-count 封顶，反复处理失败的消息会被无限认领重放；应按 XPENDING 的 delivery_count 封顶（超 N 次转 DLQ）
 - [ ] （新发现 2026-09-27）real-time-feed 用 tracing_subscriber::fmt::init()，未设 RUST_LOG 时 WARN 级兜底日志不可见（E2E 中隔离已发生但日志为空）；改为与 data-engine 一致的显式 level 初始化
+- [ ] （新发现 2026-09-27）持久化镜像失败仅告警不重试：Timescale 短暂不可用期间的写入会丢持久化副本（内存 serving 不受影响）；如需强持久化需引入重试/缓冲（outbox 类方案），当前定位为 best-effort 镜像
+- [ ] （新发现 2026-09-27）compose 未透传 ALPHA__STORAGE__PERSISTENCE_ENABLED/ALPHA__STORAGE__TIMESCALE_URL；部署启用落库时需补（注意 env 键内下划线为单下划线，分隔符才是双下划线）
 
 ### P3 补对外链路
 - [ ] api-gateway 真实反代 data-engine/real-time-feed（当前 health/proxy 全是 mock）
