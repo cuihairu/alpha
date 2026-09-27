@@ -10,6 +10,7 @@
 //! 仅在设置 `REDIS_TEST_URL` 时运行，未设置时自动跳过。
 
 use alpha_storage::{RedisStreamQueue, StreamEnvelope};
+use std::time::Duration;
 
 /// 与 main.rs `envelope_to_realtime` 相同的必填/缺省口径：
 /// symbol/price/volume 必填；change/change_percent 缺省 0。
@@ -295,4 +296,89 @@ async fn undecodable_entry_is_quarantined_and_acked() {
     assert_eq!(dlq_messages[0].envelope.payload["original_stream"], stream);
 
     cleanup(&url, &[&stream, &dlq_stream]).await;
+}
+
+/// 读取消费组 PEL 中未确认消息数（XPENDING 摘要的第一个元素）。
+async fn pending_count(url: &str, stream: &str, group: &str) -> i64 {
+    let mut conn = redis::Client::open(url)
+        .expect("open test redis client")
+        .get_connection_manager()
+        .await
+        .expect("connect test redis");
+    let reply: redis::Value = redis::cmd("XPENDING")
+        .arg(stream)
+        .arg(group)
+        .query_async(&mut conn)
+        .await
+        .expect("XPENDING");
+    match reply {
+        redis::Value::Bulk(items) => match items.first() {
+            Some(redis::Value::Int(n)) => *n,
+            other => panic!("unexpected XPENDING first element: {other:?}"),
+        },
+        other => panic!("unexpected XPENDING reply: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn orphaned_pending_message_is_claimed_and_reprocessed() {
+    // 崩溃遗留场景镜像（与 main.rs 的 sweeper 任务同构）：
+    // 消费端「已投递、未 ack」→ PEL 滞留 → 周期 XAUTOCLAIM 认领 →
+    // 转换/广播路径可正常处理 → ack 后 XPENDING 清零。
+    let Some(url) = test_redis_url() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+    let queue = RedisStreamQueue::connect(&url).unwrap();
+
+    let stream = unique_stream("orphan");
+
+    let envelope = StreamEnvelope::new(
+        &stream,
+        "quote",
+        "eastmoney",
+        Some("sz000001".to_string()),
+        raw_payload_like_collector(),
+    );
+    queue.publish(&stream, &envelope).await.unwrap();
+
+    // 模拟崩溃：读走但不 ack
+    queue.ensure_consumer_group(&stream, "real-time-feed").await.unwrap();
+    let crashed = queue
+        .read_group(&stream, "real-time-feed", "rtf-crashed", 10, 500)
+        .await
+        .unwrap();
+    assert_eq!(crashed.messages.len(), 1);
+    assert_eq!(pending_count(&url, &stream, "real-time-feed").await, 1);
+
+    // 闲置未过阈值不认领
+    let not_yet = queue
+        .claim_stale(&stream, "real-time-feed", "rtf-sweep", 60_000, 10)
+        .await
+        .unwrap();
+    assert!(not_yet.is_empty());
+    assert_eq!(pending_count(&url, &stream, "real-time-feed").await, 1);
+
+    // 闲置超过阈值：认领后按既有转换路径重放（合法行情不被误入 DLQ），随后 ack 清零
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let claimed = queue
+        .claim_stale(&stream, "real-time-feed", "rtf-sweep", 1000, 10)
+        .await
+        .unwrap();
+    assert_eq!(claimed.messages.len(), 1, "orphaned message must be reclaimed");
+    assert!(claimed.invalid.is_empty());
+
+    let (symbol, price, volume, change, change_percent) =
+        realtime_from_payload(&claimed.messages[0].envelope.payload)
+            .expect("reclaimed message must be consumable via normal conversion path");
+    assert_eq!(symbol, "sz000001");
+    assert_eq!(price, 12.34);
+    assert_eq!(volume, 5000);
+    assert_eq!(change, 0.12);
+    assert_eq!(change_percent, 0.98);
+
+    queue.ack(&stream, "real-time-feed", &claimed.messages[0].id).await.unwrap();
+    assert_eq!(pending_count(&url, &stream, "real-time-feed").await, 0);
+
+    cleanup(&url, &[&stream]).await;
 }

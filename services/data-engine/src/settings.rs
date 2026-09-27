@@ -13,6 +13,17 @@ pub struct AppConfig {
     pub data: DataConfig,
     pub storage: StorageConfig,
     pub clickhouse: ClickHouseSettings,
+    pub sweeper: SweeperConfig,
+}
+
+/// 消费组孤儿 pending 周期兜底（XAUTOCLAIM）配置
+#[derive(Debug, Clone, Deserialize)]
+pub struct SweeperConfig {
+    pub enabled: bool,
+    /// pending 闲置多久才认定为孤儿（需大于正常处理耗时）
+    pub min_idle_ms: u64,
+    /// 兜底扫描间隔（秒）
+    pub interval_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -95,6 +106,12 @@ impl AppConfig {
             .expect("failed to set clickhouse.user default")
             .set_default("clickhouse.password", "admin123")
             .expect("failed to set clickhouse.password default")
+            .set_default("sweeper.enabled", true)
+            .expect("failed to set sweeper.enabled default")
+            .set_default("sweeper.min_idle_ms", 30_000_u64)
+            .expect("failed to set sweeper.min_idle_ms default")
+            .set_default("sweeper.interval_secs", 30_u64)
+            .expect("failed to set sweeper.interval_secs default")
     }
 
     fn load_from_builder(builder: ConfigBuilder<DefaultState>) -> Result<Self, ConfigError> {
@@ -142,6 +159,9 @@ mod tests {
         assert!(!cfg.storage.persistence_enabled);
         assert!(cfg.storage.timescale_url.is_none());
         assert!(!cfg.clickhouse.enabled);
+        assert!(cfg.sweeper.enabled);
+        assert_eq!(cfg.sweeper.min_idle_ms, 30_000);
+        assert_eq!(cfg.sweeper.interval_secs, 30);
     }
 
     #[test]

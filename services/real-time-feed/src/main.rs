@@ -12,7 +12,7 @@ use axum::{
     Router,
 };
 use alpha_protocols::websocket::{channels, DataMessage, WsMessage};
-use alpha_storage::{RedisStreamQueue, StreamEnvelope};
+use alpha_storage::{InvalidMessage, RedisStreamQueue, StreamEnvelope, StreamMessage};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -276,14 +276,20 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
         .await;
     let consumer = format!("rtf-{}", uuid::Uuid::new_v4());
 
+    let (min_idle_ms, sweep_secs) = claim_sweep_config();
+    let sweeper_state = app_state.clone();
+    let sweeper_queue = queue.clone();
+
+    let loop_queue = queue.clone();
+    let loop_state = app_state.clone();
     tokio::spawn(async move {
         loop {
-            let normalized_result = queue
+            let normalized_result = loop_queue
                 .read_group(NORMALIZED_QUOTES_STREAM, REALTIME_GROUP, &consumer, 20, 1000)
                 .await;
             let result = match normalized_result {
                 Ok(result) if !result.is_empty() => result,
-                _ => match queue
+                _ => match loop_queue
                     .read_group(QUOTES_STREAM, REALTIME_GROUP, &consumer, 20, 1000)
                     .await
                 {
@@ -295,43 +301,101 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
                 },
             };
 
-            // 无法解码的条目：按 DLQ 契约隔离（quotes.dlq）并 ack，
-            // 避免滞留消费组 PEL 永不清理；DLQ 发布失败则不 ack，留待下轮重试。
             for invalid in result.invalid {
-                tracing::warn!(
-                    "Quarantining undecodable message {} on {}: {}",
-                    invalid.id,
-                    invalid.stream,
-                    invalid.reason
-                );
-                if let Err(err) = queue.publish_dlq(QUOTES_DLQ_STREAM, &invalid).await {
-                    tracing::warn!("Failed to publish undecodable message to DLQ: {}", err);
-                    continue;
-                }
-                if let Err(err) = queue.ack(&invalid.stream, REALTIME_GROUP, &invalid.id).await {
-                    tracing::warn!("Failed to ack quarantined message {}: {}", invalid.id, err);
-                }
+                quarantine_invalid(&loop_queue, &invalid).await;
             }
-
             for message in result.messages {
-                let stream_name = message.envelope.stream.clone();
-                if let Some(data) = envelope_to_realtime(&message.envelope) {
-                    if let Err(err) = app_state.data_sender.send(data) {
-                        tracing::debug!("Failed to fan out realtime data: {}", err);
+                process_realtime_message(&loop_state, &loop_queue, &message).await;
+            }
+        }
+    });
+
+    // 周期 XAUTOCLAIM 兜底：消费端崩溃遗留的「已投递、未 ack」孤儿 pending 由独立的
+    // sweeper 认领后重放，处理路径与实时消费完全一致。注意：这与解码失败 → DLQ 是
+    // 两条不同路径，后者发生在读取时（见 quarantine_invalid/process_realtime_message）。
+    let sweeper_consumer = format!("rtf-sweep-{}", uuid::Uuid::new_v4());
+    tokio::spawn(async move {
+        let mut ticker = interval(Duration::from_secs(sweep_secs.max(1)));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        ticker.tick().await; // interval 首个 tick 立即返回，跳过以保证先等一个周期
+
+        loop {
+            ticker.tick().await;
+            for stream in [NORMALIZED_QUOTES_STREAM, QUOTES_STREAM] {
+                match sweeper_queue
+                    .claim_stale(stream, REALTIME_GROUP, &sweeper_consumer, min_idle_ms, 100)
+                    .await
+                {
+                    Ok(result) => {
+                        for invalid in result.invalid {
+                            quarantine_invalid(&sweeper_queue, &invalid).await;
+                        }
+                        for message in result.messages {
+                            tracing::info!(
+                                "Reprocessing orphaned pending message {} on {}",
+                                message.id,
+                                message.envelope.stream
+                            );
+                            process_realtime_message(&sweeper_state, &sweeper_queue, &message).await;
+                        }
                     }
-                    if let Err(err) = queue.ack(&stream_name, REALTIME_GROUP, &message.id).await {
-                        tracing::warn!("Failed to ack stream message {}: {}", message.id, err);
-                    }
-                } else if let Err(err) = send_to_dlq(&queue, &message.envelope, "invalid realtime quote payload").await {
-                    tracing::warn!("Failed to send message {} to DLQ: {}", message.id, err);
-                } else if let Err(err) = queue.ack(&stream_name, REALTIME_GROUP, &message.id).await {
-                    tracing::warn!("Failed to ack DLQ'd message {}: {}", message.id, err);
+                    // Redis < 6.2 无 XAUTOCLAIM：兜底不可用属预期降级，debug 级避免刷屏
+                    Err(err) => tracing::debug!("XAUTOCLAIM sweep skipped for {}: {}", stream, err),
                 }
             }
         }
     });
 
     Ok(())
+}
+
+/// 孤儿 pending 兜底参数（env 可调便于测试/演练；生产默认闲置 30s、每 30s 扫一轮）。
+fn claim_sweep_config() -> (u64, u64) {
+    let min_idle_ms = std::env::var("ALPHA_CLAIM_MIN_IDLE_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30_000);
+    let sweep_secs = std::env::var("ALPHA_CLAIM_SWEEP_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30);
+    (min_idle_ms, sweep_secs)
+}
+
+/// 处理一条行情 stream 消息：转换 → 广播 → ack；
+/// 转换失败则按 DLQ 契约转发 quotes.dlq 后 ack。
+async fn process_realtime_message(app_state: &Arc<AppState>, queue: &RedisStreamQueue, message: &StreamMessage) {
+    let stream_name = message.envelope.stream.clone();
+    if let Some(data) = envelope_to_realtime(&message.envelope) {
+        if let Err(err) = app_state.data_sender.send(data) {
+            tracing::debug!("Failed to fan out realtime data: {}", err);
+        }
+        if let Err(err) = queue.ack(&stream_name, REALTIME_GROUP, &message.id).await {
+            tracing::warn!("Failed to ack stream message {}: {}", message.id, err);
+        }
+    } else if let Err(err) = send_to_dlq(queue, &message.envelope, "invalid realtime quote payload").await {
+        tracing::warn!("Failed to send message {} to DLQ: {}", message.id, err);
+    } else if let Err(err) = queue.ack(&stream_name, REALTIME_GROUP, &message.id).await {
+        tracing::warn!("Failed to ack DLQ'd message {}: {}", message.id, err);
+    }
+}
+
+/// 无法解码的条目：按 DLQ 契约隔离（quotes.dlq）并 ack，
+/// 避免滞留消费组 PEL 永不清理；DLQ 发布失败则不 ack，留待下轮重试。
+async fn quarantine_invalid(queue: &RedisStreamQueue, invalid: &InvalidMessage) {
+    tracing::warn!(
+        "Quarantining undecodable message {} on {}: {}",
+        invalid.id,
+        invalid.stream,
+        invalid.reason
+    );
+    if let Err(err) = queue.publish_dlq(QUOTES_DLQ_STREAM, invalid).await {
+        tracing::warn!("Failed to publish undecodable message to DLQ: {}", err);
+        return;
+    }
+    if let Err(err) = queue.ack(&invalid.stream, REALTIME_GROUP, &invalid.id).await {
+        tracing::warn!("Failed to ack quarantined message {}: {}", invalid.id, err);
+    }
 }
 
 fn envelope_to_realtime(envelope: &StreamEnvelope) -> Option<RealTimeData> {

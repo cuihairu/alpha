@@ -12,7 +12,8 @@ use alpha_core::{
 };
 use alpha_storage::{
     clickhouse::{ClickHouseConfig, ClickHouseStorage},
-    RedisStreamQueue, StreamEnvelope, TimeSeriesPoint, TimeSeriesStorage,
+    InvalidMessage, RedisStreamQueue, StreamEnvelope, StreamMessage, TimeSeriesPoint,
+    TimeSeriesStorage,
 };
 use axum::{
     extract::{Path, Query, State},
@@ -35,7 +36,8 @@ use datafusion::{
     prelude::SessionContext,
 };
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener;
+use std::time::Duration as StdDuration;
+use tokio::{net::TcpListener, time::{interval, MissedTickBehavior}};
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
@@ -229,72 +231,25 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
         .await?;
     let consumer = format!("de-{}", uuid::Uuid::new_v4());
 
+    let sweeper_enabled = state.config.sweeper.enabled;
+    let min_idle_ms = state.config.sweeper.min_idle_ms;
+    let sweep_interval = StdDuration::from_secs(state.config.sweeper.interval_secs.max(1));
+    let sweeper_state = state.clone();
+    let sweeper_queue = queue.clone();
+
+    let loop_queue = queue.clone();
     tokio::spawn(async move {
         loop {
-            match queue
+            match loop_queue
                 .read_group(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &consumer, 50, 1000)
                 .await
             {
                 Ok(result) => {
-                    // 无法解码的条目：按 DLQ 契约隔离（quotes.dlq）并 ack，
-                    // 避免滞留消费组 PEL 永不清理；DLQ 发布失败则不 ack，留待下轮重试。
                     for invalid in result.invalid {
-                        tracing::warn!(
-                            "Quarantining undecodable message {} on {}: {}",
-                            invalid.id,
-                            invalid.stream,
-                            invalid.reason
-                        );
-                        if let Err(err) = queue.publish_dlq(QUOTES_DLQ_STREAM, &invalid).await {
-                            tracing::warn!("Failed to publish undecodable message to DLQ: {}", err);
-                            continue;
-                        }
-                        if let Err(err) = queue
-                            .ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &invalid.id)
-                            .await
-                        {
-                            tracing::warn!(
-                                "Failed to ack quarantined message {}: {}",
-                                invalid.id,
-                                err
-                            );
-                        }
+                        quarantine_invalid(&loop_queue, &invalid).await;
                     }
-
                     for message in result.messages {
-                        match normalize_quote(&message.envelope) {
-                            Some(market_data) => {
-                                if let Err(err) = state.storage.add_market_data(&market_data).await {
-                                    tracing::warn!("Failed to write normalized quote to storage: {}", err);
-                                    continue;
-                                }
-
-                                let normalized = StreamEnvelope::new(
-                                    NORMALIZED_QUOTES_STREAM,
-                                    "normalized_quote",
-                                    "data-engine",
-                                    Some(market_data.symbol.clone()),
-                                    normalized_payload(&message.envelope, &market_data),
-                                );
-
-                                if let Err(err) = queue.publish(NORMALIZED_QUOTES_STREAM, &normalized).await {
-                                    tracing::warn!("Failed to publish normalized quote: {}", err);
-                                    continue;
-                                }
-
-                                if let Err(err) = state.refresh_query_tables().await {
-                                    tracing::debug!("Failed to refresh query tables: {}", err);
-                                }
-
-                                if let Err(err) = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await {
-                                    tracing::warn!("Failed to ack raw quote {}: {}", message.id, err);
-                                }
-                            }
-                            None => {
-                                tracing::warn!("Skipping invalid raw quote message {}", message.id);
-                                let _ = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await;
-                            }
-                        }
+                        process_normalizer_message(&state, &loop_queue, &message).await;
                     }
                 }
                 Err(err) => tracing::warn!("Quote normalizer read failed: {}", err),
@@ -302,7 +257,105 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
         }
     });
 
+    // 周期 XAUTOCLAIM 兜底：消费端崩溃遗留的「已投递、未 ack」孤儿 pending 由独立的
+    // sweeper 认领后重放，处理路径与实时消费完全一致（注意：这与解码失败 → DLQ 是
+    // 两条不同路径，后者发生在读取时，见 quarantine_invalid/process_normalizer_message）。
+    if sweeper_enabled {
+        let sweeper_consumer = format!("de-sweep-{}", uuid::Uuid::new_v4());
+
+        tokio::spawn(async move {
+            let mut ticker = interval(sweep_interval);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            ticker.tick().await; // interval 首个 tick 立即返回，跳过以保证先等一个周期
+
+            loop {
+                ticker.tick().await;
+                match sweeper_queue
+                    .claim_stale(
+                        RAW_QUOTES_STREAM,
+                        NORMALIZER_GROUP,
+                        &sweeper_consumer,
+                        min_idle_ms,
+                        100,
+                    )
+                    .await
+                {
+                    Ok(result) => {
+                        for invalid in result.invalid {
+                            quarantine_invalid(&sweeper_queue, &invalid).await;
+                        }
+                        for message in result.messages {
+                            tracing::info!("Reprocessing orphaned pending message {}", message.id);
+                            process_normalizer_message(&sweeper_state, &sweeper_queue, &message).await;
+                        }
+                    }
+                    // Redis < 6.2 无 XAUTOCLAIM：兜底不可用属预期降级，debug 级避免刷屏
+                    Err(err) => tracing::debug!("XAUTOCLAIM sweep skipped: {}", err),
+                }
+            }
+        });
+    }
+
     Ok(())
+}
+
+/// 处理一条 quotes.raw 消息：规范化 → 入内存时序 → 转发 normalized → ack。
+///
+/// 写入/转发失败时不 ack，消息留待周期 XAUTOCLAIM 兜底重放；
+/// payload 无法规范化（缺字段等）则直接 ack 跳过——这与 stream 条目解码失败的
+/// DLQ 隔离路径（quarantine_invalid）是不同层面的两回事。
+async fn process_normalizer_message(state: &Arc<AppState>, queue: &RedisStreamQueue, message: &StreamMessage) {
+    match normalize_quote(&message.envelope) {
+        Some(market_data) => {
+            if let Err(err) = state.storage.add_market_data(&market_data).await {
+                tracing::warn!("Failed to write normalized quote to storage: {}", err);
+                return; // 不 ack：留待 XAUTOCLAIM 兜底重放
+            }
+
+            let normalized = StreamEnvelope::new(
+                NORMALIZED_QUOTES_STREAM,
+                "normalized_quote",
+                "data-engine",
+                Some(market_data.symbol.clone()),
+                normalized_payload(&message.envelope, &market_data),
+            );
+
+            if let Err(err) = queue.publish(NORMALIZED_QUOTES_STREAM, &normalized).await {
+                tracing::warn!("Failed to publish normalized quote: {}", err);
+                return; // 不 ack：留待 XAUTOCLAIM 兜底重放
+            }
+
+            if let Err(err) = state.refresh_query_tables().await {
+                tracing::debug!("Failed to refresh query tables: {}", err);
+            }
+
+            if let Err(err) = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await {
+                tracing::warn!("Failed to ack raw quote {}: {}", message.id, err);
+            }
+        }
+        None => {
+            tracing::warn!("Skipping invalid raw quote message {}", message.id);
+            let _ = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await;
+        }
+    }
+}
+
+/// 无法解码的条目：按 DLQ 契约隔离（quotes.dlq）并 ack，
+/// 避免滞留消费组 PEL 永不清理；DLQ 发布失败则不 ack，留待下轮重试。
+async fn quarantine_invalid(queue: &RedisStreamQueue, invalid: &InvalidMessage) {
+    tracing::warn!(
+        "Quarantining undecodable message {} on {}: {}",
+        invalid.id,
+        invalid.stream,
+        invalid.reason
+    );
+    if let Err(err) = queue.publish_dlq(QUOTES_DLQ_STREAM, invalid).await {
+        tracing::warn!("Failed to publish undecodable message to DLQ: {}", err);
+        return;
+    }
+    if let Err(err) = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &invalid.id).await {
+        tracing::warn!("Failed to ack quarantined message {}: {}", invalid.id, err);
+    }
 }
 
 fn normalize_quote(envelope: &StreamEnvelope) -> Option<MarketData> {

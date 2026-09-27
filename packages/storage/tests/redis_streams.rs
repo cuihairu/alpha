@@ -280,3 +280,94 @@ async fn undecodable_entries_are_surfaced_not_poisoning_the_group() {
 
     cleanup(&url, &[&stream, &dlq_stream]).await;
 }
+
+#[tokio::test]
+async fn claim_stale_reclaims_orphaned_pending_messages() {
+    // 崩溃遗留场景：消费端「已投递、未 ack」后崩溃 → 消息滞留 PEL →
+    // 周期 XAUTOCLAIM 认领 → 重新交付 → ack 后 XPENDING 清零。
+    let Some((queue, url)) = test_queue() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+
+    let stream = unique_stream("orphan");
+    queue.ensure_consumer_group(&stream, "grp").await.unwrap();
+
+    // 模拟正常生产 + 「崩溃」消费：读走但不 ack
+    queue.publish(&stream, &sample_envelope(&stream, "000001", 10.0)).await.unwrap();
+    queue.publish(&stream, &sample_envelope(&stream, "000002", 11.0)).await.unwrap();
+    let crashed = queue
+        .read_group(&stream, "grp", "crashed-consumer", 10, 100)
+        .await
+        .unwrap();
+    assert_eq!(crashed.messages.len(), 2);
+    assert_eq!(pending_count(&url, &stream, "grp").await, 2);
+
+    // 闲置时长未过阈值：不应认领
+    let not_yet = queue
+        .claim_stale(&stream, "grp", "sweeper", 60_000, 10)
+        .await
+        .unwrap();
+    assert!(not_yet.messages.is_empty(), "entries below min idle must not be claimed");
+    assert_eq!(pending_count(&url, &stream, "grp").await, 2);
+
+    // 闲置超过阈值（消息投递至今已 >1s）：认领并重新交付
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let claimed = queue
+        .claim_stale(&stream, "grp", "sweeper", 1000, 10)
+        .await
+        .unwrap();
+    assert_eq!(claimed.messages.len(), 2, "orphaned entries must be reclaimed");
+    assert!(claimed.invalid.is_empty());
+    let mut symbols: Vec<&str> = claimed
+        .messages
+        .iter()
+        .map(|m| m.envelope.payload["symbol"].as_str().unwrap())
+        .collect();
+    symbols.sort();
+    assert_eq!(symbols, vec!["000001", "000002"]);
+
+    // 认领只是转移所有权，仍属 pending；重新处理完成后 ack 才清零
+    assert_eq!(pending_count(&url, &stream, "grp").await, 2);
+    for message in &claimed.messages {
+        queue.ack(&stream, "grp", &message.id).await.unwrap();
+    }
+    assert_eq!(pending_count(&url, &stream, "grp").await, 0);
+
+    cleanup(&url, &[&stream]).await;
+}
+
+#[tokio::test]
+async fn claim_stale_acks_entries_deleted_from_stream() {
+    // 条目本体被 XDEL 的 pending 空壳（Redis 7.0+ 以 [id, nil] 应答）：
+    // claim_stale 应直接 ack 清理，而不是把空壳重新交给调用者。
+    let Some((queue, url)) = test_queue() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+
+    let stream = unique_stream("deleted");
+    queue.ensure_consumer_group(&stream, "grp").await.unwrap();
+    let published = queue.publish(&stream, &sample_envelope(&stream, "600519", 1700.0)).await.unwrap();
+
+    let crashed = queue
+        .read_group(&stream, "grp", "crashed-consumer", 10, 100)
+        .await
+        .unwrap();
+    assert_eq!(crashed.messages.len(), 1);
+    assert_eq!(pending_count(&url, &stream, "grp").await, 1);
+
+    let mut conn = raw_conn(&url).await;
+    let deleted: i64 = conn.xdel(&stream, &[&published]).await.unwrap();
+    assert_eq!(deleted, 1);
+
+    let claimed = queue
+        .claim_stale(&stream, "grp", "sweeper", 0, 10)
+        .await
+        .unwrap();
+    assert!(claimed.messages.is_empty(), "deleted entry has nothing to reprocess");
+    assert!(claimed.invalid.is_empty());
+    assert_eq!(pending_count(&url, &stream, "grp").await, 0, "PEL shell must be acked away");
+
+    cleanup(&url, &[&stream]).await;
+}

@@ -74,7 +74,7 @@ pub struct InvalidMessage {
 }
 
 /// 一次消费组读取的结果：可正常解码的消息 + 无法解码的条目。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GroupRead {
     pub messages: Vec<StreamMessage>,
     pub invalid: Vec<InvalidMessage>,
@@ -207,10 +207,7 @@ impl RedisStreamQueue {
             .await
             .map_err(|e| AlphaError::StorageError(format!("redis XREADGROUP failed: {e}")))?;
 
-        let mut result = GroupRead {
-            messages: Vec::new(),
-            invalid: Vec::new(),
-        };
+        let mut result = GroupRead::default();
         for key in entries.keys {
             for entry in key.ids {
                 let field_pairs = entry
@@ -222,34 +219,115 @@ impl RedisStreamQueue {
                             .map(|vv| (k, vv))
                     })
                     .collect::<Vec<_>>();
-                let fields: BTreeMap<String, String> =
-                    field_pairs.iter().cloned().collect();
-
-                match Self::decode_envelope(&key.key, &entry.id, field_pairs) {
-                    Ok(Some(envelope)) => result.messages.push(StreamMessage {
-                        id: entry.id,
-                        envelope,
-                    }),
-                    // 单条条目解码失败不再让整批读取报错（此前会导致消息滞留 PEL 永不清理），
-                    // 而是作为 invalid 交给消费者按 DLQ 契约处置。
-                    Ok(None) => result.invalid.push(InvalidMessage {
-                        id: entry.id,
-                        stream: key.key.clone(),
-                        reason: "missing `payload` field".to_string(),
-                        raw_payload: None,
-                        fields,
-                    }),
-                    Err(err) => result.invalid.push(InvalidMessage {
-                        id: entry.id,
-                        stream: key.key.clone(),
-                        reason: err.to_string(),
-                        raw_payload: fields.get("payload").cloned(),
-                        fields,
-                    }),
-                }
+                Self::push_decoded(&key.key, entry.id, field_pairs, &mut result);
             }
         }
         Ok(result)
+    }
+
+    /// 周期兜底：用 XAUTOCLAIM 认领组内闲置超过 `min_idle_ms` 的 pending 条目
+    /// （典型场景：消费端在「已投递、未 ack」之间崩溃，消息滞留 PEL 永不清理）。
+    ///
+    /// 与「解码失败 → DLQ」是两条独立路径：本方法只负责把孤儿消息重新交付给调用者，
+    /// 返回的 `invalid` 条目（认领后发现解码失败）仍由消费者按既有 DLQ 契约处置。
+    /// 条目本体已被 XDEL 删除的 pending 项会被直接 ack 清理（无可重处理内容）。
+    ///
+    /// 需要 Redis ≥ 6.2；服务端不支持时返回 StorageError，调用方按需降级。
+    pub async fn claim_stale(
+        &self,
+        stream: &str,
+        group: &str,
+        consumer: &str,
+        min_idle_ms: u64,
+        count: usize,
+    ) -> AlphaResult<GroupRead> {
+        let mut conn = self.get_conn().await?;
+        let reply: redis::Value = redis::cmd("XAUTOCLAIM")
+            .arg(stream)
+            .arg(group)
+            .arg(consumer)
+            .arg(min_idle_ms)
+            .arg("0-0")
+            .arg("COUNT")
+            .arg(count)
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| AlphaError::StorageError(format!("redis XAUTOCLAIM failed: {e}")))?;
+
+        let mut result = GroupRead::default();
+        // RESP2 应答：[next_cursor, entries]（6.2）或 [next_cursor, entries, deleted]（7.0+）。
+        // entries 中已删除的条目以 [id, nil] 形式出现（7.0+ 也会汇总在第三段 deleted 里）。
+        let entries = match &reply {
+            redis::Value::Bulk(items) if items.len() >= 2 => &items[1],
+            _ => return Ok(result),
+        };
+        let entry_items = match entries {
+            redis::Value::Bulk(items) => items,
+            _ => return Ok(result),
+        };
+
+        for entry in entry_items {
+            let (id, field_values) = match entry {
+                redis::Value::Bulk(pair) if pair.len() == 2 => match &pair[0] {
+                    redis::Value::Data(bytes) => {
+                        let id = String::from_utf8_lossy(bytes).to_string();
+                        (id, &pair[1])
+                    }
+                    _ => continue,
+                },
+                _ => continue,
+            };
+
+            match field_values {
+                // 条目已被 XDEL：只剩 PEL 空壳，直接 ack 清理，避免空壳继续滞留
+                redis::Value::Nil => {
+                    self.ack(stream, group, &id).await?;
+                }
+                redis::Value::Bulk(flat) => {
+                    let field_pairs = flat
+                        .chunks_exact(2)
+                        .filter_map(|pair| {
+                            let key = redis::from_redis_value::<String>(&pair[0]).ok()?;
+                            let value = redis::from_redis_value::<String>(&pair[1]).ok()?;
+                            Some((key, value))
+                        })
+                        .collect::<Vec<_>>();
+                    Self::push_decoded(stream, id, field_pairs, &mut result);
+                }
+                _ => continue,
+            }
+        }
+        Ok(result)
+    }
+
+    /// 单条条目解码入库：可解码进 messages，失败进 invalid（不中断批次）。
+    fn push_decoded(
+        stream: &str,
+        id: String,
+        field_pairs: Vec<(String, String)>,
+        result: &mut GroupRead,
+    ) {
+        let fields: BTreeMap<String, String> = field_pairs.iter().cloned().collect();
+
+        match Self::decode_envelope(stream, &id, field_pairs) {
+            Ok(Some(envelope)) => result.messages.push(StreamMessage { id, envelope }),
+            // 单条条目解码失败不再让整批读取报错（此前会导致消息滞留 PEL 永不清理），
+            // 而是作为 invalid 交给消费者按 DLQ 契约处置。
+            Ok(None) => result.invalid.push(InvalidMessage {
+                id,
+                stream: stream.to_string(),
+                reason: "missing `payload` field".to_string(),
+                raw_payload: None,
+                fields,
+            }),
+            Err(err) => result.invalid.push(InvalidMessage {
+                id,
+                stream: stream.to_string(),
+                reason: err.to_string(),
+                raw_payload: fields.get("payload").cloned(),
+                fields,
+            }),
+        }
     }
 
     /// 将一条无法解码的条目投递到独立 DLQ stream（仓库契约：`quotes.dlq` 这类独立 stream）。
