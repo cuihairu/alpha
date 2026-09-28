@@ -353,11 +353,14 @@ impl WasmAnalyzer {
         serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
     }
 
-    /// SMA 双均线交叉回测（TODO「开发高性能 Rust WASM 核心计算库」最小可用版本）。
+    /// SMA 双均线交叉回测（便捷接口：内部 `to_vec()` 一次 memcpy 拷入）。
+    /// 一次性调用用它即可；热路径（逐 bar/逐标的反复回测）请走零拷贝组合：
+    /// `allocPriceBuffer` → JS 直写视图 → [`WasmAnalyzer::backtest_sma_cross_ptr`]
+    /// （复用缓冲）→ `freePriceBuffer`（TODO「实现零拷贝内存管理」，A/B 基准见
+    /// examples/zero_copy_bench.rs 与 TODO 注）。
     /// 记账与信号逻辑全部在 alpha-core（L0 纯计算层，单测覆盖），此处仅做 JS 边界转换。
     /// JS 侧字段为 serde 默认 snake_case（equity_curve/total_return_pct/…，
     /// 与 calculateAllIndicators 输出键风格一致），方法名 camelCase 与既有导出一致。
-    /// 简化口径：`to_vec()` 一次 memcpy 拷入；零拷贝视图留待「零拷贝内存管理」立项统一处理。
     /// 非法参数（fast >= slow、空序列）会触发 wasm trap——与全 crate 的边界口径一致，
     /// 参数校验由 JS 调用方负责。
     #[wasm_bindgen(js_name = backtestSmaCross)]
@@ -372,6 +375,32 @@ impl WasmAnalyzer {
         let mut strategy = alpha_core::backtest::SmaCrossStrategy::new(fast_period, slow_period);
         let report = alpha_core::backtest::BacktestEngine::new(fee_bps).run(&prices, &mut strategy);
         serde_wasm_bindgen::to_value(&report).unwrap_or(JsValue::NULL)
+    }
+
+    /// 零拷贝回测：直接读 `allocPriceBuffer` 返回的 `(ptr, len)` 所指价格，
+    /// 不做任何拷贝。其余口径与 [`WasmAnalyzer::backtest_sma_cross`] 一致。
+    /// 内存扩容警告：本调用内部会为 equity_curve 分配堆内存，可能触发 wasm
+    /// 内存 grow——此后 JS 持有的旧视图已失效，需复用时须重新 `allocPriceBuffer`。
+    #[wasm_bindgen(js_name = backtestSmaCrossPtr)]
+    pub fn backtest_sma_cross_ptr(
+        &self,
+        ptr: u32,
+        len: usize,
+        fast_period: usize,
+        slow_period: usize,
+        fee_bps: f64,
+    ) -> Result<JsValue, JsValue> {
+        if ptr == 0 || len == 0 {
+            return Err(JsValue::from_str(
+                "backtestSmaCrossPtr: 非法 (ptr, len)——须来自 allocPriceBuffer 且未释放",
+            ));
+        }
+        // SAFETY: (ptr, len) 契约来自 allocPriceBuffer（8 字节对齐、地址恒定、
+        // 未释放），wasm 无法校验外来指针，见 shared_buffer 模块文档
+        let prices = unsafe { std::slice::from_raw_parts(ptr as *const f64, len) };
+        let mut strategy = alpha_core::backtest::SmaCrossStrategy::new(fast_period, slow_period);
+        let report = alpha_core::backtest::BacktestEngine::new(fee_bps).run(prices, &mut strategy);
+        Ok(serde_wasm_bindgen::to_value(&report).unwrap_or(JsValue::NULL))
     }
 
     /// 获取性能指标
@@ -532,6 +561,43 @@ mod tests {
 
     /// 回测绑定：上涨序列净值应为持有收益（逻辑断言在 alpha-core 单测，
     /// 此处验证 JS 边界转换后报告结构完整、字段为 serde 默认 snake_case）
+    /// 零拷贝全流程（alloc → JS 直写视图 → ptr 计算 → free）：
+    /// 与便捷接口同口径，且计算侧读到的就是 JS 写入的数据
+    #[wasm_bindgen_test]
+    fn test_zero_copy_backtest_flow() {
+        let handle = alloc_price_buffer(5).expect("alloc 应成功");
+        let ptr = js_sys::Reflect::get(&handle, &JsValue::from_str("ptr"))
+            .unwrap()
+            .as_f64()
+            .unwrap() as u32;
+        let len = js_sys::Reflect::get(&handle, &JsValue::from_str("len"))
+            .unwrap()
+            .as_f64()
+            .unwrap() as usize;
+        assert_eq!(len, 5);
+        let view: js_sys::Float64Array =
+            js_sys::Reflect::get(&handle, &JsValue::from_str("view")).unwrap().into();
+        view.set(&js_sys::Float64Array::from(&[10.0, 20.0, 30.0, 40.0, 50.0][..]), 0);
+
+        let analyzer = WasmAnalyzer::new(None);
+        let report = analyzer
+            .backtest_sma_cross_ptr(ptr, len, 1, 2, 0.0)
+            .expect("ptr 回测应成功");
+        let total_return = js_sys::Reflect::get(&report, &JsValue::from_str("total_return_pct"))
+            .expect("报告应含 total_return_pct");
+        assert!(
+            (total_return.as_f64().unwrap_or(0.0) - 150.0).abs() < 1e-9,
+            "零拷贝路径与便捷路径同口径：bar1 入场 20 持有到 50 = 2.5x 应 +150%"
+        );
+
+        free_price_buffer(ptr, len).expect("free 应成功");
+        // 双 free 拒绝（契约前置检查，非 UB 路径）
+        assert!(
+            free_price_buffer(ptr, len).is_err(),
+            "同一 (ptr, len) 二次 free 必须报错"
+        );
+    }
+
     #[wasm_bindgen_test]
     fn test_backtest_sma_cross_binding() {
         let analyzer = WasmAnalyzer::new(None);

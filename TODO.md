@@ -51,7 +51,14 @@
   （serde snake_case 输出，node 冒烟验证持有收益与费用记账）；接口缝：多标的/止损/滑点
   经 Strategy trait 扩展，Worker 并行走 worker.rs BacktestStrategy 协议预留，
   零拷贝 memcpy 简化待「零拷贝内存管理」项统一处理）
-- [ ] 实现零拷贝内存管理与 Arrow 数据格式优化
+- [x] 实现零拷贝内存管理与 Arrow 数据格式优化
+  （2026-09-28 最小可用版本：wasm-analyzer/src/shared_buffer.rs 定长 f64 缓冲区
+  alloc/from_raw/as_slice/into_vec + allocPriceBuffer/freePriceBuffer wasm 绑定；
+  JS 侧 Float64Array::view_mut_raw 零拷贝直写、Rust 侧 as_slice 零拷贝直读，
+  生命周期契约（定长、grow 后视图失效、双 free UB）文档化；
+  arrow_adapter.rs：ArrowBatch.from_market_data 零拷贝列构建、
+  exportPrices/exportVolumes 导出、ArrowMemoryPool 预留；
+  wasm32 target 编译通过、原生测试 17 通过 3 自跳过、全仓门禁复跑 0 失败）
 - [ ] 构建混合存储架构（WASM 内存 + IndexedDB + 服务端缓存）
 - [ ] 开发流式数据处理和并行计算机制（Web Workers + Rayon）
 - [ ] 实现实时数据同步协议（WebSocket 增量更新 + 版本控制）
