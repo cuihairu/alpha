@@ -2,8 +2,8 @@
 //!
 //! 负责任务调度、并发控制和优先级管理
 
-use crate::sources::{DataSource, KlineType, RealtimeQuote};
 use crate::cleaner::DataCleaner;
+use crate::sources::{DataSource, KlineType, RealtimeQuote};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -13,18 +13,13 @@ use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
 /// 任务优先级
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum SourceTaskPriority {
     Low = 0,
+    #[default]
     Normal = 1,
     High = 2,
     Urgent = 3,
-}
-
-impl Default for SourceTaskPriority {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 /// 任务状态
@@ -48,7 +43,11 @@ pub enum SourceTaskType {
     /// 获取实时行情
     RealtimeQuote { symbols: Vec<String> },
     /// 获取 K线数据
-    KlineData { symbol: String, kline_type: KlineType, limit: usize },
+    KlineData {
+        symbol: String,
+        kline_type: KlineType,
+        limit: usize,
+    },
     /// 获取股票列表
     StockList,
     /// 健康检查
@@ -203,7 +202,12 @@ impl SourceTaskQueue {
     }
 
     fn remove_by_id(&mut self, task_id: &str) -> bool {
-        for queue in [&mut self.urgent, &mut self.high, &mut self.normal, &mut self.low] {
+        for queue in [
+            &mut self.urgent,
+            &mut self.high,
+            &mut self.normal,
+            &mut self.low,
+        ] {
             if let Some(pos) = queue.iter().position(|task| task.id == task_id) {
                 queue.remove(pos);
                 return true;
@@ -294,7 +298,10 @@ impl SourceScheduler {
         }
 
         queue.push(task.clone())?;
-        info!("Task submitted: {} (priority: {:?})", task.id, task.priority);
+        info!(
+            "Task submitted: {} (priority: {:?})",
+            task.id, task.priority
+        );
 
         // 更新统计
         let mut stats = self.stats.write().await;
@@ -340,7 +347,10 @@ impl SourceScheduler {
             Ok(permit) => permit,
             Err(_) => {
                 // 并发数已达上限，重新放回队列
-                warn!("Max concurrent tasks reached, re-queueing task: {}", task.id);
+                warn!(
+                    "Max concurrent tasks reached, re-queueing task: {}",
+                    task.id
+                );
                 let _ = self.submit_task(task).await;
                 return;
             }
@@ -371,7 +381,8 @@ impl SourceScheduler {
         let result = tokio::time::timeout(
             Duration::from_secs(self.config.task_timeout),
             self.do_execute_task(&task),
-        ).await;
+        )
+        .await;
 
         // 任务完成
         let (status, error) = match result {
@@ -385,7 +396,10 @@ impl SourceScheduler {
             }
             Err(_) => {
                 error!("Task timeout: {}", task_id);
-                (ScheduledTaskStatus::Failed, Some("Task timeout".to_string()))
+                (
+                    ScheduledTaskStatus::Failed,
+                    Some("Task timeout".to_string()),
+                )
             }
         };
 
@@ -427,8 +441,9 @@ impl SourceScheduler {
             // 更新平均执行时间
             if let Some(exec_time) = task.execution_time_ms() {
                 let total = stats.success_tasks + stats.failed_tasks;
-                stats.avg_execution_time_ms =
-                    ((stats.avg_execution_time_ms * (total - 1) as u64) + exec_time as u64) / total as u64;
+                stats.avg_execution_time_ms = ((stats.avg_execution_time_ms * (total - 1) as u64)
+                    + exec_time as u64)
+                    / total as u64;
             }
 
             stats.last_updated = Some(Utc::now());
@@ -439,7 +454,10 @@ impl SourceScheduler {
     }
 
     /// 实际执行任务
-    async fn do_execute_task(&self, task: &SourceTask) -> Result<SourceTaskResult, Box<dyn std::error::Error + Send + Sync>> {
+    async fn do_execute_task(
+        &self,
+        task: &SourceTask,
+    ) -> Result<SourceTaskResult, Box<dyn std::error::Error + Send + Sync>> {
         // 获取可用的数据源
         let source = self.get_best_source().await?;
 
@@ -460,15 +478,17 @@ impl SourceScheduler {
                 if self.config.enable_cleaning {
                     let mut cleaner = self.cleaner.lock().await;
                     let cleaned = cleaner.clean_realtime_quotes(quotes);
-                    let valid_quotes: Vec<_> = cleaned.into_iter()
-                        .filter_map(|r| r.data)
-                        .collect();
+                    let valid_quotes: Vec<_> = cleaned.into_iter().filter_map(|r| r.data).collect();
                     Ok(SourceTaskResult::RealtimeQuotes(valid_quotes))
                 } else {
                     Ok(SourceTaskResult::RealtimeQuotes(quotes))
                 }
             }
-            SourceTaskType::KlineData { symbol, kline_type, limit } => {
+            SourceTaskType::KlineData {
+                symbol,
+                kline_type,
+                limit,
+            } => {
                 let _klines = source.get_kline(symbol, *kline_type, *limit).await?;
                 Ok(SourceTaskResult::Empty)
             }
@@ -484,13 +504,17 @@ impl SourceScheduler {
     }
 
     /// 获取最佳数据源
-    async fn get_best_source(&self) -> Result<Arc<dyn DataSource>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_best_source(
+        &self,
+    ) -> Result<Arc<dyn DataSource>, Box<dyn std::error::Error + Send + Sync>> {
         if self.sources.is_empty() {
             return Err("No data sources available".into());
         }
 
         // 简单策略：返回优先级最高的数据源
-        let best = self.sources.iter()
+        let best = self
+            .sources
+            .iter()
             .min_by_key(|s| s.priority())
             .ok_or("No data sources available")?;
 
@@ -550,26 +574,24 @@ pub struct SourceTaskGenerator;
 impl SourceTaskGenerator {
     /// 生成实时行情任务
     pub fn realtime_quotes(symbols: Vec<String>, priority: SourceTaskPriority) -> SourceTask {
-        SourceTask::new(
-            SourceTaskType::RealtimeQuote { symbols },
-            priority,
-        )
+        SourceTask::new(SourceTaskType::RealtimeQuote { symbols }, priority)
     }
 
     /// 生成 K线任务
     pub fn kline_data(symbol: String, kline_type: KlineType, limit: usize) -> SourceTask {
         SourceTask::new(
-            SourceTaskType::KlineData { symbol, kline_type, limit },
+            SourceTaskType::KlineData {
+                symbol,
+                kline_type,
+                limit,
+            },
             SourceTaskPriority::Normal,
         )
     }
 
     /// 生成健康检查任务
     pub fn health_check() -> SourceTask {
-        SourceTask::new(
-            SourceTaskType::HealthCheck,
-            SourceTaskPriority::Low,
-        )
+        SourceTask::new(SourceTaskType::HealthCheck, SourceTaskPriority::Low)
     }
 }
 
@@ -603,15 +625,9 @@ mod tests {
     fn test_task_queue() {
         let mut queue = SourceTaskQueue::new();
 
-        let task1 = SourceTask::new(
-            SourceTaskType::HealthCheck,
-            SourceTaskPriority::Low,
-        );
+        let task1 = SourceTask::new(SourceTaskType::HealthCheck, SourceTaskPriority::Low);
 
-        let task2 = SourceTask::new(
-            SourceTaskType::HealthCheck,
-            SourceTaskPriority::High,
-        );
+        let task2 = SourceTask::new(SourceTaskType::HealthCheck, SourceTaskPriority::High);
 
         queue.push(task1).unwrap();
         queue.push(task2).unwrap();

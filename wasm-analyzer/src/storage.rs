@@ -14,6 +14,12 @@ pub struct IndexedDBStorage {
     db_name: String,
 }
 
+impl Default for IndexedDBStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl IndexedDBStorage {
     /// 创建新的存储管理器
@@ -123,7 +129,6 @@ impl StoredMarketDataWrapper {
         self.data.volume as f64
     }
 }
-
 
 /// 混合存储策略管理器
 #[wasm_bindgen]

@@ -10,21 +10,19 @@ use std::{
     time::{Duration, Instant},
 };
 
+use alpha_storage::{RedisStreamQueue, StreamEnvelope};
 use axum::{
     body::Body,
     extract::State,
     http::StatusCode,
+    middleware::Next,
     response::{
-        Response,
         sse::{Event as SseEvent, KeepAlive, Sse},
-        IntoResponse,
-        Json,
+        IntoResponse, Json, Response,
     },
     routing::{get, post},
-    middleware::Next,
     Router,
 };
-use alpha_storage::{RedisStreamQueue, StreamEnvelope};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -40,12 +38,13 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::multilang_simple::{CrawlerConfig, CrawlerLanguage, MultilangCrawler};
-use crate::sources::{CrawlerConfig as SourceCrawlerConfig, CrawlerError, DataSource, EastmoneySource};
+use crate::sources::{
+    CrawlerConfig as SourceCrawlerConfig, CrawlerError, DataSource, EastmoneySource,
+};
 use crate::types::{
-    TaskDefinition, TaskResult, TaskSource, TaskStatus, TaskPriority,
-    TaskConfig, RequestConfig, ParserConfig, StorageConfig, RetryPolicy,
-    AShareDataSource, HKShareDataSource, USShareDataSource,
-    NewsDataSource,
+    AShareDataSource, HKShareDataSource, NewsDataSource, ParserConfig, RequestConfig, RetryPolicy,
+    StorageConfig, TaskConfig, TaskDefinition, TaskPriority, TaskResult, TaskSource, TaskStatus,
+    USShareDataSource,
 };
 
 const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
@@ -68,10 +67,15 @@ pub struct SimpleCollector {
 }
 
 /// 收集器事件
+///（TaskSubmitted 变体携带完整任务定义，属低频管理面事件，不做 Box 装箱）
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize)]
 pub enum CollectorEvent {
     /// 任务提交
-    TaskSubmitted { task_id: String, task: TaskDefinition },
+    TaskSubmitted {
+        task_id: String,
+        task: TaskDefinition,
+    },
     /// 任务状态更新
     TaskStatusUpdated { task_id: String, status: TaskStatus },
     /// 任务完成
@@ -79,7 +83,10 @@ pub enum CollectorEvent {
     /// 任务失败
     TaskFailed { task_id: String, error: String },
     /// 系统状态更新
-    SystemStatus { status: String, timestamp: DateTime<Utc> },
+    SystemStatus {
+        status: String,
+        timestamp: DateTime<Utc>,
+    },
 }
 
 /// 新建任务请求
@@ -211,7 +218,9 @@ impl SimpleCollector {
         let now = Utc::now();
 
         // 解析任务来源
-        let source = self.parse_task_source(&request.source_type, &request.url).await?;
+        let source = self
+            .parse_task_source(&request.source_type, &request.url)
+            .await?;
 
         // 创建任务定义
         let task = TaskDefinition {
@@ -229,9 +238,7 @@ impl SimpleCollector {
                     params: HashMap::new(),
                     body: request.body,
                     proxy: None,
-                    user_agents: vec![
-                        "Mozilla/5.0 (compatible; AlphaCollector/1.0)".to_string(),
-                    ],
+                    user_agents: vec!["Mozilla/5.0 (compatible; AlphaCollector/1.0)".to_string()],
                     request_interval: 1000,
                     retry_interval: 5000,
                 },
@@ -342,10 +349,7 @@ impl SimpleCollector {
                 working_directory: Some(working_directory),
                 environment: HashMap::new(),
                 timeout: task.timeout,
-                arguments: vec![
-                    "--symbols".to_string(),
-                    symbols.join(","),
-                ],
+                arguments: vec!["--symbols".to_string(), symbols.join(",")],
             },
             _ => CrawlerConfig {
                 language: language.clone(),
@@ -534,7 +538,9 @@ impl SimpleCollector {
     fn generate_script_code(&self, task: &TaskDefinition, language: &CrawlerLanguage) -> String {
         match language {
             CrawlerLanguage::Python => {
-                format!(r#"
+                let headers_repr = format!("{:?}", task.config.request.headers);
+                format!(
+                    r#"
 	import json
 	import urllib.request
 	import urllib.error
@@ -562,12 +568,12 @@ impl SimpleCollector {
 	if __name__ == "__main__":
 	    main()
 	"#,
-	                    task.config.request.url,
-	                    format!("{:?}", task.config.request.headers)
-	                )
+                    task.config.request.url, headers_repr
+                )
             }
             CrawlerLanguage::NodeJs => {
-                format!(r#"
+                format!(
+                    r#"
 const https = require('https');
 const url = '{}';
 https.get(url, (res) => {{
@@ -591,7 +597,8 @@ https.get(url, (res) => {{
                 )
             }
             CrawlerLanguage::Go => {
-                format!(r#"
+                format!(
+                    r#"
 package main
 
 import (
@@ -632,7 +639,8 @@ func main() {{
                 )
             }
             CrawlerLanguage::Shell => {
-                format!(r#"
+                format!(
+                    r#"
 #!/bin/bash
 
 URL="{}"
@@ -652,7 +660,9 @@ else
 fi
 "#,
                     task.config.request.url,
-                    task.config.request.headers
+                    task.config
+                        .request
+                        .headers
                         .iter()
                         .map(|(k, v)| format!("-H '{}: {}'", k, v))
                         .collect::<Vec<_>>()
@@ -660,7 +670,8 @@ fi
                 )
             }
             CrawlerLanguage::Rust => {
-                format!(r#"
+                format!(
+                    r#"
 [package]
 name = "crawler-{}"
 version = "0.1.0"
@@ -692,13 +703,14 @@ path = "main.rs"
         let running = self.running_tasks.read().await;
         let tasks = self.tasks.read().await;
 
-        let (completed, failed) = running.values().fold((0, 0), |(comp, fail), status| {
-            match status {
-                TaskStatus::Completed => (comp + 1, fail),
-                TaskStatus::Failed => (comp, fail + 1),
-                _ => (comp, fail),
-            }
-        });
+        let (completed, failed) =
+            running
+                .values()
+                .fold((0, 0), |(comp, fail), status| match status {
+                    TaskStatus::Completed => (comp + 1, fail),
+                    TaskStatus::Failed => (comp, fail + 1),
+                    _ => (comp, fail),
+                });
 
         TaskStats {
             total: tasks.len(),
@@ -726,9 +738,7 @@ pub fn build_router(collector: Arc<SimpleCollector>) -> Router {
         .route("/stats", get(get_stats))
         .route("/events", get(sse_events))
         .with_state(collector)
-        .layer(
-            axum::middleware::from_fn(request_log_middleware)
-        )
+        .layer(axum::middleware::from_fn(request_log_middleware))
 }
 
 async fn request_log_middleware(request: axum::http::Request<Body>, next: Next) -> Response {
@@ -739,9 +749,7 @@ async fn request_log_middleware(request: axum::http::Request<Body>, next: Next) 
 }
 
 /// 健康检查端点
-async fn health_check(
-    State(collector): State<Arc<SimpleCollector>>,
-) -> impl IntoResponse {
+async fn health_check(State(collector): State<Arc<SimpleCollector>>) -> impl IntoResponse {
     let stats = collector.get_task_stats().await;
 
     let response = HealthResponse {
@@ -761,9 +769,8 @@ async fn submit_task(
 ) -> impl IntoResponse {
     match collector.submit_task(request).await {
         Ok(response) => {
-            let value = serde_json::to_value(response).unwrap_or_else(|_| {
-                serde_json::json!({"error": "failed to serialize response"})
-            });
+            let value = serde_json::to_value(response)
+                .unwrap_or_else(|_| serde_json::json!({"error": "failed to serialize response"}));
             (StatusCode::CREATED, Json(value))
         }
         Err(error) => {
@@ -798,9 +805,7 @@ async fn get_task_status(
 }
 
 /// 列出所有任务端点
-async fn list_tasks(
-    State(collector): State<Arc<SimpleCollector>>,
-) -> impl IntoResponse {
+async fn list_tasks(State(collector): State<Arc<SimpleCollector>>) -> impl IntoResponse {
     let tasks = collector.tasks.read().await;
     let task_list: Vec<_> = tasks
         .values()
@@ -847,7 +852,10 @@ async fn publish_quotes(
     Json(request): Json<PublishQuotesRequest>,
 ) -> impl IntoResponse {
     match collector.publish_realtime_quotes(&request.symbols).await {
-        Ok(response) => (StatusCode::OK, Json(serde_json::to_value(response).unwrap_or_default())),
+        Ok(response) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(response).unwrap_or_default()),
+        ),
         Err(error) => (
             StatusCode::BAD_GATEWAY,
             Json(serde_json::json!({ "error": error })),
@@ -856,17 +864,13 @@ async fn publish_quotes(
 }
 
 /// 获取统计信息端点
-async fn get_stats(
-    State(collector): State<Arc<SimpleCollector>>,
-) -> impl IntoResponse {
+async fn get_stats(State(collector): State<Arc<SimpleCollector>>) -> impl IntoResponse {
     let stats = collector.get_task_stats().await;
     (StatusCode::OK, Json(stats))
 }
 
 /// SSE事件流端点
-async fn sse_events(
-    State(collector): State<Arc<SimpleCollector>>,
-) -> impl IntoResponse {
+async fn sse_events(State(collector): State<Arc<SimpleCollector>>) -> impl IntoResponse {
     let rx = collector.subscribe_events();
 
     let stream = BroadcastStream::new(rx).filter_map(|msg| match msg {
@@ -888,6 +892,17 @@ async fn sse_events(
             .interval(Duration::from_secs(15))
             .text("keep-alive"),
     )
+}
+
+fn map_crawler_error(err: CrawlerError) -> String {
+    match err {
+        CrawlerError::RequestError(msg) => format!("request error: {}", msg),
+        CrawlerError::ParseError(msg) => format!("parse error: {}", msg),
+        CrawlerError::SourceError(msg) => format!("source error: {}", msg),
+        CrawlerError::RateLimited => "rate limited".to_string(),
+        CrawlerError::Timeout => "crawler timeout".to_string(),
+        CrawlerError::InvalidData(msg) => format!("invalid data: {}", msg),
+    }
 }
 
 #[cfg(test)]
@@ -913,10 +928,22 @@ mod tests {
     fn test_priority_parsing() {
         let collector = SimpleCollector::new("/tmp");
 
-        assert_eq!(collector.parse_priority(&Some("critical".to_string())), TaskPriority::Critical);
-        assert_eq!(collector.parse_priority(&Some("high".to_string())), TaskPriority::High);
-        assert_eq!(collector.parse_priority(&Some("low".to_string())), TaskPriority::Low);
-        assert_eq!(collector.parse_priority(&Some("invalid".to_string())), TaskPriority::Medium);
+        assert_eq!(
+            collector.parse_priority(&Some("critical".to_string())),
+            TaskPriority::Critical
+        );
+        assert_eq!(
+            collector.parse_priority(&Some("high".to_string())),
+            TaskPriority::High
+        );
+        assert_eq!(
+            collector.parse_priority(&Some("low".to_string())),
+            TaskPriority::Low
+        );
+        assert_eq!(
+            collector.parse_priority(&Some("invalid".to_string())),
+            TaskPriority::Medium
+        );
         assert_eq!(collector.parse_priority(&None), TaskPriority::Medium);
     }
 
@@ -969,16 +996,5 @@ mod tests {
         let shell_code = collector.generate_script_code(&task, &CrawlerLanguage::Shell);
         assert!(shell_code.contains("curl"));
         assert!(shell_code.contains(&task.config.request.url));
-    }
-}
-
-fn map_crawler_error(err: CrawlerError) -> String {
-    match err {
-        CrawlerError::RequestError(msg) => format!("request error: {}", msg),
-        CrawlerError::ParseError(msg) => format!("parse error: {}", msg),
-        CrawlerError::SourceError(msg) => format!("source error: {}", msg),
-        CrawlerError::RateLimited => "rate limited".to_string(),
-        CrawlerError::Timeout => "crawler timeout".to_string(),
-        CrawlerError::InvalidData(msg) => format!("invalid data: {}", msg),
     }
 }

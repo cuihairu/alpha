@@ -24,22 +24,46 @@ impl SystemCapabilities {
     pub fn new() -> Self {
         Self {
             data_sources: vec![
-                "A股", "港股", "美股", "加密货币", "外汇",
-                "大宗商品", "债券", "基金", "新闻", "ESG数据", "研究报告"
+                "A股",
+                "港股",
+                "美股",
+                "加密货币",
+                "外汇",
+                "大宗商品",
+                "债券",
+                "基金",
+                "新闻",
+                "ESG数据",
+                "研究报告",
             ],
-            programming_languages: vec![
-                "Python", "JavaScript", "Go", "Rust", "Shell"
-            ],
+            programming_languages: vec!["Python", "JavaScript", "Go", "Rust", "Shell"],
             crawler_frameworks: vec![
-                "Scrapy", "Puppeteer", "Selenium", "BeautifulSoup",
-                "Cheerio", "Axios", "Colly", "Reqwest", "Playwright"
+                "Scrapy",
+                "Puppeteer",
+                "Selenium",
+                "BeautifulSoup",
+                "Cheerio",
+                "Axios",
+                "Colly",
+                "Reqwest",
+                "Playwright",
             ],
             features: vec![
-                "自动爬虫发现", "智能任务分配", "分布式管理",
-                "多语言支持", "实时数据采集", "负载均衡",
-                "容错和重试", "监控和告警", "配置管理",
-                "API集成", "数据转换", "缓存优化",
-                "安全加密", "任务调度", "性能监控"
+                "自动爬虫发现",
+                "智能任务分配",
+                "分布式管理",
+                "多语言支持",
+                "实时数据采集",
+                "负载均衡",
+                "容错和重试",
+                "监控和告警",
+                "配置管理",
+                "API集成",
+                "数据转换",
+                "缓存优化",
+                "安全加密",
+                "任务调度",
+                "性能监控",
             ],
         }
     }

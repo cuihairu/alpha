@@ -25,15 +25,15 @@ pub struct SinaSource {
 impl SinaSource {
     /// 创建新的新浪财经数据源
     pub fn new(config: CrawlerConfig) -> Self {
-        let mut builder = Client::builder()
-            .timeout(Duration::from_secs(config.timeout));
+        let mut builder = Client::builder().timeout(Duration::from_secs(config.timeout));
 
         if let Some(ref proxy) = config.proxy {
-            let proxy_url = if let (Some(ref user), Some(ref pass)) = (&proxy.username, &proxy.password) {
-                format!("{}:{}@{}", user, pass, proxy.url)
-            } else {
-                proxy.url.clone()
-            };
+            let proxy_url =
+                if let (Some(ref user), Some(ref pass)) = (&proxy.username, &proxy.password) {
+                    format!("{}:{}@{}", user, pass, proxy.url)
+                } else {
+                    proxy.url.clone()
+                };
             if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
                 builder = builder.proxy(proxy);
             }
@@ -57,9 +57,12 @@ impl SinaSource {
     /// 解析实时行情响应
     /// 响应格式: var hq_str_sh600000="浦发银行,9.88,9.89,9.90,9.91,9.87,9.90,9.91,37143368,368076074.00,..."
     fn parse_realtime_response(symbol: &str, response: &str) -> CrawlerResult<RealtimeQuote> {
-        let data_start = response.find('"')
-            .ok_or_else(|| CrawlerError::ParseError("No data found in response".to_string()))? + 1;
-        let data_end = response.rfind('"')
+        let data_start = response
+            .find('"')
+            .ok_or_else(|| CrawlerError::ParseError("No data found in response".to_string()))?
+            + 1;
+        let data_end = response
+            .rfind('"')
             .ok_or_else(|| CrawlerError::ParseError("No end quote found".to_string()))?;
 
         let data_str = &response[data_start..data_end];
@@ -73,21 +76,29 @@ impl SinaSource {
         }
 
         let name = parts[0].to_string();
-        let open = parts[1].parse::<f64>()
+        let open = parts[1]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid open price".to_string()))?;
-        let pre_close = parts[2].parse::<f64>()
+        let pre_close = parts[2]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid pre-close price".to_string()))?;
-        let price = parts[3].parse::<f64>()
+        let price = parts[3]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid current price".to_string()))?;
-        let high = parts[4].parse::<f64>()
+        let high = parts[4]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid high price".to_string()))?;
-        let low = parts[5].parse::<f64>()
+        let low = parts[5]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid low price".to_string()))?;
         let bid1 = parts[6].parse::<f64>().ok();
         let ask1 = parts[7].parse::<f64>().ok();
-        let volume = parts[8].parse::<f64>()
-            .map_err(|_| CrawlerError::ParseError("Invalid volume".to_string()))? as u64;
-        let amount = parts[9].parse::<f64>()
+        let volume = parts[8]
+            .parse::<f64>()
+            .map_err(|_| CrawlerError::ParseError("Invalid volume".to_string()))?
+            as u64;
+        let amount = parts[9]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid amount".to_string()))?;
 
         let bid1_volume = if !parts[10].is_empty() {
@@ -159,9 +170,7 @@ impl SinaSource {
 
     /// 批量获取行情的URL
     fn build_batch_url(symbols: &[String]) -> String {
-        let formatted: Vec<String> = symbols.iter()
-            .map(|s| Self::format_symbol(s))
-            .collect();
+        let formatted: Vec<String> = symbols.iter().map(|s| Self::format_symbol(s)).collect();
 
         let list = formatted.join(",");
         format!("{}/list={}", SINA_BASE_URL, list)
@@ -313,48 +322,51 @@ impl DataSource for SinaSource {
         // 解析 JSON 响应
         // 新浪返回的是一种特殊格式的 JSON，需要解析
         if let Ok(data) = serde_json::from_str::<Vec<serde_json::Value>>(&text) {
-            let klines = data.iter().filter_map(|item| {
-                let arr = item.as_array()?;
-                if arr.len() < 6 {
-                    return None;
-                }
+            let klines = data
+                .iter()
+                .filter_map(|item| {
+                    let arr = item.as_array()?;
+                    if arr.len() < 6 {
+                        return None;
+                    }
 
-                let date_str = arr[0].as_str()?;
-                let open = arr[1].as_f64()?;
-                let high = arr[2].as_f64()?;
-                let low = arr[3].as_f64()?;
-                let close = arr[4].as_f64()?;
-                let volume = arr[5].as_f64()? as u64;
+                    let date_str = arr[0].as_str()?;
+                    let open = arr[1].as_f64()?;
+                    let high = arr[2].as_f64()?;
+                    let low = arr[3].as_f64()?;
+                    let close = arr[4].as_f64()?;
+                    let volume = arr[5].as_f64()? as u64;
 
-                // 解析日期（无时间信息时按 00:00:00 处理）
-                let timestamp = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                    .ok()
-                    .and_then(|date| date.and_hms_opt(0, 0, 0))
-                    .map(|dt| Utc.from_utc_datetime(&dt))
-                    .unwrap_or_else(Utc::now);
+                    // 解析日期（无时间信息时按 00:00:00 处理）
+                    let timestamp = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                        .ok()
+                        .and_then(|date| date.and_hms_opt(0, 0, 0))
+                        .map(|dt| Utc.from_utc_datetime(&dt))
+                        .unwrap_or_else(Utc::now);
 
-                let change = close - open;
-                let change_percent = if open > 0.0 {
-                    (change / open) * 100.0
-                } else {
-                    0.0
-                };
+                    let change = close - open;
+                    let change_percent = if open > 0.0 {
+                        (change / open) * 100.0
+                    } else {
+                        0.0
+                    };
 
-                Some(KlineData {
-                    symbol: symbol.to_string(),
-                    kline_type,
-                    timestamp: timestamp.timestamp(),
-                    open,
-                    high,
-                    low,
-                    close,
-                    volume,
-                    amount: 0.0, // 新浪 API 可能不返回成交额
-                    change_percent,
-                    change,
-                    turnover_rate: None,
+                    Some(KlineData {
+                        symbol: symbol.to_string(),
+                        kline_type,
+                        timestamp: timestamp.timestamp(),
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume,
+                        amount: 0.0, // 新浪 API 可能不返回成交额
+                        change_percent,
+                        change,
+                        turnover_rate: None,
+                    })
                 })
-            }).collect();
+                .collect();
 
             Ok(klines)
         } else {
@@ -375,7 +387,9 @@ impl DataSource for SinaSource {
         // 尝试获取一个大盘指数
         let url = format!("{}/list=sh000001", SINA_BASE_URL);
 
-        let response = self.client.get(&url)
+        let response = self
+            .client
+            .get(&url)
             .timeout(Duration::from_secs(5))
             .send()
             .await?;

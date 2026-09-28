@@ -4,20 +4,19 @@
 
 use alpha_core::{analytics::AnalysisEngine, indicators::TechnicalIndicators, models::*};
 use chrono::Utc;
-use serde_wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
 mod arrow_adapter;
-mod streaming;
 mod storage;
-mod worker;
+mod streaming;
 mod websocket;
+mod worker;
 
 pub use arrow_adapter::ArrowBatch;
-pub use streaming::{BatchStreamProcessor, StreamProcessor};
 pub use storage::{HybridStorage, IndexedDBStorage};
-pub use worker::{BatchComputer, ParallelScheduler, WorkerPool};
+pub use streaming::{BatchStreamProcessor, StreamProcessor};
 pub use websocket::WebSocketClient;
+pub use worker::{BatchComputer, ParallelScheduler, WorkerPool};
 
 // 在浏览器控制台中显示 panic 信息
 #[wasm_bindgen(start)]
@@ -157,6 +156,8 @@ impl WasmAnalyzer {
     }
 
     /// 批量计算多个指标
+    /// （参数集镜像 web 前端表单：价格序列 + RSI/SMA 周期组，wasm_bindgen 契约不拆对象）
+    #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen(js_name = calculateAllIndicators)]
     pub fn calculate_all_indicators(
         &self,
@@ -218,7 +219,7 @@ impl WasmAnalyzer {
     #[wasm_bindgen(js_name = forceGC)]
     pub fn force_gc() {
         let window = web_sys::window().unwrap();
-        if let Some(gc) = js_sys::Reflect::get(&window, &JsValue::from_str("gc")).ok() {
+        if let Ok(gc) = js_sys::Reflect::get(&window, &JsValue::from_str("gc")) {
             if gc.is_function() {
                 js_sys::Function::from(gc).call0(&window).unwrap();
             }

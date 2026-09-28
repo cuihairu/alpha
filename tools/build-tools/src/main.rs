@@ -392,7 +392,7 @@ fn generate_documentation() -> anyhow::Result<()> {
     println!("📚 生成 API 文档...");
 
     std::process::Command::new("cargo")
-        .args(&["doc", "--workspace", "--no-deps", "--open"])
+        .args(["doc", "--workspace", "--no-deps", "--open"])
         .status()?;
 
     println!("✅ API 文档生成完成");
@@ -405,7 +405,7 @@ fn check_code_quality() -> anyhow::Result<()> {
 
     // 运行 cargo fmt 检查
     let fmt_status = std::process::Command::new("cargo")
-        .args(&["fmt", "--", "--check"])
+        .args(["fmt", "--", "--check"])
         .status()?;
 
     if !fmt_status.success() {
@@ -414,7 +414,7 @@ fn check_code_quality() -> anyhow::Result<()> {
 
     // 运行 cargo clippy
     let clippy_status = std::process::Command::new("cargo")
-        .args(&["clippy", "--workspace", "--", "-D", "warnings"])
+        .args(["clippy", "--workspace", "--", "-D", "warnings"])
         .status()?;
 
     if !clippy_status.success() {

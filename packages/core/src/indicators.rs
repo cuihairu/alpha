@@ -31,12 +31,8 @@ impl TechnicalIndicators {
         }
 
         let mut sma = vec![0.0; prices.len()];
-        let mut sum = 0.0;
-
         // 计算第一个平均值
-        for i in 0..period {
-            sum += prices[i];
-        }
+        let mut sum: f64 = prices[..period].iter().sum();
         sma[period - 1] = (sum / period as f64).round_to(self.precision);
 
         // 滑动窗口计算
@@ -227,7 +223,6 @@ impl Default for TechnicalIndicators {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
 
     #[test]
     fn test_sma_calculation() {

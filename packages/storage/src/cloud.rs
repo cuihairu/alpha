@@ -109,7 +109,9 @@ impl CloudStorage {
     fn build_key(&self, key: &str) -> AlphaResult<String> {
         let key = key.trim_matches('/');
         if key.is_empty() {
-            return Err(AlphaError::InvalidInput("storage key cannot be empty".to_string()));
+            return Err(AlphaError::InvalidInput(
+                "storage key cannot be empty".to_string(),
+            ));
         }
 
         let mut encoded = Vec::new();
@@ -387,7 +389,13 @@ mod tests {
         State(state): State<MockState>,
         Path((bucket, key)): Path<(String, String)>,
     ) -> (AxumStatusCode, Vec<u8>) {
-        match state.objects.lock().await.get(&format!("{bucket}/{key}")).cloned() {
+        match state
+            .objects
+            .lock()
+            .await
+            .get(&format!("{bucket}/{key}"))
+            .cloned()
+        {
             Some(bytes) => (AxumStatusCode::OK, bytes),
             None => (AxumStatusCode::NOT_FOUND, Vec::new()),
         }
@@ -397,7 +405,12 @@ mod tests {
         State(state): State<MockState>,
         Path((bucket, key)): Path<(String, String)>,
     ) -> AxumStatusCode {
-        if state.objects.lock().await.contains_key(&format!("{bucket}/{key}")) {
+        if state
+            .objects
+            .lock()
+            .await
+            .contains_key(&format!("{bucket}/{key}"))
+        {
             AxumStatusCode::OK
         } else {
             AxumStatusCode::NOT_FOUND
@@ -455,7 +468,10 @@ mod tests {
         let storage = CloudStorage::new(config);
         let object_key = storage.build_key("test/data").unwrap();
         assert_eq!(object_key, "alpha/objects/test/data.bin");
-        assert_eq!(storage.extract_key(&object_key), Some("test/data".to_string()));
+        assert_eq!(
+            storage.extract_key(&object_key),
+            Some("test/data".to_string())
+        );
     }
 
     #[test]
@@ -483,14 +499,8 @@ mod tests {
             endpoint,
         });
 
-        storage
-            .store("quotes/AAPL", b"100".to_vec())
-            .await
-            .unwrap();
-        storage
-            .store("quotes/MSFT", b"200".to_vec())
-            .await
-            .unwrap();
+        storage.store("quotes/AAPL", b"100".to_vec()).await.unwrap();
+        storage.store("quotes/MSFT", b"200".to_vec()).await.unwrap();
 
         assert!(storage.exists("quotes/AAPL").await.unwrap());
         assert_eq!(

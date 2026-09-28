@@ -179,11 +179,7 @@ impl BatchStreamProcessor {
 
     /// 为指定股票推送数据
     #[wasm_bindgen(js_name = pushDataForSymbol)]
-    pub fn push_data_for_symbol(
-        &mut self,
-        symbol: &str,
-        data_js: &JsValue,
-    ) -> Result<(), JsValue> {
+    pub fn push_data_for_symbol(&mut self, symbol: &str, data_js: &JsValue) -> Result<(), JsValue> {
         let processor = self
             .processors
             .entry(symbol.to_string())
@@ -235,10 +231,12 @@ impl BatchStreamProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
 
     #[test]
-    #[cfg_attr(not(target_arch = "wasm32"), ignore = "requires wasm32 (js-sys/wasm-bindgen)")]
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        ignore = "requires wasm32 (js-sys/wasm-bindgen)"
+    )]
     fn test_stream_processor() {
         let mut processor = StreamProcessor::new(10);
 
@@ -251,7 +249,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(target_arch = "wasm32"), ignore = "requires wasm32 (js-sys/wasm-bindgen)")]
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        ignore = "requires wasm32 (js-sys/wasm-bindgen)"
+    )]
     fn test_window_overflow() {
         let mut processor = StreamProcessor::new(3);
 

@@ -126,8 +126,6 @@ macro_rules! return_compute_error_with {
     };
 }
 
-pub(crate) use return_compute_error_with;
-
 // Internal trait, which is used for mapping values from DateLike structures
 trait ChronoDateExt {
     /// Returns a value in range `1..=4` indicating the quarter this date falls into

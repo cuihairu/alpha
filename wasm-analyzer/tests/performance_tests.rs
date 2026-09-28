@@ -23,19 +23,11 @@ fn bench_sma_calculation() {
     let prices_array = js_sys::Float64Array::from(&prices[..]);
 
     // 测试 SMA 计算性能
-    let start = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let start = web_sys::window().unwrap().performance().unwrap().now();
 
     let _result = analyzer.calculate_sma(&prices_array, 20);
 
-    let end = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let end = web_sys::window().unwrap().performance().unwrap().now();
 
     let duration = end - start;
     web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
@@ -57,19 +49,11 @@ fn bench_rsi_calculation() {
 
     let prices_array = js_sys::Float64Array::from(&prices[..]);
 
-    let start = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let start = web_sys::window().unwrap().performance().unwrap().now();
 
     let _result = analyzer.calculate_rsi(&prices_array, 14);
 
-    let end = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let end = web_sys::window().unwrap().performance().unwrap().now();
 
     let duration = end - start;
     web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
@@ -91,11 +75,7 @@ fn bench_all_indicators() {
 
     let prices_array = js_sys::Float64Array::from(&prices[..]);
 
-    let start = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let start = web_sys::window().unwrap().performance().unwrap().now();
 
     let _result = analyzer.calculate_all_indicators(
         &prices_array,
@@ -107,11 +87,7 @@ fn bench_all_indicators() {
         9,  // macd_signal
     );
 
-    let end = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let end = web_sys::window().unwrap().performance().unwrap().now();
 
     let duration = end - start;
     web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
@@ -126,29 +102,18 @@ fn bench_all_indicators() {
 fn bench_stream_processor() {
     let mut processor = StreamProcessor::new(1000);
 
-    let start = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let start = web_sys::window().unwrap().performance().unwrap().now();
 
     // 模拟流式数据处理
     for i in 0..1000 {
-        let data = alpha_core::models::MarketData::new(
-            "AAPL".to_string(),
-            100.0 + i as f64,
-            1000 + i,
-        );
+        let data =
+            alpha_core::models::MarketData::new("AAPL".to_string(), 100.0 + i as f64, 1000 + i);
 
         let data_js = serde_wasm_bindgen::to_value(&data).unwrap();
         processor.push_data(&data_js).unwrap();
     }
 
-    let end = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let end = web_sys::window().unwrap().performance().unwrap().now();
 
     let duration = end - start;
     web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
@@ -171,21 +136,13 @@ fn bench_batch_computer() {
 
     let prices_array = js_sys::Float64Array::from(&prices[..]);
 
-    let start = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let start = web_sys::window().unwrap().performance().unwrap().now();
 
     let _result = computer
         .batch_compute_multiple(prices_array, 20, 12, 14)
         .unwrap();
 
-    let end = web_sys::window()
-        .unwrap()
-        .performance()
-        .unwrap()
-        .now();
+    let end = web_sys::window().unwrap().performance().unwrap().now();
 
     let duration = end - start;
     web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(

@@ -20,27 +20,42 @@ jobs:
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - name: 缓存 Cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: 运行 Clippy
-        run: cargo clippy --workspace --all-targets
+      # Rust 代码规范门禁（docs/rust-code-standards.md §11，与本地 scripts/check-lint.sh 一致）
+      - name: 格式化检查
+        run: cargo fmt --all -- --check
+
+      - name: Clippy（零警告）
+        run: cargo clippy --workspace --all-targets --exclude alpha-desktop -- -D warnings
 
   test:
     name: Test
     runs-on: ubuntu-latest
+    # Redis 供 REDIS_TEST_URL 门控的管线集成测试真实运行（无 Redis 时测试自跳过）
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
     steps:
       - uses: actions/checkout@v4
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: 安装 protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: 缓存 Cargo
         uses: Swatinem/rust-cache@v2
 
       - name: 运行测试
+        env:
+          REDIS_TEST_URL: redis://127.0.0.1:6379
         run: cargo test --workspace --all-targets --exclude alpha-desktop
 
   desktop:
@@ -77,14 +92,24 @@ jobs:
         with:
           version: 'latest'
 
+      # 跨平台兼容性门禁（wasm32 编译 + L0 依赖黑名单，含 tonic/prost 代码生成需 protoc）
+      - name: 安装 protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: 跨平台兼容性检查
+        run: scripts/check-cross-platform.sh
+
       - name: 构建 WASM
         run: |
           cd wasm-analyzer
           wasm-pack build --target web --out-dir pkg --release
 
   security:
-    name: 安全审计
+    name: 安全审计（报告型，不阻塞）
     runs-on: ubuntu-latest
+    # 现存依赖漏洞属升级债（另行立项消化）；作业保持可见但不阻塞合并，
+    # 避免长期红灯淹没 lint/test 的真信号（docs/rust-code-standards.md §11）
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

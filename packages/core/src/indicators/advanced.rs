@@ -5,7 +5,15 @@
 /// 高级技术指标计算器
 #[derive(Debug, Clone)]
 pub struct AdvancedIndicators {
+    /// 输出精度（小数位）；预留配置位，当前指标实现按调用方约定输出
+    #[allow(dead_code)]
     precision: usize,
+}
+
+impl Default for AdvancedIndicators {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AdvancedIndicators {
@@ -85,7 +93,7 @@ impl AdvancedIndicators {
     }
 
     /// 计算商品通道指数 (CCI)
-    fn calculate_cci(
+    pub fn calculate_cci(
         &self,
         highs: &[f64],
         lows: &[f64],
@@ -147,10 +155,8 @@ impl AdvancedIndicators {
         // 计算 ATR (TR 的移动平均)
         let atr_sma = self.calculate_sma_internal(&true_ranges, period);
 
-        // 调整数组长度
-        for i in 0..atr_sma.len() {
-            atr_values[i + 1] = atr_sma[i]; // TR 从 index 1 开始
-        }
+        // 调整数组长度（TR 从 index 1 开始对齐）
+        atr_values[1..=atr_sma.len()].copy_from_slice(&atr_sma);
 
         atr_values
     }
@@ -281,12 +287,8 @@ impl AdvancedIndicators {
         }
 
         let mut sma = vec![0.0; values.len()];
-        let mut sum = 0.0;
-
         // 计算第一个平均值
-        for i in 0..period {
-            sum += values[i];
-        }
+        let mut sum: f64 = values[..period].iter().sum();
         sma[period - 1] = sum / period as f64;
 
         // 滑动窗口计算

@@ -21,7 +21,9 @@ fn realtime_from_payload(payload: &serde_json::Value) -> Option<(String, f64, u6
         obj.get("price")?.as_f64()?,
         obj.get("volume")?.as_u64()?,
         obj.get("change").and_then(|v| v.as_f64()).unwrap_or(0.0),
-        obj.get("change_percent").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        obj.get("change_percent")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
     ))
 }
 
@@ -91,17 +93,32 @@ async fn consume_and_convert(
     queue: &RedisStreamQueue,
     stream: &str,
 ) -> Option<(String, f64, u64, f64, f64)> {
-    queue.ensure_consumer_group(stream, "real-time-feed").await.unwrap();
+    queue
+        .ensure_consumer_group(stream, "real-time-feed")
+        .await
+        .unwrap();
     let consumer = format!("rtf-test-{}", uuid::Uuid::new_v4());
     let result = queue
         .read_group(stream, "real-time-feed", &consumer, 10, 500)
         .await
         .unwrap();
-    assert!(result.invalid.is_empty(), "expected no undecodable entries on {}", stream);
-    assert_eq!(result.messages.len(), 1, "expected exactly one message on {}", stream);
+    assert!(
+        result.invalid.is_empty(),
+        "expected no undecodable entries on {}",
+        stream
+    );
+    assert_eq!(
+        result.messages.len(),
+        1,
+        "expected exactly one message on {}",
+        stream
+    );
 
     let converted = realtime_from_payload(&result.messages[0].envelope.payload);
-    queue.ack(stream, "real-time-feed", &result.messages[0].id).await.unwrap();
+    queue
+        .ack(stream, "real-time-feed", &result.messages[0].id)
+        .await
+        .unwrap();
     converted
 }
 
@@ -124,8 +141,9 @@ async fn normalized_stream_message_is_consumable_not_dlqd() {
     );
     queue.publish(&stream, &envelope).await.unwrap();
 
-    let (symbol, price, volume, change, change_percent) =
-        consume_and_convert(&queue, &stream).await.expect("normalized quote must be consumable");
+    let (symbol, price, volume, change, change_percent) = consume_and_convert(&queue, &stream)
+        .await
+        .expect("normalized quote must be consumable");
     assert_eq!(symbol, "000001");
     assert_eq!(price, 12.34);
     assert_eq!(volume, 5000);
@@ -153,8 +171,9 @@ async fn raw_stream_message_is_consumable_not_dlqd() {
     );
     queue.publish(&stream, &envelope).await.unwrap();
 
-    let (symbol, price, volume, change, change_percent) =
-        consume_and_convert(&queue, &stream).await.expect("raw quote must be consumable");
+    let (symbol, price, volume, change, change_percent) = consume_and_convert(&queue, &stream)
+        .await
+        .expect("raw quote must be consumable");
     assert_eq!(symbol, "sz000001");
     assert_eq!(price, 12.34);
     assert_eq!(volume, 5000);
@@ -185,7 +204,10 @@ async fn malformed_message_follows_dlq_policy() {
     );
     queue.publish(&stream, &envelope).await.unwrap();
 
-    queue.ensure_consumer_group(&stream, "real-time-feed").await.unwrap();
+    queue
+        .ensure_consumer_group(&stream, "real-time-feed")
+        .await
+        .unwrap();
     let result = queue
         .read_group(&stream, "real-time-feed", "rtf-test", 10, 500)
         .await
@@ -193,11 +215,17 @@ async fn malformed_message_follows_dlq_policy() {
     assert_eq!(result.messages.len(), 1);
 
     let converted = realtime_from_payload(&result.messages[0].envelope.payload);
-    assert!(converted.is_none(), "malformed message must fail conversion and hit DLQ path");
+    assert!(
+        converted.is_none(),
+        "malformed message must fail conversion and hit DLQ path"
+    );
 
     let mut payload = result.messages[0].envelope.payload.clone();
     if let Some(obj) = payload.as_object_mut() {
-        obj.insert("dlq_reason".to_string(), serde_json::json!("invalid realtime quote payload"));
+        obj.insert(
+            "dlq_reason".to_string(),
+            serde_json::json!("invalid realtime quote payload"),
+        );
     }
     let dlq_envelope = StreamEnvelope::new(
         &dlq_stream,
@@ -207,11 +235,17 @@ async fn malformed_message_follows_dlq_policy() {
         payload,
     );
     queue.publish(&dlq_stream, &dlq_envelope).await.unwrap();
-    queue.ack(&stream, "real-time-feed", &result.messages[0].id).await.unwrap();
+    queue
+        .ack(&stream, "real-time-feed", &result.messages[0].id)
+        .await
+        .unwrap();
 
     let dlq_messages = queue.read_latest(&dlq_stream, 10).await.unwrap();
     assert_eq!(dlq_messages.len(), 1);
-    assert_eq!(dlq_messages[0].envelope.payload["dlq_reason"], "invalid realtime quote payload");
+    assert_eq!(
+        dlq_messages[0].envelope.payload["dlq_reason"],
+        "invalid realtime quote payload"
+    );
     assert_eq!(dlq_messages[0].envelope.payload["symbol"], "000001");
 
     cleanup(&url, &[&stream, &dlq_stream]).await;
@@ -246,20 +280,34 @@ async fn undecodable_entry_is_quarantined_and_acked() {
         .await
         .unwrap();
 
-    queue.ensure_consumer_group(&stream, "real-time-feed").await.unwrap();
+    queue
+        .ensure_consumer_group(&stream, "real-time-feed")
+        .await
+        .unwrap();
     let result = queue
         .read_group(&stream, "real-time-feed", "rtf-test", 10, 500)
         .await
         .unwrap();
     assert!(result.messages.is_empty());
-    assert_eq!(result.invalid.len(), 1, "undecodable entry must be surfaced, not fail the batch");
+    assert_eq!(
+        result.invalid.len(),
+        1,
+        "undecodable entry must be surfaced, not fail the batch"
+    );
 
     // 消费者隔离路径：publish_dlq + ack
     let invalid = &result.invalid[0];
-    assert!(invalid.reason.contains("decode"), "reason: {}", invalid.reason);
+    assert!(
+        invalid.reason.contains("decode"),
+        "reason: {}",
+        invalid.reason
+    );
     assert_eq!(invalid.raw_payload.as_deref(), Some("{not json"));
     queue.publish_dlq(&dlq_stream, invalid).await.unwrap();
-    queue.ack(&stream, "real-time-feed", &invalid.id).await.unwrap();
+    queue
+        .ack(&stream, "real-time-feed", &invalid.id)
+        .await
+        .unwrap();
 
     // PEL 清空，组内无剩余条目
     let pending: redis::Value = redis::cmd("XPENDING")
@@ -286,13 +334,14 @@ async fn undecodable_entry_is_quarantined_and_acked() {
     let dlq_messages = queue.read_latest(&dlq_stream, 10).await.unwrap();
     assert_eq!(dlq_messages.len(), 1);
     assert_eq!(dlq_messages[0].envelope.event_type, "invalid_message");
-    assert!(
-        dlq_messages[0].envelope.payload["dlq_reason"]
-            .as_str()
-            .unwrap()
-            .contains("decode")
+    assert!(dlq_messages[0].envelope.payload["dlq_reason"]
+        .as_str()
+        .unwrap()
+        .contains("decode"));
+    assert_eq!(
+        dlq_messages[0].envelope.payload["original_payload"],
+        "{not json"
     );
-    assert_eq!(dlq_messages[0].envelope.payload["original_payload"], "{not json");
     assert_eq!(dlq_messages[0].envelope.payload["original_stream"], stream);
 
     cleanup(&url, &[&stream, &dlq_stream]).await;
@@ -343,7 +392,10 @@ async fn orphaned_pending_message_is_claimed_and_reprocessed() {
     queue.publish(&stream, &envelope).await.unwrap();
 
     // 模拟崩溃：读走但不 ack
-    queue.ensure_consumer_group(&stream, "real-time-feed").await.unwrap();
+    queue
+        .ensure_consumer_group(&stream, "real-time-feed")
+        .await
+        .unwrap();
     let crashed = queue
         .read_group(&stream, "real-time-feed", "rtf-crashed", 10, 500)
         .await
@@ -365,7 +417,11 @@ async fn orphaned_pending_message_is_claimed_and_reprocessed() {
         .claim_stale(&stream, "real-time-feed", "rtf-sweep", 1000, 10, 5)
         .await
         .unwrap();
-    assert_eq!(claimed.messages.len(), 1, "orphaned message must be reclaimed");
+    assert_eq!(
+        claimed.messages.len(),
+        1,
+        "orphaned message must be reclaimed"
+    );
     assert!(claimed.invalid.is_empty());
 
     let (symbol, price, volume, change, change_percent) =
@@ -377,7 +433,10 @@ async fn orphaned_pending_message_is_claimed_and_reprocessed() {
     assert_eq!(change, 0.12);
     assert_eq!(change_percent, 0.98);
 
-    queue.ack(&stream, "real-time-feed", &claimed.messages[0].id).await.unwrap();
+    queue
+        .ack(&stream, "real-time-feed", &claimed.messages[0].id)
+        .await
+        .unwrap();
     assert_eq!(pending_count(&url, &stream, "real-time-feed").await, 0);
 
     cleanup(&url, &[&stream]).await;

@@ -25,15 +25,15 @@ pub struct EastmoneySource {
 impl EastmoneySource {
     /// 创建新的东方财富数据源
     pub fn new(config: CrawlerConfig) -> Self {
-        let mut builder = Client::builder()
-            .timeout(Duration::from_secs(config.timeout));
+        let mut builder = Client::builder().timeout(Duration::from_secs(config.timeout));
 
         if let Some(ref proxy) = config.proxy {
-            let proxy_url = if let (Some(ref user), Some(ref pass)) = (&proxy.username, &proxy.password) {
-                format!("{}:{}@{}", user, pass, proxy.url)
-            } else {
-                proxy.url.clone()
-            };
+            let proxy_url =
+                if let (Some(ref user), Some(ref pass)) = (&proxy.username, &proxy.password) {
+                    format!("{}:{}@{}", user, pass, proxy.url)
+                } else {
+                    proxy.url.clone()
+                };
             if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
                 builder = builder.proxy(proxy);
             }
@@ -61,7 +61,10 @@ impl EastmoneySource {
 
         // 已经是 secid 形式（0/1/4.xxxxxx）则直接使用
         if let Some((market, code)) = raw.split_once('.') {
-            if matches!(market, "0" | "1" | "4") && !code.is_empty() && code.chars().all(|c| c.is_ascii_digit()) {
+            if matches!(market, "0" | "1" | "4")
+                && !code.is_empty()
+                && code.chars().all(|c| c.is_ascii_digit())
+            {
                 return format!("{}.{}", market, code);
             }
         }
@@ -76,21 +79,25 @@ impl EastmoneySource {
         // 提取纯数字代码（兼容输入包含其他分隔符的情况）
         let code: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
 
-        let market_code = if code.starts_with("60") || code.starts_with("68") || code.starts_with("51") {
-            "1" // 上海
-        } else if code.starts_with("00") || code.starts_with("30") {
-            "0" // 深圳
-        } else if code.starts_with("43") || code.starts_with("83") || code.starts_with("87") {
-            "4" // 北京
-        } else {
-            "0" // 默认深圳
-        };
+        let market_code =
+            if code.starts_with("60") || code.starts_with("68") || code.starts_with("51") {
+                "1" // 上海
+            } else if code.starts_with("00") || code.starts_with("30") {
+                "0" // 深圳
+            } else if code.starts_with("43") || code.starts_with("83") || code.starts_with("87") {
+                "4" // 北京
+            } else {
+                "0" // 默认深圳
+            };
 
         format!("{}.{}", market_code, code)
     }
 
     /// 解析实时行情 API 响应
-    fn parse_quote_response(symbol: &str, data: &EastmoneyQuoteData) -> CrawlerResult<RealtimeQuote> {
+    fn parse_quote_response(
+        symbol: &str,
+        data: &EastmoneyQuoteData,
+    ) -> CrawlerResult<RealtimeQuote> {
         // stock/get 接口的价格字段为“分”（*100）
         let price = data.f43 / 100.0;
         let pre_close = data.f60 / 100.0;
@@ -100,8 +107,16 @@ impl EastmoneySource {
         let volume = data.f47; // 成交量（手）
         let amount = data.f48; // 成交额（元）
 
-        let bid1 = if data.f51 > 0.0 { Some(data.f51 / 100.0) } else { None };
-        let ask1 = if data.f52 > 0.0 { Some(data.f52 / 100.0) } else { None };
+        let bid1 = if data.f51 > 0.0 {
+            Some(data.f51 / 100.0)
+        } else {
+            None
+        };
+        let ask1 = if data.f52 > 0.0 {
+            Some(data.f52 / 100.0)
+        } else {
+            None
+        };
         let bid1_volume = if data.f53 > 0 { Some(data.f53) } else { None };
         let ask1_volume = if data.f54 > 0 { Some(data.f54) } else { None };
 
@@ -109,7 +124,11 @@ impl EastmoneySource {
 
         let mut quote = RealtimeQuote {
             symbol: symbol.to_string(),
-            name: if !data.f14.is_empty() { data.f14.clone() } else { data.f58.clone() },
+            name: if !data.f14.is_empty() {
+                data.f14.clone()
+            } else {
+                data.f58.clone()
+            },
             price,
             pre_close,
             open,
@@ -214,6 +233,8 @@ struct EastmoneyUListData {
     diff: Vec<EastmoneyUListItem>,
 }
 
+/// 东方财富列表接口字段映射（f2/f3/f4… 为其协议列名，保留完整形状便于扩展）
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct EastmoneyUListItem {
     /// 当前价
@@ -316,7 +337,9 @@ impl DataSource for EastmoneySource {
             return Self::parse_quote_response(symbol, &data);
         }
 
-        Err(CrawlerError::ParseError("No data found in response".to_string()))
+        Err(CrawlerError::ParseError(
+            "No data found in response".to_string(),
+        ))
     }
 
     async fn get_realtime_quotes(&self, symbols: &[String]) -> CrawlerResult<Vec<RealtimeQuote>> {
@@ -379,7 +402,9 @@ impl DataSource for EastmoneySource {
                         .unwrap_or_else(|| item.f12.clone());
 
                     let timestamp = if item.f124 > 0 {
-                        Utc.timestamp_opt(item.f124, 0).single().unwrap_or_else(Utc::now)
+                        Utc.timestamp_opt(item.f124, 0)
+                            .single()
+                            .unwrap_or_else(Utc::now)
                     } else {
                         Utc::now()
                     };
@@ -486,7 +511,10 @@ impl DataSource for EastmoneySource {
                         let timestamp = if date_str.contains(' ') {
                             NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M")
                                 .ok()
-                                .or_else(|| NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S").ok())
+                                .or_else(|| {
+                                    NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S")
+                                        .ok()
+                                })
                                 .map(|dt| Utc.from_utc_datetime(&dt))
                         } else {
                             NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
@@ -497,7 +525,11 @@ impl DataSource for EastmoneySource {
                         .unwrap_or_else(Utc::now);
 
                         let change = close - open;
-                        let change_percent = if open > 0.0 { (change / open) * 100.0 } else { 0.0 };
+                        let change_percent = if open > 0.0 {
+                            (change / open) * 100.0
+                        } else {
+                            0.0
+                        };
 
                         Some(KlineData {
                             symbol: symbol.to_string(),
@@ -527,9 +559,9 @@ impl DataSource for EastmoneySource {
     async fn get_stock_list(&self, market: Option<Market>) -> CrawlerResult<Vec<StockInfo>> {
         // 东方财富提供股票列表 API
         let market_code = match market {
-            Some(Market::SH) => "1",  // 上海
-            Some(Market::SZ) => "0",  // 深圳
-            Some(Market::BJ) => "4",  // 北京
+            Some(Market::SH) => "1", // 上海
+            Some(Market::SZ) => "0", // 深圳
+            Some(Market::BJ) => "4", // 北京
             None => "",
         };
 
@@ -570,9 +602,14 @@ impl DataSource for EastmoneySource {
     }
 
     async fn health_check(&self) -> CrawlerResult<bool> {
-        let url = format!("{}/stock/get?secid=1.000001&fields=f12,f43", EASTMONEY_API_BASE);
+        let url = format!(
+            "{}/stock/get?secid=1.000001&fields=f12,f43",
+            EASTMONEY_API_BASE
+        );
 
-        let response = self.client.get(&url)
+        let response = self
+            .client
+            .get(&url)
             .timeout(Duration::from_secs(5))
             .send()
             .await?;
@@ -631,7 +668,10 @@ mod tests {
             Ok(klines) => {
                 println!("Got {} klines", klines.len());
                 for kline in &klines {
-                    println!("  {}: close={}, volume={}", kline.timestamp, kline.close, kline.volume);
+                    println!(
+                        "  {}: close={}, volume={}",
+                        kline.timestamp, kline.close, kline.volume
+                    );
                 }
             }
             Err(e) => {

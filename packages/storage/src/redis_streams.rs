@@ -102,8 +102,9 @@ impl RedisStreamQueue {
 
     pub async fn publish(&self, stream: &str, envelope: &StreamEnvelope) -> AlphaResult<String> {
         let mut conn = self.get_conn().await?;
-        let payload = serde_json::to_string(envelope)
-            .map_err(|e| AlphaError::StorageError(format!("serialize stream envelope failed: {e}")))?;
+        let payload = serde_json::to_string(envelope).map_err(|e| {
+            AlphaError::StorageError(format!("serialize stream envelope failed: {e}"))
+        })?;
 
         let mut fields = BTreeMap::new();
         fields.insert("event_type", envelope.event_type.clone());
@@ -132,11 +133,7 @@ impl RedisStreamQueue {
         Ok(id)
     }
 
-    pub async fn read_latest(
-        &self,
-        stream: &str,
-        count: usize,
-    ) -> AlphaResult<Vec<StreamMessage>> {
+    pub async fn read_latest(&self, stream: &str, count: usize) -> AlphaResult<Vec<StreamMessage>> {
         let mut conn = self.get_conn().await?;
         let entries: StreamRangeReply = redis::cmd("XREVRANGE")
             .arg(stream)
@@ -165,11 +162,7 @@ impl RedisStreamQueue {
         Ok(result)
     }
 
-    pub async fn ensure_consumer_group(
-        &self,
-        stream: &str,
-        group: &str,
-    ) -> AlphaResult<()> {
+    pub async fn ensure_consumer_group(&self, stream: &str, group: &str) -> AlphaResult<()> {
         let mut conn = self.get_conn().await?;
         let result: Result<String, redis::RedisError> = redis::cmd("XGROUP")
             .arg("CREATE")
@@ -214,9 +207,7 @@ impl RedisStreamQueue {
                     .map
                     .into_iter()
                     .filter_map(|(k, v)| {
-                        redis::from_redis_value::<String>(&v)
-                            .ok()
-                            .map(|vv| (k, vv))
+                        redis::from_redis_value::<String>(&v).ok().map(|vv| (k, vv))
                     })
                     .collect::<Vec<_>>();
                 Self::push_decoded(&key.key, entry.id, field_pairs, &mut result);

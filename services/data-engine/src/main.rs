@@ -31,8 +31,7 @@ use chrono::{DateTime, Duration, Utc};
 use datafusion::{
     arrow::{
         array::{
-            ArrayRef, Float64Array, Int64Array, StringArray, TimestampMillisecondArray,
-            UInt64Array,
+            ArrayRef, Float64Array, Int64Array, StringArray, TimestampMillisecondArray, UInt64Array,
         },
         datatypes::{DataType, TimeUnit},
         record_batch::RecordBatch,
@@ -42,7 +41,10 @@ use datafusion::{
 };
 use serde::{Deserialize, Serialize};
 use std::time::Duration as StdDuration;
-use tokio::{net::TcpListener, time::{interval, MissedTickBehavior}};
+use tokio::{
+    net::TcpListener,
+    time::{interval, MissedTickBehavior},
+};
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
@@ -114,7 +116,10 @@ impl MirrorRetryBuffer {
     }
 
     fn len(&self) -> usize {
-        self.queue.lock().expect("mirror retry mutex poisoned").len()
+        self.queue
+            .lock()
+            .expect("mirror retry mutex poisoned")
+            .len()
     }
 
     fn dropped_total(&self) -> u64 {
@@ -244,7 +249,8 @@ impl AppState {
         if self.session.table_exist("market_data")? {
             self.session.deregister_table("market_data")?;
         }
-        self.session.register_table("market_data", Arc::new(table))?;
+        self.session
+            .register_table("market_data", Arc::new(table))?;
         Ok(())
     }
 
@@ -383,7 +389,9 @@ async fn initialize_clickhouse(settings: &ClickHouseSettings) -> Option<Arc<Clic
 /// - 未启用（persistence_enabled=false）→ None，纯内存；
 /// - 启用但 URL 缺失/无效、连接失败 → 告警后降级为 None（服务不因落库不可用而拒绝启动）；
 /// - 正常 → Some，规范化写入经 write_normalized 镜像落库。
-async fn initialize_persistence(settings: &StorageConfig) -> Option<Arc<TimescaleTimeSeriesStorage>> {
+async fn initialize_persistence(
+    settings: &StorageConfig,
+) -> Option<Arc<TimescaleTimeSeriesStorage>> {
     if !settings.persistence_enabled {
         return None;
     }
@@ -478,7 +486,8 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
                         }
                         for message in result.messages {
                             tracing::info!("Reprocessing orphaned pending message {}", message.id);
-                            process_normalizer_message(&sweeper_state, &sweeper_queue, &message).await;
+                            process_normalizer_message(&sweeper_state, &sweeper_queue, &message)
+                                .await;
                         }
                     }
                     // Redis < 6.2 无 XPENDING IDLE/XCLAIM 认领：兜底不可用属预期降级，debug 级避免刷屏
@@ -560,7 +569,11 @@ async fn run_mirror_retry_round(
 /// 注意：写路径不再全量重建 DataFusion MemTable（实测 ~25-35µs/点、随存量线性
 /// 增长，见 TODO.md P2）——/query 每次执行前自行 refresh（execute_query），
 /// /stocks、/indicators 直读内存时序，均不依赖写路径刷新。
-async fn process_normalizer_message(state: &Arc<AppState>, queue: &RedisStreamQueue, message: &StreamMessage) {
+async fn process_normalizer_message(
+    state: &Arc<AppState>,
+    queue: &RedisStreamQueue,
+    message: &StreamMessage,
+) {
     match normalize_quote(&message.envelope) {
         Some(market_data) => {
             let payload_hash = message.envelope.payload_hash.clone();
@@ -570,7 +583,10 @@ async fn process_normalizer_message(state: &Arc<AppState>, queue: &RedisStreamQu
                     payload_hash,
                     message.id
                 );
-                if let Err(err) = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await {
+                if let Err(err) = queue
+                    .ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id)
+                    .await
+                {
                     tracing::warn!("Failed to ack duplicate raw quote {}: {}", message.id, err);
                 }
                 return;
@@ -596,13 +612,18 @@ async fn process_normalizer_message(state: &Arc<AppState>, queue: &RedisStreamQu
 
             state.record_payload_hash(&payload_hash);
 
-            if let Err(err) = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await {
+            if let Err(err) = queue
+                .ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id)
+                .await
+            {
                 tracing::warn!("Failed to ack raw quote {}: {}", message.id, err);
             }
         }
         None => {
             tracing::warn!("Skipping invalid raw quote message {}", message.id);
-            let _ = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await;
+            let _ = queue
+                .ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id)
+                .await;
         }
     }
 }
@@ -620,7 +641,10 @@ async fn quarantine_invalid(queue: &RedisStreamQueue, invalid: &InvalidMessage) 
         tracing::warn!("Failed to publish undecodable message to DLQ: {}", err);
         return;
     }
-    if let Err(err) = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &invalid.id).await {
+    if let Err(err) = queue
+        .ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &invalid.id)
+        .await
+    {
         tracing::warn!("Failed to ack quarantined message {}: {}", invalid.id, err);
     }
 }
@@ -696,15 +720,18 @@ struct ClickhouseExportDescriptor {
     params: &'static [&'static str],
 }
 
-const CLICKHOUSE_EXPORTS: &[ClickhouseExportDescriptor] = &[ClickhouseExportDescriptor {
-    id: "market_data",
-    description: "OHLCV market data (timestamp, symbol, open/high/low/close, volume)",
-    params: &["symbol", "start|days", "end", "limit"],
-}, ClickhouseExportDescriptor {
-    id: "realtime_quotes",
-    description: "Realtime quotes snapshot (symbol, last/bid/ask, volume, timestamp, change)",
-    params: &["symbols(optional)", "limit"],
-}];
+const CLICKHOUSE_EXPORTS: &[ClickhouseExportDescriptor] = &[
+    ClickhouseExportDescriptor {
+        id: "market_data",
+        description: "OHLCV market data (timestamp, symbol, open/high/low/close, volume)",
+        params: &["symbol", "start|days", "end", "limit"],
+    },
+    ClickhouseExportDescriptor {
+        id: "realtime_quotes",
+        description: "Realtime quotes snapshot (symbol, last/bid/ask, volume, timestamp, change)",
+        params: &["symbols(optional)", "limit"],
+    },
+];
 
 async fn list_clickhouse_exports() -> Json<serde_json::Value> {
     Json(serde_json::json!({
@@ -771,10 +798,17 @@ async fn export_market_data_parquet(
         .as_deref()
         .and_then(parse_datetime)
         .unwrap_or_else(Utc::now);
-    let start = params.start.as_deref().and_then(parse_datetime).unwrap_or_else(|| {
-        let days = params.days.unwrap_or(state.config.data.lookback_days).max(1).min(3650);
-        end - Duration::days(days as i64)
-    });
+    let start = params
+        .start
+        .as_deref()
+        .and_then(parse_datetime)
+        .unwrap_or_else(|| {
+            let days = params
+                .days
+                .unwrap_or(state.config.data.lookback_days)
+                .clamp(1, 3650);
+            end - Duration::days(days as i64)
+        });
 
     let data = clickhouse
         .query_market_data_parquet(&params.symbol, start, end, Some(limit))
@@ -1622,7 +1656,10 @@ mod tests {
         assert_eq!(obj["volume"], 5000);
         assert_eq!(obj["bid"], 12.30);
         assert_eq!(obj["ask"], 12.40);
-        assert_eq!(obj["timestamp"], serde_json::to_value(&market_data.timestamp).unwrap());
+        assert_eq!(
+            obj["timestamp"],
+            serde_json::to_value(market_data.timestamp).unwrap()
+        );
     }
 
     #[test]
@@ -1690,7 +1727,10 @@ mod tests {
         buffer.requeue_front(first_batch);
         let all = buffer.drain_for_retry(10);
         assert_eq!(3, all.len());
-        assert_eq!(vec![10.0, 11.0, 12.0], all.iter().map(|d| d.price).collect::<Vec<_>>());
+        assert_eq!(
+            vec![10.0, 11.0, 12.0],
+            all.iter().map(|d| d.price).collect::<Vec<_>>()
+        );
     }
 
     /// 镜像重试缓冲：超容量丢最旧并累计 dropped 计数（内存 serving 不受影响）。
@@ -1703,7 +1743,10 @@ mod tests {
         assert_eq!(2, buffer.len());
         assert_eq!(1, buffer.dropped_total());
         let remaining = buffer.drain_for_retry(10);
-        assert_eq!(vec![11.0, 12.0], remaining.iter().map(|d| d.price).collect::<Vec<_>>());
+        assert_eq!(
+            vec![11.0, 12.0],
+            remaining.iter().map(|d| d.price).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
@@ -1712,7 +1755,10 @@ mod tests {
         assert!(initialize_persistence(&disabled).await.is_none());
 
         let state = Arc::new(AppState::new(test_config()).await);
-        assert!(state.persistence.is_none(), "default config must not assemble persistence");
+        assert!(
+            state.persistence.is_none(),
+            "default config must not assemble persistence"
+        );
 
         let market_data = MarketData {
             symbol: "E2E-DISABLED".to_string(),
@@ -1742,13 +1788,17 @@ mod tests {
 
         let invalid = storage_settings(true, Some("postgres://invalid"));
         // 直接连接必须报错（与 timescale 模块的 connect_returns_error_without_db 同口径）
-        assert!(TimescaleTimeSeriesStorage::connect("postgres://invalid").await.is_err());
+        assert!(TimescaleTimeSeriesStorage::connect("postgres://invalid")
+            .await
+            .is_err());
         // 装配层吞掉错误降级为 None，而不是让服务崩溃
         assert!(initialize_persistence(&invalid).await.is_none());
 
         // 降级后写入路径照常可用
-        let mut config = AppConfig::default();
-        config.storage = invalid;
+        let config = AppConfig {
+            storage: invalid,
+            ..AppConfig::default()
+        };
         let state = Arc::new(AppState::new(Arc::new(config)).await);
         assert!(state.persistence.is_none());
     }
@@ -1757,7 +1807,7 @@ mod tests {
     fn dedup_window_tracks_and_evicts_oldest() {
         let mut window = RecentPayloads::with_capacity(2);
 
-        assert!(window.contains("a") == false);
+        assert!(!window.contains("a"));
         window.insert("a");
         window.insert("b");
         assert!(window.contains("a"));
@@ -1768,7 +1818,10 @@ mod tests {
 
         // 窗口满：插入 c 淘汰最早的 a
         window.insert("c");
-        assert!(!window.contains("a"), "oldest entry must be evicted at capacity");
+        assert!(
+            !window.contains("a"),
+            "oldest entry must be evicted at capacity"
+        );
         assert!(window.contains("b"));
         assert!(window.contains("c"));
     }
@@ -1817,14 +1870,21 @@ mod tests {
             let Json(response) = execute_query(
                 State(state.clone()),
                 Json(QueryRequest {
-                    query: "SELECT MAX(price) AS max_price FROM market_data WHERE symbol = 'DEDUP1'"
-                        .to_string(),
+                    query:
+                        "SELECT MAX(price) AS max_price FROM market_data WHERE symbol = 'DEDUP1'"
+                            .to_string(),
                 }),
             )
             .await
             .unwrap();
-            assert!(response.success, "query must succeed (register_table collision fixed)");
-            assert_eq!(response.data[0]["max_price"], serde_json::json!(expected_price));
+            assert!(
+                response.success,
+                "query must succeed (register_table collision fixed)"
+            );
+            assert_eq!(
+                response.data[0]["max_price"],
+                serde_json::json!(expected_price)
+            );
         }
     }
 

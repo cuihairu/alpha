@@ -265,17 +265,18 @@ pub enum ReportType {
 }
 
 /// 任务优先级
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum TaskPriority {
     Critical = 5,
     High = 4,
+    #[default]
     Medium = 3,
     Low = 2,
     Background = 1,
 }
 
 /// 任务配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TaskConfig {
     /// 请求配置
     pub request: RequestConfig,
@@ -574,7 +575,6 @@ pub enum RetryCondition {
     ValidationError,
 }
 
-
 /// 采集统计信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionStats {
@@ -598,11 +598,7 @@ pub struct CollectionStats {
 
 impl TaskDefinition {
     /// 创建新任务
-    pub fn new<S: Into<String>>(
-        id: S,
-        source: TaskSource,
-        name: S,
-    ) -> Self {
+    pub fn new<S: Into<String>>(id: S, source: TaskSource, name: S) -> Self {
         let now = Utc::now();
         Self {
             id: id.into(),
@@ -692,17 +688,6 @@ impl Default for TaskDefinition {
     }
 }
 
-impl Default for TaskConfig {
-    fn default() -> Self {
-        Self {
-            request: RequestConfig::default(),
-            parser: ParserConfig::default(),
-            storage: StorageConfig::default(),
-            notification: None,
-        }
-    }
-}
-
 impl Default for RequestConfig {
     fn default() -> Self {
         Self {
@@ -760,12 +745,6 @@ impl Default for RetryPolicy {
     }
 }
 
-impl Default for TaskPriority {
-    fn default() -> Self {
-        TaskPriority::Medium
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -820,11 +799,16 @@ mod tests {
 
     #[test]
     fn test_task_weight() {
-        let critical_task = TaskDefinition::new("critical", TaskSource::Custom {
-            source_type: "test".to_string(),
-            endpoint: "".to_string(),
-            params: HashMap::new(),
-        }, "Critical Task").with_priority(TaskPriority::Critical);
+        let critical_task = TaskDefinition::new(
+            "critical",
+            TaskSource::Custom {
+                source_type: "test".to_string(),
+                endpoint: "".to_string(),
+                params: HashMap::new(),
+            },
+            "Critical Task",
+        )
+        .with_priority(TaskPriority::Critical);
 
         assert_eq!(critical_task.weight(), 5);
     }

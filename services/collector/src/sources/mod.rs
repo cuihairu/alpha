@@ -2,15 +2,15 @@
 //!
 //! 提供统一的爬虫接口，支持多种数据源
 
-pub mod mod_sina;
-pub mod mod_eastmoney;
-pub mod mod_tencent;
 pub mod mod_163;
+pub mod mod_eastmoney;
+pub mod mod_sina;
+pub mod mod_tencent;
 
-pub use mod_sina::SinaSource;
-pub use mod_eastmoney::EastmoneySource;
-pub use mod_tencent::TencentSource;
 pub use mod_163::Netease163Source;
+pub use mod_eastmoney::EastmoneySource;
+pub use mod_sina::SinaSource;
+pub use mod_tencent::TencentSource;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -341,7 +341,9 @@ impl Default for CrawlerConfig {
             request_interval: 100,
             retry_times: 3,
             retry_interval: 1000,
-            user_agent: Some("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36".to_string()),
+            user_agent: Some(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36".to_string(),
+            ),
             proxy: None,
         }
     }

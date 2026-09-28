@@ -40,13 +40,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. 批量获取股票行情
     println!("3. 批量获取股票行情...");
-    let symbols = vec!["000001".to_string(), "600000".to_string(), "600519".to_string()];
+    let symbols = vec![
+        "000001".to_string(),
+        "600000".to_string(),
+        "600519".to_string(),
+    ];
     match sources[0].get_realtime_quotes(&symbols).await {
         Ok(quotes) => {
             println!("✓ 获取到 {} 只股票行情:", quotes.len());
             for quote in &quotes {
-                println!("  {} ({}): {:.2}元 ({:.2}%)",
-                    quote.name, quote.symbol, quote.price, quote.change_percent);
+                println!(
+                    "  {} ({}): {:.2}元 ({:.2}%)",
+                    quote.name, quote.symbol, quote.price, quote.change_percent
+                );
             }
         }
         Err(e) => println!("✗ 获取失败: {}", e),
@@ -59,8 +65,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(klines) => {
             println!("✓ 获取到 {} 条K线数据:", klines.len());
             for kline in &klines {
-                println!("  {}: 开盘={:.2}, 最高={:.2}, 最低={:.2}, 收盘={:.2}",
-                    kline.timestamp, kline.open, kline.high, kline.low, kline.close);
+                println!(
+                    "  {}: 开盘={:.2}, 最高={:.2}, 最低={:.2}, 收盘={:.2}",
+                    kline.timestamp, kline.open, kline.high, kline.low, kline.close
+                );
             }
         }
         Err(e) => println!("✗ 获取失败: {}", e),
@@ -162,9 +170,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 9. 健康检查
     println!("9. 健康检查示例...");
     let health_checker = HealthChecker::new(metrics.clone());
-    health_checker.register_checker("test_source", move || {
-        ComponentHealth::healthy("test_source")
-    }).await;
+    health_checker
+        .register_checker("test_source", move || {
+            ComponentHealth::healthy("test_source")
+        })
+        .await;
 
     let health_result = health_checker.check().await;
     println!("✓ 健康状态: {:?}", health_result.status);

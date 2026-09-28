@@ -100,7 +100,10 @@ async fn read_latest_skips_entries_without_payload() {
         .await
         .unwrap();
 
-    queue.publish(&stream, &sample_envelope(&stream, "600000", 8.8)).await.unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "600000", 8.8))
+        .await
+        .unwrap();
 
     let messages = queue.read_latest(&stream, 10).await.unwrap();
     assert_eq!(messages.len(), 1);
@@ -134,8 +137,14 @@ async fn consumer_group_delivers_and_acks_messages() {
     let stream = unique_stream("consumer");
     queue.ensure_consumer_group(&stream, "grp").await.unwrap();
 
-    queue.publish(&stream, &sample_envelope(&stream, "000001", 10.0)).await.unwrap();
-    queue.publish(&stream, &sample_envelope(&stream, "000002", 11.0)).await.unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "000001", 10.0))
+        .await
+        .unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "000002", 11.0))
+        .await
+        .unwrap();
 
     let batch1 = queue
         .read_group(&stream, "grp", "consumer-1", 10, 100)
@@ -157,7 +166,9 @@ async fn consumer_group_delivers_and_acks_messages() {
 
     // 空读应在 block 窗口内快速返回而不是挂死
     let started = std::time::Instant::now();
-    let _ = queue.read_group(&stream, "grp", "consumer-1", 10, 300).await;
+    let _ = queue
+        .read_group(&stream, "grp", "consumer-1", 10, 300)
+        .await;
     assert!(started.elapsed() < Duration::from_secs(5));
 
     cleanup(&url, &[&stream]).await;
@@ -173,8 +184,14 @@ async fn group_created_at_zero_reads_history() {
     };
 
     let stream = unique_stream("history");
-    queue.publish(&stream, &sample_envelope(&stream, "600519", 1700.0)).await.unwrap();
-    queue.ensure_consumer_group(&stream, "late-grp").await.unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "600519", 1700.0))
+        .await
+        .unwrap();
+    queue
+        .ensure_consumer_group(&stream, "late-grp")
+        .await
+        .unwrap();
 
     let messages = queue
         .read_group(&stream, "late-grp", "consumer-1", 10, 100)
@@ -216,7 +233,10 @@ async fn undecodable_entries_are_surfaced_not_poisoning_the_group() {
     queue.ensure_consumer_group(&stream, "grp").await.unwrap();
 
     // 1 条合法消息 + 1 条 payload 为垃圾 JSON + 1 条完全没有 payload 字段
-    queue.publish(&stream, &sample_envelope(&stream, "000001", 10.0)).await.unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "000001", 10.0))
+        .await
+        .unwrap();
     let mut conn = raw_conn(&url).await;
     let _: String = redis::cmd("XADD")
         .arg(&stream)
@@ -239,17 +259,36 @@ async fn undecodable_entries_are_surfaced_not_poisoning_the_group() {
         .await
         .unwrap();
 
-    let result = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
-    assert_eq!(result.messages.len(), 1, "valid message must still be delivered");
-    assert_eq!(result.invalid.len(), 2, "both undecodable entries must be surfaced");
+    let result = queue
+        .read_group(&stream, "grp", "consumer-1", 10, 100)
+        .await
+        .unwrap();
+    assert_eq!(
+        result.messages.len(),
+        1,
+        "valid message must still be delivered"
+    );
+    assert_eq!(
+        result.invalid.len(),
+        2,
+        "both undecodable entries must be surfaced"
+    );
 
     // 消费者按 DLQ 契约隔离（publish_dlq + ack）
     for invalid in &result.invalid {
         if invalid.raw_payload.is_some() {
-            assert!(invalid.reason.contains("decode"), "reason: {}", invalid.reason);
+            assert!(
+                invalid.reason.contains("decode"),
+                "reason: {}",
+                invalid.reason
+            );
             assert_eq!(invalid.raw_payload.as_deref(), Some("this is not json"));
         } else {
-            assert!(invalid.reason.contains("payload"), "reason: {}", invalid.reason);
+            assert!(
+                invalid.reason.contains("payload"),
+                "reason: {}",
+                invalid.reason
+            );
         }
         queue.publish_dlq(&dlq_stream, invalid).await.unwrap();
         queue.ack(&stream, "grp", &invalid.id).await.unwrap();
@@ -262,7 +301,10 @@ async fn undecodable_entries_are_surfaced_not_poisoning_the_group() {
     assert_eq!(pending_count(&url, &stream, "grp").await, 0);
 
     // 再次读取：合法与非法条目都已被消费，组内无剩余
-    let again = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    let again = queue
+        .read_group(&stream, "grp", "consumer-1", 10, 100)
+        .await
+        .unwrap();
     assert!(again.is_empty());
 
     // DLQ 上能看到两条带原因的隔离条目
@@ -294,8 +336,14 @@ async fn claim_stale_reclaims_orphaned_pending_messages() {
     queue.ensure_consumer_group(&stream, "grp").await.unwrap();
 
     // 模拟正常生产 + 「崩溃」消费：读走但不 ack
-    queue.publish(&stream, &sample_envelope(&stream, "000001", 10.0)).await.unwrap();
-    queue.publish(&stream, &sample_envelope(&stream, "000002", 11.0)).await.unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "000001", 10.0))
+        .await
+        .unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "000002", 11.0))
+        .await
+        .unwrap();
     let crashed = queue
         .read_group(&stream, "grp", "crashed-consumer", 10, 100)
         .await
@@ -308,7 +356,10 @@ async fn claim_stale_reclaims_orphaned_pending_messages() {
         .claim_stale(&stream, "grp", "sweeper", 60_000, 10, 10)
         .await
         .unwrap();
-    assert!(not_yet.messages.is_empty(), "entries below min idle must not be claimed");
+    assert!(
+        not_yet.messages.is_empty(),
+        "entries below min idle must not be claimed"
+    );
     assert_eq!(pending_count(&url, &stream, "grp").await, 2);
 
     // 闲置超过阈值（消息投递至今已 >1s）：认领并重新交付
@@ -317,7 +368,11 @@ async fn claim_stale_reclaims_orphaned_pending_messages() {
         .claim_stale(&stream, "grp", "sweeper", 1000, 10, 10)
         .await
         .unwrap();
-    assert_eq!(claimed.messages.len(), 2, "orphaned entries must be reclaimed");
+    assert_eq!(
+        claimed.messages.len(),
+        2,
+        "orphaned entries must be reclaimed"
+    );
     assert!(claimed.invalid.is_empty());
     let mut symbols: Vec<&str> = claimed
         .messages
@@ -348,7 +403,10 @@ async fn claim_stale_acks_entries_deleted_from_stream() {
 
     let stream = unique_stream("deleted");
     queue.ensure_consumer_group(&stream, "grp").await.unwrap();
-    let published = queue.publish(&stream, &sample_envelope(&stream, "600519", 1700.0)).await.unwrap();
+    let published = queue
+        .publish(&stream, &sample_envelope(&stream, "600519", 1700.0))
+        .await
+        .unwrap();
 
     let crashed = queue
         .read_group(&stream, "grp", "crashed-consumer", 10, 100)
@@ -365,9 +423,16 @@ async fn claim_stale_acks_entries_deleted_from_stream() {
         .claim_stale(&stream, "grp", "sweeper", 0, 10, 10)
         .await
         .unwrap();
-    assert!(claimed.messages.is_empty(), "deleted entry has nothing to reprocess");
+    assert!(
+        claimed.messages.is_empty(),
+        "deleted entry has nothing to reprocess"
+    );
     assert!(claimed.invalid.is_empty());
-    assert_eq!(pending_count(&url, &stream, "grp").await, 0, "PEL shell must be acked away");
+    assert_eq!(
+        pending_count(&url, &stream, "grp").await,
+        0,
+        "PEL shell must be acked away"
+    );
 
     cleanup(&url, &[&stream]).await;
 }
@@ -387,8 +452,14 @@ async fn claim_stale_caps_redelivery_and_routes_poison_to_dlq() {
     queue.ensure_consumer_group(&stream, "grp").await.unwrap();
 
     // 首次投递（delivery_count = 1），读走后不 ack 模拟反复处理失败
-    queue.publish(&stream, &sample_envelope(&stream, "000001", 10.0)).await.unwrap();
-    let first = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "000001", 10.0))
+        .await
+        .unwrap();
+    let first = queue
+        .read_group(&stream, "grp", "consumer-1", 10, 100)
+        .await
+        .unwrap();
     assert_eq!(first.messages.len(), 1);
 
     // cap=3：前两轮兜底重投照常（未达上限不误杀）
@@ -397,7 +468,11 @@ async fn claim_stale_caps_redelivery_and_routes_poison_to_dlq() {
         .claim_stale(&stream, "grp", "sweeper", 1000, 10, 3)
         .await
         .unwrap();
-    assert_eq!(sweep1.messages.len(), 1, "delivery below cap must still be reclaimed");
+    assert_eq!(
+        sweep1.messages.len(),
+        1,
+        "delivery below cap must still be reclaimed"
+    );
     assert!(sweep1.invalid.is_empty());
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let sweep2 = queue
@@ -413,7 +488,10 @@ async fn claim_stale_caps_redelivery_and_routes_poison_to_dlq() {
         .claim_stale(&stream, "grp", "sweeper", 1000, 10, 3)
         .await
         .unwrap();
-    assert!(sweep3.messages.is_empty(), "poison message must not be redelivered");
+    assert!(
+        sweep3.messages.is_empty(),
+        "poison message must not be redelivered"
+    );
     assert_eq!(sweep3.invalid.len(), 1);
     let poison = &sweep3.invalid[0];
     assert_eq!(poison.id, first.messages[0].id);
@@ -445,7 +523,10 @@ async fn claim_stale_caps_redelivery_and_routes_poison_to_dlq() {
     assert!(payload["dlq_reason"].as_str().unwrap().contains("cap 3"));
     assert_eq!(payload["original_stream"].as_str().unwrap(), stream);
     assert_eq!(payload["entry_id"].as_str().unwrap(), poison.id);
-    assert!(payload["original_payload"].as_str().unwrap().contains("000001"));
+    assert!(payload["original_payload"]
+        .as_str()
+        .unwrap()
+        .contains("000001"));
 
     // 超限 ack 后不再认领：再次兜底扫描无任何产出
     tokio::time::sleep(Duration::from_millis(1100)).await;
@@ -453,7 +534,10 @@ async fn claim_stale_caps_redelivery_and_routes_poison_to_dlq() {
         .claim_stale(&stream, "grp", "sweeper", 1000, 10, 3)
         .await
         .unwrap();
-    assert!(sweep4.is_empty(), "acked poison message must never resurface");
+    assert!(
+        sweep4.is_empty(),
+        "acked poison message must never resurface"
+    );
 
     cleanup(&url, &[&stream, &dlq_stream]).await;
 }
@@ -469,8 +553,14 @@ async fn claim_stale_does_not_poison_below_cap() {
     let stream = unique_stream("below-cap");
     queue.ensure_consumer_group(&stream, "grp").await.unwrap();
 
-    queue.publish(&stream, &sample_envelope(&stream, "600519", 1700.0)).await.unwrap();
-    let first = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "600519", 1700.0))
+        .await
+        .unwrap();
+    let first = queue
+        .read_group(&stream, "grp", "consumer-1", 10, 100)
+        .await
+        .unwrap();
     assert_eq!(first.messages.len(), 1);
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
@@ -478,10 +568,17 @@ async fn claim_stale_does_not_poison_below_cap() {
         .claim_stale(&stream, "grp", "sweeper", 1000, 10, 5)
         .await
         .unwrap();
-    assert_eq!(claimed.messages.len(), 1, "orphan below cap must be reclaimed normally");
+    assert_eq!(
+        claimed.messages.len(),
+        1,
+        "orphan below cap must be reclaimed normally"
+    );
     assert!(claimed.invalid.is_empty());
 
-    queue.ack(&stream, "grp", &claimed.messages[0].id).await.unwrap();
+    queue
+        .ack(&stream, "grp", &claimed.messages[0].id)
+        .await
+        .unwrap();
     assert_eq!(pending_count(&url, &stream, "grp").await, 0);
 
     cleanup(&url, &[&stream]).await;
@@ -501,8 +598,14 @@ async fn claim_stale_sweep_handles_poison_and_fresh_orphans_together() {
     queue.ensure_consumer_group(&stream, "grp").await.unwrap();
 
     // A：投递一次后经一轮兜底重投到 dc=2（恰好达 cap=2）
-    queue.publish(&stream, &sample_envelope(&stream, "000001", 10.0)).await.unwrap();
-    let batch = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "000001", 10.0))
+        .await
+        .unwrap();
+    let batch = queue
+        .read_group(&stream, "grp", "consumer-1", 10, 100)
+        .await
+        .unwrap();
     let poisoned_id = batch.messages[0].id.clone();
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let warm = queue
@@ -512,8 +615,14 @@ async fn claim_stale_sweep_handles_poison_and_fresh_orphans_together() {
     assert_eq!(warm.messages.len(), 1, "dc=1 below cap must be claimed");
 
     // B：在 A 之后发布（条目 ID 更大，XPENDING 中排在毒消息之后），投递一次不 ack
-    queue.publish(&stream, &sample_envelope(&stream, "000002", 11.0)).await.unwrap();
-    let fresh = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    queue
+        .publish(&stream, &sample_envelope(&stream, "000002", 11.0))
+        .await
+        .unwrap();
+    let fresh = queue
+        .read_group(&stream, "grp", "consumer-1", 10, 100)
+        .await
+        .unwrap();
     assert_eq!(fresh.messages.len(), 1);
 
     tokio::time::sleep(Duration::from_millis(1100)).await;
@@ -522,16 +631,33 @@ async fn claim_stale_sweep_handles_poison_and_fresh_orphans_together() {
         .await
         .unwrap();
     // 同一轮：A（老条目，dc 达 cap）→ invalid；B（dc=1 < cap）→ 正常重放
-    assert_eq!(swept.invalid.len(), 1, "capped entry must be routed to DLQ contract");
+    assert_eq!(
+        swept.invalid.len(),
+        1,
+        "capped entry must be routed to DLQ contract"
+    );
     assert_eq!(swept.invalid[0].id, poisoned_id);
-    assert_eq!(swept.messages.len(), 1, "fresh orphan behind a poison entry must still be claimed");
+    assert_eq!(
+        swept.messages.len(),
+        1,
+        "fresh orphan behind a poison entry must still be claimed"
+    );
     assert_eq!(swept.messages[0].envelope.payload["symbol"], "000002");
     assert_eq!(pending_count(&url, &stream, "grp").await, 2);
 
     // A 走 DLQ 契约隔离，B 重放完成后 ack：PEL 清零，DLQ 恰好一条
-    queue.publish_dlq(&dlq_stream, &swept.invalid[0]).await.unwrap();
-    queue.ack(&stream, "grp", &swept.invalid[0].id).await.unwrap();
-    queue.ack(&stream, "grp", &swept.messages[0].id).await.unwrap();
+    queue
+        .publish_dlq(&dlq_stream, &swept.invalid[0])
+        .await
+        .unwrap();
+    queue
+        .ack(&stream, "grp", &swept.invalid[0].id)
+        .await
+        .unwrap();
+    queue
+        .ack(&stream, "grp", &swept.messages[0].id)
+        .await
+        .unwrap();
     assert_eq!(pending_count(&url, &stream, "grp").await, 0);
     assert_eq!(queue.read_latest(&dlq_stream, 10).await.unwrap().len(), 1);
 

@@ -11,7 +11,10 @@ pub struct RedisKvStorage {
 }
 
 impl RedisKvStorage {
-    pub async fn connect(connection_string: &str, default_ttl_seconds: Option<u64>) -> AlphaResult<Self> {
+    pub async fn connect(
+        connection_string: &str,
+        default_ttl_seconds: Option<u64>,
+    ) -> AlphaResult<Self> {
         let client = redis::Client::open(connection_string)
             .map_err(|e| AlphaError::ConfigurationError(format!("invalid redis URL: {e}")))?;
         let conn = client

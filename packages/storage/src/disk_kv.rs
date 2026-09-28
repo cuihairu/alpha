@@ -57,7 +57,9 @@ impl DiskKvStorage {
     fn key_to_path(&self, key: &str) -> AlphaResult<PathBuf> {
         let key = key.trim_matches('/');
         if key.is_empty() {
-            return Err(AlphaError::InvalidInput("storage key cannot be empty".to_string()));
+            return Err(AlphaError::InvalidInput(
+                "storage key cannot be empty".to_string(),
+            ));
         }
 
         let mut out = self.base_path.clone();
@@ -235,10 +237,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let storage = DiskKvStorage::new(tmp.path());
 
-        storage
-            .store("a/b/c", b"hello".to_vec())
-            .await
-            .unwrap();
+        storage.store("a/b/c", b"hello".to_vec()).await.unwrap();
         assert!(storage.exists("a/b/c").await.unwrap());
 
         let val = storage.retrieve("a/b/c").await.unwrap().unwrap();

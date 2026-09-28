@@ -388,15 +388,23 @@ impl DataCleaner {
     }
 
     /// 批量清洗实时行情数据
-    pub fn clean_realtime_quotes(&mut self, quotes: Vec<RealtimeQuote>) -> Vec<CleanResult<RealtimeQuote>> {
-        quotes.into_iter()
+    pub fn clean_realtime_quotes(
+        &mut self,
+        quotes: Vec<RealtimeQuote>,
+    ) -> Vec<CleanResult<RealtimeQuote>> {
+        quotes
+            .into_iter()
             .map(|quote| self.clean_realtime_quote(quote))
             .collect()
     }
 
     /// 批量清洗 K线数据
-    pub fn clean_kline_data_batch(&mut self, klines: Vec<KlineData>) -> Vec<CleanResult<KlineData>> {
-        klines.into_iter()
+    pub fn clean_kline_data_batch(
+        &mut self,
+        klines: Vec<KlineData>,
+    ) -> Vec<CleanResult<KlineData>> {
+        klines
+            .into_iter()
             .map(|kline| self.clean_kline_data(kline))
             .collect()
     }
@@ -420,19 +428,18 @@ impl DataCleaner {
         }
 
         // 验证市场
-        match info.stock_type {
-            crate::sources::StockType::Stock => {
-                // A股代码规则验证
-                let code = info.symbol.chars()
-                    .skip_while(|c| c.is_alphabetic())
-                    .collect::<String>();
+        if info.stock_type == crate::sources::StockType::Stock {
+            // A股代码规则验证
+            let code = info
+                .symbol
+                .chars()
+                .skip_while(|c| c.is_alphabetic())
+                .collect::<String>();
 
-                if code.len() != 6 {
-                    warnings.push("股票代码长度异常".to_string());
-                    quality = DataQuality::Medium;
-                }
+            if code.len() != 6 {
+                warnings.push("股票代码长度异常".to_string());
+                quality = DataQuality::Medium;
             }
-            _ => {}
         }
 
         // 验证状态
@@ -508,9 +515,7 @@ impl SymbolNormalizer {
 
     /// 提取纯数字代码
     pub fn extract_code(symbol: &str) -> String {
-        symbol.chars()
-            .skip_while(|c| c.is_alphabetic())
-            .collect()
+        symbol.chars().skip_while(|c| c.is_alphabetic()).collect()
     }
 
     /// 获取市场

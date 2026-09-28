@@ -75,7 +75,7 @@ impl TimeSeries {
         let mut merged = std::mem::take(&mut self.data);
         merged.extend(points);
         // 稳定排序：同 ts 保持插入顺序，下面的去重因此天然「后者覆盖前者」
-        merged.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        merged.sort_by_key(|a| a.timestamp);
 
         let mut deduped: Vec<TimeSeriesPoint> = Vec::with_capacity(merged.len());
         for point in merged {
@@ -395,7 +395,13 @@ mod tests {
 
         let shuffled: Vec<MarketData> = [3_i64, 0, 7, 2, 9, 1, 5, 8, 4, 6]
             .iter()
-            .map(|&i| md("SHUF", base + chrono::Duration::seconds(i), 100.0 + i as f64))
+            .map(|&i| {
+                md(
+                    "SHUF",
+                    base + chrono::Duration::seconds(i),
+                    100.0 + i as f64,
+                )
+            })
             .collect();
         storage.add_market_data_batch(&shuffled).await.unwrap();
 
@@ -405,7 +411,11 @@ mod tests {
             .iter()
             .map(|p| (p.timestamp - base).num_seconds())
             .collect();
-        assert_eq!(timestamps, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "series must stay sorted");
+        assert_eq!(
+            timestamps,
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            "series must stay sorted"
+        );
 
         let range = storage
             .get_data_in_range("SHUF", base, base + chrono::Duration::seconds(4))
@@ -426,21 +436,41 @@ mod tests {
         let ts2 = base + chrono::Duration::seconds(1);
 
         // 单点路径：同 ts 后写覆盖前写
-        storage.add_market_data(&md("DUP", ts1, 10.0)).await.unwrap();
-        storage.add_market_data(&md("DUP", ts1, 20.0)).await.unwrap();
+        storage
+            .add_market_data(&md("DUP", ts1, 10.0))
+            .await
+            .unwrap();
+        storage
+            .add_market_data(&md("DUP", ts1, 20.0))
+            .await
+            .unwrap();
 
         // 批量路径：批内重复 + 与存量重复，均保留最后写入
         storage
-            .add_market_data_batch(&[md("DUP", ts1, 30.0), md("DUP", ts2, 99.0), md("DUP", ts2, 88.0)])
+            .add_market_data_batch(&[
+                md("DUP", ts1, 30.0),
+                md("DUP", ts2, 99.0),
+                md("DUP", ts2, 88.0),
+            ])
             .await
             .unwrap();
 
         let series = storage.get_series("DUP").await.unwrap().unwrap();
-        assert_eq!(series.data.len(), 2, "duplicate (symbol, ts) must collapse to one point");
+        assert_eq!(
+            series.data.len(),
+            2,
+            "duplicate (symbol, ts) must collapse to one point"
+        );
         assert_eq!(series.data[0].timestamp, ts1);
-        assert_eq!(series.data[0].value, 30.0, "batch later write must win over existing point");
+        assert_eq!(
+            series.data[0].value, 30.0,
+            "batch later write must win over existing point"
+        );
         assert_eq!(series.data[1].timestamp, ts2);
-        assert_eq!(series.data[1].value, 88.0, "within-batch later write must win");
+        assert_eq!(
+            series.data[1].value, 88.0,
+            "within-batch later write must win"
+        );
     }
 
     /// 写后立即查询可见（单点路径，含乱序插入后 get_latest 语义）。
@@ -451,23 +481,22 @@ mod tests {
         let late = base + chrono::Duration::hours(1);
         let early = base - chrono::Duration::hours(1);
 
-        storage.add_market_data(&md("VIS", late, 42.0)).await.unwrap();
-        // 写入乱序的更早点后，区间查询与最新价都要立即反映
-        let visible = storage
-            .get_data_in_range("VIS", late, late)
+        storage
+            .add_market_data(&md("VIS", late, 42.0))
             .await
             .unwrap();
+        // 写入乱序的更早点后，区间查询与最新价都要立即反映
+        let visible = storage.get_data_in_range("VIS", late, late).await.unwrap();
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].value, 42.0);
 
-        storage.add_market_data(&md("VIS", early, 41.0)).await.unwrap();
-        let all = storage
-            .get_data_in_range("VIS", early, late)
+        storage
+            .add_market_data(&md("VIS", early, 41.0))
             .await
             .unwrap();
+        let all = storage.get_data_in_range("VIS", early, late).await.unwrap();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].value, 41.0, "earlier point must sort first");
         assert_eq!(storage.get_latest_price("VIS").await.unwrap(), Some(42.0));
     }
 }
-

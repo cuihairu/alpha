@@ -2,10 +2,10 @@
 //!
 //! 展示多语言、多数据源的爬虫集成和自动发现功能
 
-use std::collections::HashMap;
-use std::path::PathBuf;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 // 简化的数据源枚举
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,7 +128,6 @@ impl SimpleIntegrationSystem {
                 requires_python: true,
                 requires_nodejs: false,
             },
-
             // Puppeteer爬虫
             CrawlerConfig {
                 name: "puppeteer-crawler".to_string(),
@@ -144,11 +143,11 @@ impl SimpleIntegrationSystem {
                     "social_media".to_string(),
                 ],
                 start_command: "node crawler.js".to_string(),
-                command_template: "node crawler.js --data-source={source} --keywords={keywords}".to_string(),
+                command_template: "node crawler.js --data-source={source} --keywords={keywords}"
+                    .to_string(),
                 requires_python: false,
                 requires_nodejs: true,
             },
-
             // Selenium爬虫
             CrawlerConfig {
                 name: "selenium-finance-crawler".to_string(),
@@ -165,11 +164,11 @@ impl SimpleIntegrationSystem {
                     "financial_reports".to_string(),
                 ],
                 start_command: "python finance_crawler.py".to_string(),
-                command_template: "python finance_crawler.py --source={source} --symbols={symbols}".to_string(),
+                command_template: "python finance_crawler.py --source={source} --symbols={symbols}"
+                    .to_string(),
                 requires_python: true,
                 requires_nodejs: false,
             },
-
             // Node.js加密货币爬虫
             CrawlerConfig {
                 name: "node-crypto-trader".to_string(),
@@ -183,11 +182,11 @@ impl SimpleIntegrationSystem {
                     "economic_indicators".to_string(),
                 ],
                 start_command: "node index.js".to_string(),
-                command_template: "node index.js --exchange={exchange} --symbols={symbols}".to_string(),
+                command_template: "node index.js --exchange={exchange} --symbols={symbols}"
+                    .to_string(),
                 requires_python: false,
                 requires_nodejs: true,
             },
-
             // Python外汇爬虫
             CrawlerConfig {
                 name: "python-forex-scraper".to_string(),
@@ -205,38 +204,40 @@ impl SimpleIntegrationSystem {
                 requires_python: true,
                 requires_nodejs: false,
             },
-
             // Go大宗商品爬虫
             CrawlerConfig {
                 name: "go-commodity-crawler".to_string(),
                 display_name: "Go 大宗商品数据爬虫".to_string(),
                 language: "Go".to_string(),
                 framework: "Go".to_string(),
-                repository_url: "https://github.com/commodity-crawler/go-commodity-crawler".to_string(),
+                repository_url: "https://github.com/commodity-crawler/go-commodity-crawler"
+                    .to_string(),
                 supported_sources: vec![
                     "commodities".to_string(),
                     "economic_indicators".to_string(),
                 ],
                 start_command: "go run main.go".to_string(),
-                command_template: "go run main.go --category={category} --symbol={symbol}".to_string(),
+                command_template: "go run main.go --category={category} --symbol={symbol}"
+                    .to_string(),
                 requires_python: false,
                 requires_nodejs: false,
             },
-
             // Rust新闻聚合器
             CrawlerConfig {
                 name: "rust-news-aggregator".to_string(),
                 display_name: "Rust 新闻聚合器".to_string(),
                 language: "Rust".to_string(),
                 framework: "Rust".to_string(),
-                repository_url: "https://github.com/rust-news-aggregator/rust-news-aggregator".to_string(),
+                repository_url: "https://github.com/rust-news-aggregator/rust-news-aggregator"
+                    .to_string(),
                 supported_sources: vec![
                     "news".to_string(),
                     "research_reports".to_string(),
                     "economic_indicators".to_string(),
                 ],
                 start_command: "cargo run --release".to_string(),
-                command_template: "cargo run --release --bin aggregator --sources={sources}".to_string(),
+                command_template: "cargo run --release --bin aggregator --sources={sources}"
+                    .to_string(),
                 requires_python: false,
                 requires_nodejs: false,
             },
@@ -262,7 +263,12 @@ impl SimpleIntegrationSystem {
 
             self.crawlers.push(discovered);
 
-            println!("  {}. {} ({})", i + 1, discovered.display_name, discovered.language);
+            println!(
+                "  {}. {} ({})",
+                i + 1,
+                discovered.display_name,
+                discovered.language
+            );
             println!("    📍 路径: {:?}", discovered.path);
             println!("    🔧 框架: {}", discovered.framework);
             println!("    📊 支持数据源: {:?}", discovered.supported_sources);
@@ -279,28 +285,57 @@ impl SimpleIntegrationSystem {
 
         // 初始化数据源到爬虫的映射
         let mappings = vec![
-            (DataSource::Cryptocurrency, vec!["scrapy-redis".to_string(), "node-crypto-trader".to_string()]),
-            (DataSource::AShare, vec!["scrapy-redis".to_string(), "selenium-finance-crawler".to_string()]),
-            (DataSource::Forex, vec!["python-forex-scraper".to_string(), "node-crypto-trader".to_string()]),
-            (DataSource::News, vec!["puppeteer-crawler".to_string(), "rust-news-aggregator".to_string()]),
-            (DataSource::Commodities, vec!["go-commodity-crawler".to_string()]),
+            (
+                DataSource::Cryptocurrency,
+                vec!["scrapy-redis".to_string(), "node-crypto-trader".to_string()],
+            ),
+            (
+                DataSource::AShare,
+                vec![
+                    "scrapy-redis".to_string(),
+                    "selenium-finance-crawler".to_string(),
+                ],
+            ),
+            (
+                DataSource::Forex,
+                vec![
+                    "python-forex-scraper".to_string(),
+                    "node-crypto-trader".to_string(),
+                ],
+            ),
+            (
+                DataSource::News,
+                vec![
+                    "puppeteer-crawler".to_string(),
+                    "rust-news-aggregator".to_string(),
+                ],
+            ),
+            (
+                DataSource::Commodities,
+                vec!["go-commodity-crawler".to_string()],
+            ),
             (DataSource::Bonds, vec!["python-forex-scraper".to_string()]),
             (DataSource::Funds, vec!["python-forex-scraper".to_string()]),
-            (DataSource::ResearchReports, vec!["rust-news-aggregator".to_string()]),
+            (
+                DataSource::ResearchReports,
+                vec!["rust-news-aggregator".to_string()],
+            ),
         ];
 
         for (data_source, crawlers) in mappings {
-            self.data_source_mappings.insert(
-                format!("{:?}", data_source),
-                crawlers
-            );
+            self.data_source_mappings
+                .insert(format!("{:?}", data_source), crawlers);
         }
 
         println!("✅ 数据源映射创建完成！");
     }
 
     /// 智能任务分配
-    pub async fn allocate_task(&self, task_name: &str, data_source: &DataSource) -> Result<TaskAllocation> {
+    pub async fn allocate_task(
+        &self,
+        task_name: &str,
+        data_source: &DataSource,
+    ) -> Result<TaskAllocation> {
         println!("\n🧠 智能任务分配演示");
         println!("  📋 任务: {}", task_name);
         println!("  🎯 数据源: {:?}", data_source);
@@ -310,7 +345,9 @@ impl SimpleIntegrationSystem {
         if let Some(crawlers) = self.data_source_mappings.get(&data_source_key) {
             // 简单选择第一个可用的爬虫
             if let Some(crawler_name) = crawlers.first() {
-                let crawler = self.crawlers.iter()
+                let crawler = self
+                    .crawlers
+                    .iter()
                     .find(|c| &c.name == crawler_name)
                     .unwrap();
 
@@ -371,9 +408,15 @@ impl SimpleIntegrationSystem {
             execution_time,
             data_count: 100,
             metadata: HashMap::from([
-                ("crawler_language".to_string(), self.get_crawler_language(&allocation.crawler_name)),
+                (
+                    "crawler_language".to_string(),
+                    self.get_crawler_language(&allocation.crawler_name),
+                ),
                 ("data_source".to_string(), allocation.data_source.clone()),
-                ("allocation_reason".to_string(), allocation.allocation_reason.clone()),
+                (
+                    "allocation_reason".to_string(),
+                    allocation.allocation_reason.clone(),
+                ),
                 ("execution_mode".to_string(), "automatic".to_string()),
             ]),
         };
@@ -423,9 +466,11 @@ impl SimpleIntegrationSystem {
                     let execution_result = self.execute_task(&allocation).await?;
 
                     println!("  📋 {} - 状态: ✅", task_name);
-                    println!("    🤖 爬虫: {} ({})",
-                            allocation.crawler_name,
-                            self.get_crawler_language(&allocation.crawler_name));
+                    println!(
+                        "    🤖 爬虫: {} ({})",
+                        allocation.crawler_name,
+                        self.get_crawler_language(&allocation.crawler_name)
+                    );
                     println!("    ⏱️ 执行时间: {}秒", execution_result.execution_time);
                     println!("    📊 数据量: {} 条", execution_result.data_count);
                 }

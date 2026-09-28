@@ -227,7 +227,7 @@ impl AnalysisEngine {
         let base_confidence = (valid_indicators as f64 / indicators.len() as f64) * 100.0;
 
         // 可以进一步基于数据一致性、信号强度等因素调整置信度
-        base_confidence.min(100.0).max(0.0)
+        base_confidence.clamp(0.0, 100.0)
     }
 }
 
@@ -240,13 +240,11 @@ impl Default for AnalysisEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::StrategyParameters;
 
     #[test]
     fn test_analysis_engine_creation() {
-        let engine = AnalysisEngine::new();
-        // 测试引擎创建和基本属性
-        assert!(true);
+        // 构造即冒烟：创建成功不 panic 即通过
+        let _engine = AnalysisEngine::new();
     }
 
     #[test]

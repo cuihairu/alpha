@@ -50,7 +50,10 @@ impl ProxyConfig {
     /// 构建完整的代理 URL
     pub fn build_url(&self) -> String {
         if let (Some(username), Some(password)) = (&self.username, &self.password) {
-            format!("{}://{}:{}@{}", self.proxy_type, username, password, self.url)
+            format!(
+                "{}://{}:{}@{}",
+                self.proxy_type, username, password, self.url
+            )
         } else {
             format!("{}://{}", self.proxy_type, self.url)
         }
@@ -112,8 +115,7 @@ impl ProxyStatus {
         if self.avg_response_time_ms == 0 {
             self.avg_response_time_ms = response_time_ms;
         } else {
-            self.avg_response_time_ms =
-                (self.avg_response_time_ms + response_time_ms) / 2;
+            self.avg_response_time_ms = (self.avg_response_time_ms + response_time_ms) / 2;
         }
     }
 
@@ -166,10 +168,7 @@ pub struct ProxyPool {
 impl ProxyPool {
     /// 创建新的代理池
     pub fn new(proxies: Vec<ProxyConfig>, config: ProxyPoolConfig) -> Self {
-        let proxy_statuses: Vec<ProxyStatus> = proxies
-            .into_iter()
-            .map(ProxyStatus::new)
-            .collect();
+        let proxy_statuses: Vec<ProxyStatus> = proxies.into_iter().map(ProxyStatus::new).collect();
 
         Self {
             proxies: Arc::new(RwLock::new(proxy_statuses)),
@@ -217,7 +216,12 @@ impl ProxyPool {
     }
 
     /// 记录代理请求结果
-    pub async fn record_result(&self, proxy_config: &ProxyConfig, success: bool, response_time_ms: u64) {
+    pub async fn record_result(
+        &self,
+        proxy_config: &ProxyConfig,
+        success: bool,
+        response_time_ms: u64,
+    ) {
         let mut proxies = self.proxies.write().await;
 
         if let Some(proxy_status) = proxies
@@ -260,7 +264,8 @@ impl ProxyPool {
         let config = self.config.clone();
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(config.health_check_interval));
+            let mut interval =
+                tokio::time::interval(Duration::from_secs(config.health_check_interval));
 
             loop {
                 interval.tick().await;
@@ -272,7 +277,10 @@ impl ProxyPool {
                     // 简单的健康检查逻辑
                     // 实际项目中应该发送真实的测试请求
                     if !proxy.is_healthy() {
-                        warn!("Proxy {} is unhealthy, marking as unavailable", proxy.config.url);
+                        warn!(
+                            "Proxy {} is unhealthy, marking as unavailable",
+                            proxy.config.url
+                        );
                         proxy.is_available = false;
                     } else if !proxy.is_available && proxy.success_rate() > 0.5 {
                         info!("Proxy {} recovered, marking as available", proxy.config.url);
@@ -459,18 +467,16 @@ pub struct MultiLevelRateLimiter {
 impl MultiLevelRateLimiter {
     /// 创建新的多级限流器
     pub fn new(config: RateLimiterConfig) -> Self {
-        let token_limiter = TokenBucketRateLimiter::new(
-            config.initial_burst,
-            config.requests_per_second,
-        );
+        let token_limiter =
+            TokenBucketRateLimiter::new(config.initial_burst, config.requests_per_second);
 
-        let minute_limiter = config.requests_per_minute.map(|rpm| {
-            SlidingWindowRateLimiter::new(60, rpm)
-        });
+        let minute_limiter = config
+            .requests_per_minute
+            .map(|rpm| SlidingWindowRateLimiter::new(60, rpm));
 
-        let hour_limiter = config.requests_per_hour.map(|rph| {
-            SlidingWindowRateLimiter::new(3600, rph)
-        });
+        let hour_limiter = config
+            .requests_per_hour
+            .map(|rph| SlidingWindowRateLimiter::new(3600, rph));
 
         Self {
             token_limiter,

@@ -149,6 +149,12 @@ pub struct StrategyParameters {
     pub descriptions: std::collections::HashMap<String, String>,
 }
 
+impl Default for StrategyParameters {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StrategyParameters {
     pub fn new() -> Self {
         Self {

@@ -279,8 +279,8 @@ async fn api_proxy(
 
     match request.send().await {
         Ok(upstream) => {
-            let status = StatusCode::from_u16(upstream.status().as_u16())
-                .unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let mut builder = Response::builder().status(status);
             for (name, value) in upstream.headers() {
                 if is_hop_by_hop(name.as_str()) {
@@ -305,10 +305,7 @@ async fn api_proxy(
 }
 
 /// WS 反代（根路径）：/ws → real-time-feed /ws
-async fn ws_proxy_root(
-    state: State<GatewayState>,
-    ws: WebSocketUpgrade,
-) -> Response {
+async fn ws_proxy_root(state: State<GatewayState>, ws: WebSocketUpgrade) -> Response {
     ws_proxy_inner(state, "/".to_string(), ws).await
 }
 
@@ -321,15 +318,17 @@ async fn ws_proxy(
     ws_proxy_inner(state, format!("/{path}"), ws).await
 }
 
-async fn ws_proxy_inner(state: State<GatewayState>, path: String, ws: WebSocketUpgrade) -> Response {
+async fn ws_proxy_inner(
+    state: State<GatewayState>,
+    path: String,
+    ws: WebSocketUpgrade,
+) -> Response {
     let upstream_url = to_ws_url(&state.realtime_url, &path);
     tracing::info!("Proxying WebSocket connection → {}", upstream_url);
 
     // 先建立上游连接，失败时在升级握手前直接拒绝（返回 502 而非空升级）
     match tokio_tungstenite::connect_async(&upstream_url).await {
-        Ok((upstream, _)) => ws.on_upgrade(move |downstream| {
-            pump_websocket(downstream, upstream)
-        }),
+        Ok((upstream, _)) => ws.on_upgrade(move |downstream| pump_websocket(downstream, upstream)),
         Err(err) => {
             tracing::warn!("real-time-feed unreachable at {}: {}", upstream_url, err);
             (
@@ -351,7 +350,11 @@ fn to_ws_url(base_url: &str, path: &str) -> String {
     } else {
         base.to_string()
     };
-    let suffix = if path == "/" { String::new() } else { path.to_string() };
+    let suffix = if path == "/" {
+        String::new()
+    } else {
+        path.to_string()
+    };
     format!("{base}/ws{suffix}")
 }
 
@@ -382,12 +385,14 @@ async fn pump_websocket(
                 WsMessage::Pong(bytes) => {
                     Some(tokio_tungstenite::tungstenite::Message::Pong(bytes))
                 }
-                WsMessage::Close(frame) => Some(tokio_tungstenite::tungstenite::Message::Close(
-                    frame.map(|f| tokio_tungstenite::tungstenite::protocol::frame::CloseFrame {
-                        code: f.code.into(),
-                        reason: f.reason.to_string().into(),
-                    }),
-                )),
+                WsMessage::Close(frame) => {
+                    Some(tokio_tungstenite::tungstenite::Message::Close(frame.map(
+                        |f| tokio_tungstenite::tungstenite::protocol::frame::CloseFrame {
+                            code: f.code.into(),
+                            reason: f.reason.to_string().into(),
+                        },
+                    )))
+                }
             };
             match mapped {
                 Some(msg) => {
@@ -412,14 +417,18 @@ async fn pump_websocket(
                 tokio_tungstenite::tungstenite::Message::Binary(bytes) => {
                     Some(WsMessage::Binary(bytes))
                 }
-                tokio_tungstenite::tungstenite::Message::Ping(bytes) => Some(WsMessage::Ping(bytes)),
-                tokio_tungstenite::tungstenite::Message::Pong(bytes) => Some(WsMessage::Pong(bytes)),
-                tokio_tungstenite::tungstenite::Message::Close(frame) => Some(WsMessage::Close(
-                    frame.map(|f| WsCloseFrame {
+                tokio_tungstenite::tungstenite::Message::Ping(bytes) => {
+                    Some(WsMessage::Ping(bytes))
+                }
+                tokio_tungstenite::tungstenite::Message::Pong(bytes) => {
+                    Some(WsMessage::Pong(bytes))
+                }
+                tokio_tungstenite::tungstenite::Message::Close(frame) => {
+                    Some(WsMessage::Close(frame.map(|f| WsCloseFrame {
                         code: f.code.into(),
                         reason: f.reason.to_string().into(),
-                    }),
-                )),
+                    })))
+                }
                 tokio_tungstenite::tungstenite::Message::Frame(_) => None,
             };
             match mapped {
@@ -495,7 +504,10 @@ mod tests {
                         let (mut tx, mut rx) = socket.split();
                         while let Some(Ok(msg)) = rx.next().await {
                             if let WsMessage::Text(text) = msg {
-                                if tx.send(WsMessage::Text(format!("echo:{text}"))).await.is_err()
+                                if tx
+                                    .send(WsMessage::Text(format!("echo:{text}")))
+                                    .await
+                                    .is_err()
                                 {
                                     break;
                                 }
@@ -605,8 +617,9 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let (mut ws_stream, _) =
-            tokio_tungstenite::connect_async(format!("ws://{addr}/ws")).await.unwrap();
+        let (mut ws_stream, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .unwrap();
         use futures_util::SinkExt as TestSink;
         use futures_util::StreamExt as TestStream;
         ws_stream

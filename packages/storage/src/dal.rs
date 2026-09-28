@@ -69,9 +69,7 @@ impl DataAccessLayer {
         let price = self.timeseries.get_latest_price(symbol).await?;
 
         if let Some(p) = price {
-            self.cache
-                .store(&cache_key, serialize_value(&p)?)
-                .await?;
+            self.cache.store(&cache_key, serialize_value(&p)?).await?;
         }
 
         Ok(price)
@@ -84,7 +82,10 @@ impl DataAccessLayer {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> AlphaResult<Vec<MarketData>> {
-        let points = self.timeseries.get_data_in_range(symbol, start, end).await?;
+        let points = self
+            .timeseries
+            .get_data_in_range(symbol, start, end)
+            .await?;
 
         let mut market_data = Vec::new();
         for point in points {
@@ -165,8 +166,7 @@ impl DataAccessLayer {
         end: DateTime<Utc>,
     ) -> AlphaResult<Vec<u8>> {
         let data = self.get_market_data_range(symbol, start, end).await?;
-        serde_json::to_vec(&data)
-            .map_err(|e| AlphaError::SerializationError(e.to_string()))
+        serde_json::to_vec(&data).map_err(|e| AlphaError::SerializationError(e.to_string()))
     }
 
     /// 导入数据
@@ -263,9 +263,9 @@ impl QueryBuilder {
             .as_ref()
             .ok_or_else(|| AlphaError::InvalidInput("查询必须指定符号".to_string()))?;
 
-        let start =
-            self.start_time
-                .unwrap_or_else(|| Utc::now() - chrono::Duration::days(30));
+        let start = self
+            .start_time
+            .unwrap_or_else(|| Utc::now() - chrono::Duration::days(30));
         let end = self.end_time.unwrap_or_else(Utc::now);
 
         let mut data = dal.get_market_data_range(symbol, start, end).await?;

@@ -6,7 +6,9 @@ use alpha_core::indicators::TechnicalIndicators;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-/// Worker 任务类型
+/// Worker 任务类型（Web Workers + Rayon 流式并行计算路线的协议预留，
+/// 见 docs/cross-platform-architecture.md；Worker 通道接通前暂未被构造）
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum WorkerTask {
@@ -29,7 +31,8 @@ pub enum WorkerTask {
     },
 }
 
-/// Worker 计算结果
+/// Worker 计算结果（与 [`WorkerTask`] 同批预留）
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerResult {
     pub task_id: String,
@@ -43,6 +46,8 @@ pub struct WorkerResult {
 #[wasm_bindgen]
 pub struct WorkerPool {
     worker_count: usize,
+    /// 任务计数器：generate_task_id 在 Worker 通道接通后启用
+    #[allow(dead_code)]
     task_counter: std::cell::RefCell<usize>,
 }
 
@@ -51,7 +56,9 @@ impl WorkerPool {
     /// 创建 Worker 池
     #[wasm_bindgen(constructor)]
     pub fn new(worker_count: usize) -> WorkerPool {
-        let count = worker_count.max(1).min(navigator_hardware_concurrency().unwrap_or(4));
+        let count = worker_count
+            .max(1)
+            .min(navigator_hardware_concurrency().unwrap_or(4));
 
         WorkerPool {
             worker_count: count,
@@ -84,7 +91,7 @@ impl WorkerPool {
         }
 
         // 分批处理数据
-        let chunk_size = (datasets.len() + self.worker_count - 1) / self.worker_count;
+        let chunk_size = datasets.len().div_ceil(self.worker_count);
         let mut results = Vec::new();
 
         let indicators = TechnicalIndicators::new();
@@ -111,7 +118,8 @@ impl WorkerPool {
         Ok(js_results.into())
     }
 
-    /// 生成任务 ID
+    /// 生成任务 ID（Worker 通道接通后启用；wasm 单线程阶段暂无调用方）
+    #[allow(dead_code)]
     fn generate_task_id(&self) -> String {
         let mut counter = self.task_counter.borrow_mut();
         *counter += 1;

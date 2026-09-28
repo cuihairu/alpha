@@ -24,31 +24,22 @@ pub enum ConnectionState {
 #[serde(tag = "type")]
 pub enum WSMessage {
     /// 市场数据更新
-    MarketData {
-        symbol: String,
-        data: MarketData,
-    },
+    MarketData { symbol: String, data: MarketData },
     /// 批量市场数据
     MarketDataBatch {
         symbol: String,
         data: Vec<MarketData>,
     },
     /// 订阅请求
-    Subscribe {
-        symbols: Vec<String>,
-    },
+    Subscribe { symbols: Vec<String> },
     /// 取消订阅
-    Unsubscribe {
-        symbols: Vec<String>,
-    },
+    Unsubscribe { symbols: Vec<String> },
     /// 心跳
     Ping,
     /// 心跳响应
     Pong,
     /// 错误消息
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 /// WebSocket 客户端
@@ -117,10 +108,7 @@ impl WebSocketClient {
                     let _ = handler.call1(&JsValue::NULL, &JsValue::from_str(&text_str));
                 }
 
-                web_sys::console::log_1(&JsValue::from_str(&format!(
-                    "收到消息: {}",
-                    text_str
-                )));
+                web_sys::console::log_1(&JsValue::from_str(&format!("收到消息: {}", text_str)));
             }
         }) as Box<dyn FnMut(MessageEvent)>);
 
@@ -196,10 +184,7 @@ impl WebSocketClient {
     /// 订阅股票数据
     #[wasm_bindgen(js_name = subscribe)]
     pub fn subscribe(&self, symbols: js_sys::Array) -> Result<(), JsValue> {
-        let symbol_list: Vec<String> = symbols
-            .iter()
-            .filter_map(|s| s.as_string())
-            .collect();
+        let symbol_list: Vec<String> = symbols.iter().filter_map(|s| s.as_string()).collect();
 
         let message = WSMessage::Subscribe {
             symbols: symbol_list,
@@ -214,10 +199,7 @@ impl WebSocketClient {
     /// 取消订阅
     #[wasm_bindgen(js_name = unsubscribe)]
     pub fn unsubscribe(&self, symbols: js_sys::Array) -> Result<(), JsValue> {
-        let symbol_list: Vec<String> = symbols
-            .iter()
-            .filter_map(|s| s.as_string())
-            .collect();
+        let symbol_list: Vec<String> = symbols.iter().filter_map(|s| s.as_string()).collect();
 
         let message = WSMessage::Unsubscribe {
             symbols: symbol_list,

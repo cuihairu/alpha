@@ -2,30 +2,30 @@
 //!
 //! 提供统一的数据存储抽象层，支持多种存储后端
 
-pub mod memory;
-pub mod timeseries;
-pub mod timescale;
 pub mod clickhouse;
 pub mod cloud;
 pub mod dal;
 pub mod disk_kv;
+pub mod memory;
 pub mod postgres_kv;
 pub mod redis_kv;
 pub mod redis_streams;
+pub mod timescale;
+pub mod timeseries;
 
 use alpha_core::errors::AlphaResult;
 
 // 重新导出主要类型
-pub use memory::*;
-pub use timeseries::*;
-pub use timescale::*;
 pub use clickhouse::*;
 pub use cloud::*;
 pub use dal::*;
 pub use disk_kv::*;
+pub use memory::*;
 pub use postgres_kv::*;
 pub use redis_kv::*;
 pub use redis_streams::*;
+pub use timescale::*;
+pub use timeseries::*;
 
 /// 存储后端特征（对象安全版本）
 #[async_trait::async_trait]
@@ -87,7 +87,8 @@ impl StorageFactory {
                 Ok(Box::new(backend))
             }
             StorageBackendType::Redis => {
-                let backend = RedisKvStorage::connect(&config.connection_string, config.ttl_seconds).await?;
+                let backend =
+                    RedisKvStorage::connect(&config.connection_string, config.ttl_seconds).await?;
                 Ok(Box::new(backend))
             }
             StorageBackendType::S3 => {
@@ -133,8 +134,8 @@ mod tests {
     async fn storage_factory_creates_s3_backend_from_connection_string() {
         let config = StorageConfig {
             backend: StorageBackendType::S3,
-            connection_string:
-                "s3://alpha?provider=minio&endpoint=http%3A%2F%2F127.0.0.1%3A9000".to_string(),
+            connection_string: "s3://alpha?provider=minio&endpoint=http%3A%2F%2F127.0.0.1%3A9000"
+                .to_string(),
             ttl_seconds: None,
             max_connections: None,
         };

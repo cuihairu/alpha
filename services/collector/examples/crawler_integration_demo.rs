@@ -2,8 +2,8 @@
 //!
 //! 展示如何使用自动爬虫发现和集成功能
 
-use std::path::PathBuf;
 use anyhow::Result;
+use std::path::PathBuf;
 
 // 由于这是独立演示，我们模拟必要的类型和结构
 use chrono;
@@ -33,8 +33,12 @@ mod crawler_discovery {
                 auto_discovery: true,
                 scan_interval: 300,
                 supported_extensions: vec![
-                    "py".to_string(), "js".to_string(), "go".to_string(),
-                    "rs".to_string(), "json".to_string(), "yaml".to_string(),
+                    "py".to_string(),
+                    "js".to_string(),
+                    "go".to_string(),
+                    "rs".to_string(),
+                    "json".to_string(),
+                    "yaml".to_string(),
                 ],
                 ignore_patterns: vec![
                     "node_modules".to_string(),
@@ -80,7 +84,11 @@ mod crawler_discovery {
                 path: PathBuf::from("crawlers/scrapy-finance-crawler"),
                 language: "python".to_string(),
                 framework: "scrapy".to_string(),
-                supported_sources: vec!["ashare".to_string(), "cryptocurrency".to_string(), "forex".to_string()],
+                supported_sources: vec![
+                    "ashare".to_string(),
+                    "cryptocurrency".to_string(),
+                    "forex".to_string(),
+                ],
                 config_files: vec![PathBuf::from("crawlers/scrapy-finance-crawler/settings.py")],
                 start_command: Some("scrapy crawl finance_spider".to_string()),
                 requires_python: true,
@@ -106,7 +114,11 @@ mod crawler_discovery {
                 path: PathBuf::from("crawlers/selenium-stock-crawler"),
                 language: "python".to_string(),
                 framework: "selenium".to_string(),
-                supported_sources: vec!["ashare".to_string(), "hkshare".to_string(), "usshare".to_string()],
+                supported_sources: vec![
+                    "ashare".to_string(),
+                    "hkshare".to_string(),
+                    "usshare".to_string(),
+                ],
                 config_files: vec![PathBuf::from("crawlers/selenium-stock-crawler/config.py")],
                 start_command: Some("python stock_crawler.py".to_string()),
                 requires_python: true,
@@ -132,7 +144,10 @@ mod crawler_discovery {
                 path: PathBuf::from("crawlers/go-commodity-crawler"),
                 language: "go".to_string(),
                 framework: "go".to_string(),
-                supported_sources: vec!["commodities".to_string(), "economic_indicators".to_string()],
+                supported_sources: vec![
+                    "commodities".to_string(),
+                    "economic_indicators".to_string(),
+                ],
                 config_files: vec![PathBuf::from("crawlers/go-commodity-crawler/go.mod")],
                 start_command: Some("go run main.go".to_string()),
                 requires_python: false,
@@ -152,7 +167,10 @@ mod crawler_discovery {
                 requires_nodejs: false,
             });
 
-            println!("✅ 发现完成！共找到 {} 个爬虫项目", discovered_projects.len());
+            println!(
+                "✅ 发现完成！共找到 {} 个爬虫项目",
+                discovered_projects.len()
+            );
             Ok(discovered_projects)
         }
 
@@ -200,12 +218,16 @@ mod crawler_discovery {
             Ok(())
         }
 
-        pub fn get_data_source_mapping(&self, crawlers: &[CrawlerProject]) -> std::collections::HashMap<String, Vec<String>> {
+        pub fn get_data_source_mapping(
+            &self,
+            crawlers: &[CrawlerProject],
+        ) -> std::collections::HashMap<String, Vec<String>> {
             let mut mapping = std::collections::HashMap::new();
 
             for crawler in crawlers {
                 for source in &crawler.supported_sources {
-                    mapping.entry(source.clone())
+                    mapping
+                        .entry(source.clone())
                         .or_insert_with(Vec::new)
                         .push(crawler.name.clone());
                 }

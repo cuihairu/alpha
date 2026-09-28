@@ -89,13 +89,20 @@ mod tests {
     /// 契约测试：所有 KeyValueStore 实现都应满足 get/set/delete 后写覆盖语义。
     async fn assert_key_value_store_contract(store: impl KeyValueStore) {
         assert_eq!(store.get("k").await.unwrap(), None);
-        assert!(!store.delete("k").await.unwrap(), "删除不存在的键应返回 false");
+        assert!(
+            !store.delete("k").await.unwrap(),
+            "删除不存在的键应返回 false"
+        );
 
         store.set("k", b"v1").await.unwrap();
         assert_eq!(store.get("k").await.unwrap(), Some(b"v1".to_vec()));
 
         store.set("k", b"v2").await.unwrap();
-        assert_eq!(store.get("k").await.unwrap(), Some(b"v2".to_vec()), "后写覆盖");
+        assert_eq!(
+            store.get("k").await.unwrap(),
+            Some(b"v2".to_vec()),
+            "后写覆盖"
+        );
 
         assert!(store.delete("k").await.unwrap());
         assert_eq!(store.get("k").await.unwrap(), None);
@@ -109,7 +116,8 @@ mod tests {
     /// 动态分发可用（业务代码经 Arc<dyn KeyValueStore> 注入平台实现）。
     #[tokio::test]
     async fn store_is_object_safe_and_thread_safe() {
-        let store: std::sync::Arc<dyn KeyValueStore> = std::sync::Arc::new(InMemoryKeyValueStore::new());
+        let store: std::sync::Arc<dyn KeyValueStore> =
+            std::sync::Arc::new(InMemoryKeyValueStore::new());
         store.set("shared", b"1").await.unwrap();
         let clone = store.clone();
         let handle = tokio::spawn(async move { clone.get("shared").await.unwrap() });

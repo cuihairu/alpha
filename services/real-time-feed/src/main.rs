@@ -2,6 +2,8 @@
 //!
 //! 实时数据流推送服务，支持 WebSocket 连接和广播
 
+use alpha_protocols::websocket::{channels, DataMessage, WsMessage};
+use alpha_storage::{InvalidMessage, RedisStreamQueue, StreamEnvelope, StreamMessage};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -11,8 +13,6 @@ use axum::{
     routing::get,
     Router,
 };
-use alpha_protocols::websocket::{channels, DataMessage, WsMessage};
-use alpha_storage::{InvalidMessage, RedisStreamQueue, StreamEnvelope, StreamMessage};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -294,7 +294,9 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
         .or_else(|_| std::env::var("REDIS_URL"))
         .unwrap_or_else(|_| DEFAULT_REDIS_URL.to_string());
     let queue = RedisStreamQueue::connect(&redis_url)?;
-    queue.ensure_consumer_group(QUOTES_STREAM, REALTIME_GROUP).await?;
+    queue
+        .ensure_consumer_group(QUOTES_STREAM, REALTIME_GROUP)
+        .await?;
     let _ = queue
         .ensure_consumer_group(NORMALIZED_QUOTES_STREAM, REALTIME_GROUP)
         .await;
@@ -309,7 +311,13 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
     tokio::spawn(async move {
         loop {
             let normalized_result = loop_queue
-                .read_group(NORMALIZED_QUOTES_STREAM, REALTIME_GROUP, &consumer, 20, 1000)
+                .read_group(
+                    NORMALIZED_QUOTES_STREAM,
+                    REALTIME_GROUP,
+                    &consumer,
+                    20,
+                    1000,
+                )
                 .await;
             let result = match normalized_result {
                 Ok(result) if !result.is_empty() => result,
@@ -368,11 +376,14 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
                                 message.id,
                                 message.envelope.stream
                             );
-                            process_realtime_message(&sweeper_state, &sweeper_queue, &message).await;
+                            process_realtime_message(&sweeper_state, &sweeper_queue, &message)
+                                .await;
                         }
                     }
                     // Redis < 6.2 无 XPENDING IDLE/XCLAIM 认领：兜底不可用属预期降级，debug 级避免刷屏
-                    Err(err) => tracing::debug!("claim_stale sweep skipped for {}: {}", stream, err),
+                    Err(err) => {
+                        tracing::debug!("claim_stale sweep skipped for {}: {}", stream, err)
+                    }
                 }
             }
         }
@@ -401,7 +412,11 @@ fn claim_sweep_config() -> (u64, u64, u32) {
 
 /// 处理一条行情 stream 消息：转换 → 广播 → ack；
 /// 转换失败则按 DLQ 契约转发 quotes.dlq 后 ack。
-async fn process_realtime_message(app_state: &Arc<AppState>, queue: &RedisStreamQueue, message: &StreamMessage) {
+async fn process_realtime_message(
+    app_state: &Arc<AppState>,
+    queue: &RedisStreamQueue,
+    message: &StreamMessage,
+) {
     let stream_name = message.envelope.stream.clone();
     if let Some(data) = envelope_to_realtime(&message.envelope) {
         if let Err(err) = app_state.data_sender.send(data) {
@@ -410,7 +425,9 @@ async fn process_realtime_message(app_state: &Arc<AppState>, queue: &RedisStream
         if let Err(err) = queue.ack(&stream_name, REALTIME_GROUP, &message.id).await {
             tracing::warn!("Failed to ack stream message {}: {}", message.id, err);
         }
-    } else if let Err(err) = send_to_dlq(queue, &message.envelope, "invalid realtime quote payload").await {
+    } else if let Err(err) =
+        send_to_dlq(queue, &message.envelope, "invalid realtime quote payload").await
+    {
         tracing::warn!("Failed to send message {} to DLQ: {}", message.id, err);
     } else if let Err(err) = queue.ack(&stream_name, REALTIME_GROUP, &message.id).await {
         tracing::warn!("Failed to ack DLQ'd message {}: {}", message.id, err);
@@ -430,7 +447,10 @@ async fn quarantine_invalid(queue: &RedisStreamQueue, invalid: &InvalidMessage) 
         tracing::warn!("Failed to publish undecodable message to DLQ: {}", err);
         return;
     }
-    if let Err(err) = queue.ack(&invalid.stream, REALTIME_GROUP, &invalid.id).await {
+    if let Err(err) = queue
+        .ack(&invalid.stream, REALTIME_GROUP, &invalid.id)
+        .await
+    {
         tracing::warn!("Failed to ack quarantined message {}: {}", invalid.id, err);
     }
 }
@@ -443,7 +463,10 @@ fn envelope_to_realtime(envelope: &StreamEnvelope) -> Option<RealTimeData> {
         volume: payload.get("volume")?.as_u64()?,
         // data-engine 的 normalized payload 可能不含涨跌幅字段（如非行情类事件），
         // 这里缺省为 0 而不是把整条消息打进 DLQ。
-        change: payload.get("change").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        change: payload
+            .get("change")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
         change_percent: payload
             .get("change_percent")
             .and_then(|v| v.as_f64())
@@ -477,7 +500,9 @@ async fn send_to_dlq(
 #[derive(Debug, Deserialize)]
 struct SubscribeMessage {
     symbols: Vec<String>,
-    action: Option<String>, // "subscribe" or "unsubscribe"
+    /// "subscribe" / "unsubscribe"；当前「连接即订阅」，服务端暂不区分动作，仅记日志
+    #[allow(dead_code)]
+    action: Option<String>,
 }
 
 /// 健康检查

@@ -101,7 +101,11 @@ impl MultilangCrawler {
         Ok(())
     }
 
-    pub async fn execute_crawler(&self, task: &TaskDefinition, config: &CrawlerConfig) -> Result<TaskResult> {
+    pub async fn execute_crawler(
+        &self,
+        task: &TaskDefinition,
+        config: &CrawlerConfig,
+    ) -> Result<TaskResult> {
         let now = chrono::Utc::now();
 
         let script_file = self.prepare_script_file(task, config).await?;
@@ -127,16 +131,25 @@ impl MultilangCrawler {
             metadata: HashMap::from([
                 ("language".to_string(), serde_json::json!(config.language)),
                 ("exit_code".to_string(), serde_json::json!(exit_code)),
-                ("script_path".to_string(), serde_json::json!(script_file.display().to_string())),
+                (
+                    "script_path".to_string(),
+                    serde_json::json!(script_file.display().to_string()),
+                ),
             ]),
         })
     }
 
-    async fn prepare_script_file(&self, task: &TaskDefinition, config: &CrawlerConfig) -> Result<PathBuf> {
+    async fn prepare_script_file(
+        &self,
+        task: &TaskDefinition,
+        config: &CrawlerConfig,
+    ) -> Result<PathBuf> {
         if let Some(inline_code) = &config.inline_code {
-            let path = self
-                .temp_dir
-                .join(format!("{}_crawler.{}", sanitize_filename(&task.id), config.language.extension()));
+            let path = self.temp_dir.join(format!(
+                "{}_crawler.{}",
+                sanitize_filename(&task.id),
+                config.language.extension()
+            ));
             tokio::fs::write(&path, inline_code).await?;
             Ok(path)
         } else if let Some(script_path) = &config.script_path {
@@ -220,7 +233,12 @@ fn parse_stdout_as_json_or_text(stdout: &str) -> serde_json::Value {
 fn sanitize_filename(input: &str) -> String {
     input
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
-

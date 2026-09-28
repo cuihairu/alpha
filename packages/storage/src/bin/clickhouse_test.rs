@@ -1,8 +1,7 @@
 //! Alpha Finance ClickHouse 集成测试程序
 
-use alpha_storage::clickhouse::{ClickHouseStorage, ClickHouseConfig};
+use alpha_storage::clickhouse::{ClickHouseConfig, ClickHouseStorage};
 use chrono::Utc;
-use tokio;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,20 +25,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // 测试插入市场数据
             println!("📈 测试市场数据插入...");
-            let test_data = vec![
-                alpha_storage::clickhouse::MarketDataInsert {
-                    timestamp: Utc::now(),
-                    symbol_id: 1,
-                    symbol: "AAPL".to_string(),
-                    open_price: 150.0,
-                    high_price: 155.0,
-                    low_price: 149.0,
-                    close_price: 154.0,
-                    adj_close_price: 154.0,
-                    volume: 1000000,
-                    source: "test".to_string(),
-                }
-            ];
+            let test_data = vec![alpha_storage::clickhouse::MarketDataInsert {
+                timestamp: Utc::now(),
+                symbol_id: 1,
+                symbol: "AAPL".to_string(),
+                open_price: 150.0,
+                high_price: 155.0,
+                low_price: 149.0,
+                close_price: 154.0,
+                adj_close_price: 154.0,
+                volume: 1000000,
+                source: "test".to_string(),
+            }];
 
             match storage.insert_market_data(test_data).await {
                 Ok(_) => println!("✅ 市场数据插入成功"),
@@ -51,7 +48,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let end_time = Utc::now();
             let start_time = end_time - chrono::Duration::hours(1);
 
-            match storage.query_market_data("AAPL", start_time, end_time, Some(10)).await {
+            match storage
+                .query_market_data("AAPL", start_time, end_time, Some(10))
+                .await
+            {
                 Ok(data) => println!("✅ 市场数据查询成功，返回 {} 条记录", data.len()),
                 Err(e) => println!("❌ 市场数据查询失败: {}", e),
             }

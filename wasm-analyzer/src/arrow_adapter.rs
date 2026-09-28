@@ -26,7 +26,11 @@ impl ArrowBatch {
         // 定义 Schema
         let schema = Arc::new(Schema::new(vec![
             Field::new("symbol", DataType::Utf8, false),
-            Field::new("timestamp", DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, None), false),
+            Field::new(
+                "timestamp",
+                DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, None),
+                false,
+            ),
             Field::new("price", DataType::Float64, false),
             Field::new("volume", DataType::UInt64, false),
             Field::new("open", DataType::Float64, true),
@@ -38,7 +42,10 @@ impl ArrowBatch {
 
         // 提取列数据（零拷贝，直接使用引用）
         let symbols: Vec<&str> = data.iter().map(|d| d.symbol.as_str()).collect();
-        let timestamps: Vec<i64> = data.iter().map(|d| d.timestamp.timestamp_millis()).collect();
+        let timestamps: Vec<i64> = data
+            .iter()
+            .map(|d| d.timestamp.timestamp_millis())
+            .collect();
         let prices: Vec<f64> = data.iter().map(|d| d.price).collect();
         let volumes: Vec<u64> = data.iter().map(|d| d.volume).collect();
 
@@ -51,7 +58,8 @@ impl ArrowBatch {
 
         // 构建 Arrow 数组
         let symbol_array = Arc::new(StringArray::from(symbols)) as Arc<dyn Array>;
-        let timestamp_array = Arc::new(TimestampMillisecondArray::from(timestamps)) as Arc<dyn Array>;
+        let timestamp_array =
+            Arc::new(TimestampMillisecondArray::from(timestamps)) as Arc<dyn Array>;
         let price_array = Arc::new(Float64Array::from(prices)) as Arc<dyn Array>;
         let volume_array = Arc::new(UInt64Array::from(volumes)) as Arc<dyn Array>;
         let open_array = Arc::new(Float64Array::from(opens)) as Arc<dyn Array>;
@@ -152,12 +160,15 @@ impl ArrowBatch {
     }
 }
 
-/// Arrow 内存池管理器
+/// Arrow 内存池管理器（零拷贝内存管理与 Arrow 数据格式优化路线预留，
+/// 批处理接入前暂未被构造）
+#[allow(dead_code)]
 pub struct ArrowMemoryPool {
     batches: Vec<ArrowBatch>,
     max_batches: usize,
 }
 
+#[allow(dead_code)]
 impl ArrowMemoryPool {
     /// 创建新的内存池
     pub fn new(max_batches: usize) -> Self {
@@ -196,7 +207,6 @@ impl ArrowMemoryPool {
 mod tests {
     use super::*;
     use alpha_core::models::MarketData;
-    use chrono::Utc;
 
     #[test]
     fn test_arrow_batch_creation() {

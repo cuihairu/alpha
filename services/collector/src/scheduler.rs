@@ -12,16 +12,12 @@ use tokio::time::Duration;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
-use tokio::{
-    sync::{mpsc, RwLock},
-};
 use uuid::Uuid;
 
 use crate::multilang_simple::{CrawlerConfig, CrawlerLanguage, MultilangCrawler};
-use crate::types::{
-    TaskDefinition, TaskPriority, TaskResult, TaskSource, TaskStatus,
-};
+use crate::types::{TaskDefinition, TaskPriority, TaskResult, TaskSource, TaskStatus};
 
 /// 任务调度器
 pub struct TaskScheduler {
@@ -298,7 +294,10 @@ impl TaskScheduler {
 
         // 检查依赖关系
         if !self.check_dependencies(&task).await? {
-            return Err(anyhow::anyhow!("Task dependencies not satisfied: {}", task.id));
+            return Err(anyhow::anyhow!(
+                "Task dependencies not satisfied: {}",
+                task.id
+            ));
         }
 
         // 添加到待处理队列
@@ -366,7 +365,7 @@ impl TaskScheduler {
         // 检查运行中任务
         {
             let running = self.running_tasks.read().await;
-            if let Some(_) = running.get(task_id) {
+            if running.get(task_id).is_some() {
                 return Some(TaskStatus::Running);
             }
         }
@@ -381,27 +380,32 @@ impl TaskScheduler {
     }
 
     /// 创建语言资源池
-    fn create_language_pools(_config: &SchedulerConfig) -> HashMap<CrawlerLanguage, LanguageResourcePool> {
+    fn create_language_pools(
+        _config: &SchedulerConfig,
+    ) -> HashMap<CrawlerLanguage, LanguageResourcePool> {
         let mut pools = HashMap::new();
 
         // 定义每种语言的资源配置
         let language_configs = vec![
-            (CrawlerLanguage::Python, 4, 1024),      // 4并发, 1GB内存
-            (CrawlerLanguage::NodeJs, 6, 512),         // 6并发, 512MB内存
-            (CrawlerLanguage::Go, 8, 256),             // 8并发, 256MB内存
-            (CrawlerLanguage::Rust, 2, 2048),          // 2并发, 2GB内存（编译需要更多内存）
-            (CrawlerLanguage::Shell, 10, 128),          // 10并发, 128MB内存
+            (CrawlerLanguage::Python, 4, 1024), // 4并发, 1GB内存
+            (CrawlerLanguage::NodeJs, 6, 512),  // 6并发, 512MB内存
+            (CrawlerLanguage::Go, 8, 256),      // 8并发, 256MB内存
+            (CrawlerLanguage::Rust, 2, 2048),   // 2并发, 2GB内存（编译需要更多内存）
+            (CrawlerLanguage::Shell, 10, 128),  // 10并发, 128MB内存
         ];
 
         for (language, max_concurrent, _memory_mb) in language_configs {
             let language_clone = language.clone();
-            pools.insert(language_clone.clone(), LanguageResourcePool {
-                language: language_clone,
-                max_concurrent,
-                current_running: 0,
-                language_weights: Self::create_language_weights(&language),
-                is_available: true,
-            });
+            pools.insert(
+                language_clone.clone(),
+                LanguageResourcePool {
+                    language: language_clone,
+                    max_concurrent,
+                    current_running: 0,
+                    language_weights: Self::create_language_weights(&language),
+                    is_available: true,
+                },
+            );
         }
 
         pools
@@ -459,6 +463,8 @@ impl TaskScheduler {
     }
 
     /// 调度任务的主循环
+    ///（各共享状态句柄显式传参，避免引入上下文结构体的额外借用复杂度）
+    #[allow(clippy::too_many_arguments)]
     async fn schedule_tasks(
         task_queue: &Arc<RwLock<BinaryHeap<TaskPriorityNode>>>,
         pending_tasks: &Arc<RwLock<HashMap<String, TaskDefinition>>>,
@@ -473,12 +479,9 @@ impl TaskScheduler {
         let start_time = Instant::now();
 
         // 获取可执行的任务
-        let executable_tasks = Self::get_executable_tasks(
-            task_queue,
-            pending_tasks,
-            running_tasks,
-            task_dependencies,
-        ).await?;
+        let executable_tasks =
+            Self::get_executable_tasks(task_queue, pending_tasks, running_tasks, task_dependencies)
+                .await?;
 
         if executable_tasks.is_empty() {
             return Ok(());
@@ -503,11 +506,10 @@ impl TaskScheduler {
             };
 
             // 选择最佳语言
-            if let Ok((language, crawler_config)) = Self::select_best_language(
-                &task,
-                language_pools,
-                &config.load_balancing_strategy,
-            ).await {
+            if let Ok((language, crawler_config)) =
+                Self::select_best_language(&task, language_pools, &config.load_balancing_strategy)
+                    .await
+            {
                 // 检查资源可用性
                 if Self::check_resource_availability(&task, language_pools, &language).await? {
                     // 执行任务
@@ -522,7 +524,8 @@ impl TaskScheduler {
                         running_tasks.clone(),
                         language_pools.clone(),
                         worker_id,
-                    ).await;
+                    )
+                    .await;
 
                     scheduled_count += 1;
                 } else {
@@ -543,7 +546,11 @@ impl TaskScheduler {
         }
 
         if scheduled_count > 0 {
-            info!("Scheduled {} tasks in {:?}", scheduled_count, start_time.elapsed());
+            info!(
+                "Scheduled {} tasks in {:?}",
+                scheduled_count,
+                start_time.elapsed()
+            );
         }
 
         Ok(())
@@ -616,12 +623,10 @@ impl TaskScheduler {
         }
 
         let selected_pool = match strategy {
-            LoadBalancingStrategy::LeastConnections => {
-                available_pools
-                    .iter()
-                    .min_by_key(|pool| pool.current_running)
-                    .unwrap()
-            }
+            LoadBalancingStrategy::LeastConnections => available_pools
+                .iter()
+                .min_by_key(|pool| pool.current_running)
+                .unwrap(),
             LoadBalancingStrategy::WeightedRoundRobin => {
                 // 简化的加权选择
                 available_pools
@@ -638,7 +643,9 @@ impl TaskScheduler {
                         let utilization_b = b.current_running as f64 / b.max_concurrent as f64;
                         let score_a = (1.0 - utilization_a) * 100.0;
                         let score_b = (1.0 - utilization_b) * 100.0;
-                        score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+                        score_a
+                            .partial_cmp(&score_b)
+                            .unwrap_or(std::cmp::Ordering::Equal)
                     })
                     .unwrap()
             }
@@ -647,12 +654,14 @@ impl TaskScheduler {
                 available_pools
                     .iter()
                     .find(|pool| matches!(pool.language, CrawlerLanguage::Python))
-                    .or_else(|| available_pools.iter().find(|pool| matches!(pool.language, CrawlerLanguage::Go)))
+                    .or_else(|| {
+                        available_pools
+                            .iter()
+                            .find(|pool| matches!(pool.language, CrawlerLanguage::Go))
+                    })
                     .unwrap_or_else(|| available_pools.first().unwrap())
             }
-            LoadBalancingStrategy::RoundRobin => {
-                available_pools.first().unwrap()
-            }
+            LoadBalancingStrategy::RoundRobin => available_pools.first().unwrap(),
         };
 
         // 创建爬虫配置
@@ -669,10 +678,15 @@ impl TaskScheduler {
         let source_type = task_source_type_for_script_path(&task.source);
         Ok(CrawlerConfig {
             language: language.clone(),
-            script_path: Some(format!("scripts/{}/{}.{}",
-                source_type,
-                task.id,
-                language.extension()).into()),
+            script_path: Some(
+                format!(
+                    "scripts/{}/{}.{}",
+                    source_type,
+                    task.id,
+                    language.extension()
+                )
+                .into(),
+            ),
             inline_code: None,
             working_directory: Some(format!("workspaces/{}", task.id).into()),
             environment: task.config.request.headers.clone(),
@@ -697,6 +711,8 @@ impl TaskScheduler {
     }
 
     /// 执行单个任务
+    ///（同上：共享状态句柄显式传参）
+    #[allow(clippy::too_many_arguments)]
     async fn execute_task(
         task: TaskDefinition,
         language: CrawlerLanguage,
@@ -716,18 +732,21 @@ impl TaskScheduler {
         // 更新运行状态
         {
             let mut running = running_tasks.write().await;
-            running.insert(task_id.clone(), RunningTaskInfo {
-                task_id: task_id.clone(),
-                language: language.clone(),
-                start_time: Instant::now(),
-                worker_id,
-                resource_requirements: ResourceRequirements {
-                    cpu_cores: 2,
-                    memory_mb: 512,
-                    bandwidth_mbps: 10.0,
-                    disk_io: true,
+            running.insert(
+                task_id.clone(),
+                RunningTaskInfo {
+                    task_id: task_id.clone(),
+                    language: language.clone(),
+                    start_time: Instant::now(),
+                    worker_id,
+                    resource_requirements: ResourceRequirements {
+                        cpu_cores: 2,
+                        memory_mb: 512,
+                        bandwidth_mbps: 10.0,
+                        disk_io: true,
+                    },
                 },
-            });
+            );
         }
 
         // 更新语言池计数
@@ -771,7 +790,9 @@ impl TaskScheduler {
                 metadata: HashMap::new(),
             },
         };
-        let _ = result_tx.send(task_result).expect("Failed to send task result");
+        result_tx
+            .send(task_result)
+            .expect("Failed to send task result");
     }
 
     /// 检查任务依赖
@@ -867,11 +888,11 @@ mod tests {
         for strategy in strategies {
             // 确保所有策略都能创建
             match strategy {
-                LoadBalancingStrategy::RoundRobin => {},
-                LoadBalancingStrategy::LeastConnections => {},
-                LoadBalancingStrategy::WeightedRoundRobin => {},
-                LoadBalancingStrategy::ResourceBased => {},
-                LoadBalancingStrategy::LanguagePriority => {},
+                LoadBalancingStrategy::RoundRobin => {}
+                LoadBalancingStrategy::LeastConnections => {}
+                LoadBalancingStrategy::WeightedRoundRobin => {}
+                LoadBalancingStrategy::ResourceBased => {}
+                LoadBalancingStrategy::LanguagePriority => {}
             }
         }
     }

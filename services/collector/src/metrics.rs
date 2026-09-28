@@ -59,13 +59,19 @@ impl CollectorMetrics {
 
         // 成功请求数计数器
         let requests_success_total = IntCounterVec::new(
-            Opts::new("collector_requests_success_total", "Total number of successful requests"),
+            Opts::new(
+                "collector_requests_success_total",
+                "Total number of successful requests",
+            ),
             &["source", "task_type"],
         )?;
 
         // 失败请求数计数器
         let requests_failed_total = IntCounterVec::new(
-            Opts::new("collector_requests_failed_total", "Total number of failed requests"),
+            Opts::new(
+                "collector_requests_failed_total",
+                "Total number of failed requests",
+            ),
             &["source", "task_type", "error_type"],
         )?;
 
@@ -89,7 +95,10 @@ impl CollectorMetrics {
 
         // 数据采集计数器
         let data_points_collected = IntCounterVec::new(
-            Opts::new("collector_data_points_collected", "Total number of data points collected"),
+            Opts::new(
+                "collector_data_points_collected",
+                "Total number of data points collected",
+            ),
             &["source", "data_type"],
         )?;
 
@@ -101,15 +110,16 @@ impl CollectorMetrics {
 
         // 数据源健康状态
         let source_healthy = IntGaugeVec::new(
-            Opts::new("collector_source_healthy", "Data source health status (1=healthy, 0=unhealthy)"),
+            Opts::new(
+                "collector_source_healthy",
+                "Data source health status (1=healthy, 0=unhealthy)",
+            ),
             &["source"],
         )?;
 
         // 代理池可用代理数
-        let proxy_pool_size = IntGauge::new(
-            "collector_proxy_pool_size",
-            "Number of available proxies"
-        )?;
+        let proxy_pool_size =
+            IntGauge::new("collector_proxy_pool_size", "Number of available proxies")?;
 
         // 注册所有指标
         registry.register(Box::new(requests_total.clone()))?;
@@ -141,9 +151,7 @@ impl CollectorMetrics {
         self.requests_total
             .with_label_values(&[source, task_type])
             .inc();
-        self.active_requests
-            .with_label_values(&[source])
-            .inc();
+        self.active_requests.with_label_values(&[source]).inc();
     }
 
     /// 记录请求成功
@@ -174,9 +182,7 @@ impl CollectorMetrics {
 
     /// 更新队列长度
     pub fn update_queue_length(&self, priority: &str, length: i64) {
-        self.queue_length
-            .with_label_values(&[priority])
-            .set(length);
+        self.queue_length.with_label_values(&[priority]).set(length);
     }
 
     /// 更新数据源健康状态
@@ -319,7 +325,8 @@ impl HealthChecker {
 
         for (name, checker) in checkers.iter() {
             let health = checker();
-            self.metrics.update_source_health(name, health.status == HealthStatus::Healthy);
+            self.metrics
+                .update_source_health(name, health.status == HealthStatus::Healthy);
 
             match health.status {
                 HealthStatus::Unhealthy => {
@@ -359,7 +366,11 @@ pub struct RequestTimer {
 
 impl RequestTimer {
     /// 开始计时
-    pub fn start(metrics: Arc<CollectorMetrics>, source: impl Into<String>, task_type: impl Into<String>) -> Self {
+    pub fn start(
+        metrics: Arc<CollectorMetrics>,
+        source: impl Into<String>,
+        task_type: impl Into<String>,
+    ) -> Self {
         let source = source.into();
         let task_type = task_type.into();
 
@@ -462,7 +473,8 @@ impl SourceMonitor {
         source_stats.last_check = Some(Utc::now());
 
         // 更新健康状态（成功率 > 80% 且平均响应时间 < 5秒）
-        source_stats.is_healthy = source_stats.success_rate() > 0.8 && source_stats.avg_duration_ms() < 5000.0;
+        source_stats.is_healthy =
+            source_stats.success_rate() > 0.8 && source_stats.avg_duration_ms() < 5000.0;
 
         self.metrics
             .update_source_health(source, source_stats.is_healthy);
@@ -528,7 +540,9 @@ mod tests {
         let checker = HealthChecker::new(metrics);
 
         checker
-            .register_checker("test_component", || ComponentHealth::healthy("test_component"))
+            .register_checker("test_component", || {
+                ComponentHealth::healthy("test_component")
+            })
             .await;
 
         let result = checker.check().await;

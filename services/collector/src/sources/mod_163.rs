@@ -24,15 +24,15 @@ pub struct Netease163Source {
 impl Netease163Source {
     /// 创建新的网易财经数据源
     pub fn new(config: CrawlerConfig) -> Self {
-        let mut builder = Client::builder()
-            .timeout(Duration::from_secs(config.timeout));
+        let mut builder = Client::builder().timeout(Duration::from_secs(config.timeout));
 
         if let Some(ref proxy) = config.proxy {
-            let proxy_url = if let (Some(ref user), Some(ref pass)) = (&proxy.username, &proxy.password) {
-                format!("{}:{}@{}", user, pass, proxy.url)
-            } else {
-                proxy.url.clone()
-            };
+            let proxy_url =
+                if let (Some(ref user), Some(ref pass)) = (&proxy.username, &proxy.password) {
+                    format!("{}:{}@{}", user, pass, proxy.url)
+                } else {
+                    proxy.url.clone()
+                };
             if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
                 builder = builder.proxy(proxy);
             }
@@ -56,7 +56,10 @@ impl Netease163Source {
     /// 格式化股票代码为网易格式
     /// 网易使用 0(深圳) | 代码, 1(上海) | 代码
     fn format_symbol_for_api(symbol: &str) -> String {
-        let (market_code, code) = if symbol.starts_with("60") || symbol.starts_with("68") || symbol.starts_with("51") {
+        let (market_code, code) = if symbol.starts_with("60")
+            || symbol.starts_with("68")
+            || symbol.starts_with("51")
+        {
             ("1", symbol) // 上海
         } else if symbol.starts_with("00") || symbol.starts_with("30") {
             ("0", symbol) // 深圳
@@ -82,7 +85,10 @@ impl Netease163Source {
     /// 格式化股票代码为推送接口格式 (0600000 for sh600000)
     #[allow(dead_code)]
     fn format_symbol_for_push(symbol: &str) -> String {
-        let (prefix, code) = if symbol.starts_with("60") || symbol.starts_with("68") || symbol.starts_with("51") {
+        let (prefix, code) = if symbol.starts_with("60")
+            || symbol.starts_with("68")
+            || symbol.starts_with("51")
+        {
             ("1", symbol)
         } else if symbol.starts_with("00") || symbol.starts_with("30") {
             ("0", symbol)
@@ -165,10 +171,7 @@ impl DataSource for Netease163Source {
     async fn get_realtime_quote(&self, symbol: &str) -> CrawlerResult<RealtimeQuote> {
         let api_symbol = Self::format_symbol_for_api(symbol);
 
-        let url = format!(
-            "{}/data/feed/{},money.api",
-            NETEASE_DATA_URL, api_symbol
-        );
+        let url = format!("{}/data/feed/{},money.api", NETEASE_DATA_URL, api_symbol);
 
         let mut request = self.client.get(&url);
         for (key, value) in Self::build_headers() {
@@ -198,7 +201,9 @@ impl DataSource for Netease163Source {
             }
         }
 
-        Err(CrawlerError::ParseError("Invalid response format".to_string()))
+        Err(CrawlerError::ParseError(
+            "Invalid response format".to_string(),
+        ))
     }
 
     async fn get_realtime_quotes(&self, symbols: &[String]) -> CrawlerResult<Vec<RealtimeQuote>> {
@@ -207,16 +212,14 @@ impl DataSource for Netease163Source {
         }
 
         // 构建批量请求参数
-        let api_symbols: Vec<String> = symbols.iter()
+        let api_symbols: Vec<String> = symbols
+            .iter()
             .map(|s| Self::format_symbol_for_api(s))
             .collect();
 
         let symbols_param = api_symbols.join(",");
 
-        let url = format!(
-            "{}/data/feed/{},money.api",
-            NETEASE_DATA_URL, symbols_param
-        );
+        let url = format!("{}/data/feed/{},money.api", NETEASE_DATA_URL, symbols_param);
 
         let mut request = self.client.get(&url);
         for (key, value) in Self::build_headers() {
@@ -296,7 +299,8 @@ impl DataSource for Netease163Source {
         // 解析 JSON 响应
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
             if let Some(data_array) = json["data"].as_array() {
-                let klines = data_array.iter()
+                let klines = data_array
+                    .iter()
                     .filter_map(|item| {
                         // 网易返回格式可能是 JSON 数组，需要根据实际响应调整
                         let timestamp = item["TNO"].as_i64().unwrap_or(0);
@@ -341,7 +345,9 @@ impl DataSource for Netease163Source {
     async fn health_check(&self) -> CrawlerResult<bool> {
         let url = format!("{}/data/feed/1000001,money.api", NETEASE_DATA_URL);
 
-        let response = self.client.get(&url)
+        let response = self
+            .client
+            .get(&url)
             .timeout(Duration::from_secs(5))
             .send()
             .await?;

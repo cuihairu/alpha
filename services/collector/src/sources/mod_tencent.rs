@@ -25,15 +25,15 @@ pub struct TencentSource {
 impl TencentSource {
     /// 创建新的腾讯财经数据源
     pub fn new(config: CrawlerConfig) -> Self {
-        let mut builder = Client::builder()
-            .timeout(Duration::from_secs(config.timeout));
+        let mut builder = Client::builder().timeout(Duration::from_secs(config.timeout));
 
         if let Some(ref proxy) = config.proxy {
-            let proxy_url = if let (Some(ref user), Some(ref pass)) = (&proxy.username, &proxy.password) {
-                format!("{}:{}@{}", user, pass, proxy.url)
-            } else {
-                proxy.url.clone()
-            };
+            let proxy_url =
+                if let (Some(ref user), Some(ref pass)) = (&proxy.username, &proxy.password) {
+                    format!("{}:{}@{}", user, pass, proxy.url)
+                } else {
+                    proxy.url.clone()
+                };
             if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
                 builder = builder.proxy(proxy);
             }
@@ -72,9 +72,12 @@ impl TencentSource {
     /// 解析实时行情响应
     /// 腾讯响应格式: v_sh600000="1~浦发银行~600000~9.88~..."
     fn parse_realtime_response(symbol: &str, response: &str) -> CrawlerResult<RealtimeQuote> {
-        let data_start = response.find('"')
-            .ok_or_else(|| CrawlerError::ParseError("No data found in response".to_string()))? + 1;
-        let data_end = response.rfind('"')
+        let data_start = response
+            .find('"')
+            .ok_or_else(|| CrawlerError::ParseError("No data found in response".to_string()))?
+            + 1;
+        let data_end = response
+            .rfind('"')
             .ok_or_else(|| CrawlerError::ParseError("No end quote found".to_string()))?;
 
         let data_str = &response[data_start..data_end];
@@ -88,21 +91,29 @@ impl TencentSource {
         }
 
         let name = parts[1].to_string();
-        let price = parts[3].parse::<f64>()
+        let price = parts[3]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid current price".to_string()))?;
-        let pre_close = parts[4].parse::<f64>()
+        let pre_close = parts[4]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid pre-close price".to_string()))?;
-        let open = parts[5].parse::<f64>()
+        let open = parts[5]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid open price".to_string()))?;
-        let volume = parts[6].parse::<f64>()
-            .map_err(|_| CrawlerError::ParseError("Invalid volume".to_string()))? as u64;
+        let volume = parts[6]
+            .parse::<f64>()
+            .map_err(|_| CrawlerError::ParseError("Invalid volume".to_string()))?
+            as u64;
         let ask1 = parts[9].parse::<f64>().ok();
         let bid1 = parts[10].parse::<f64>().ok();
-        let high = parts[33].parse::<f64>()
+        let high = parts[33]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid high price".to_string()))?;
-        let low = parts[34].parse::<f64>()
+        let low = parts[34]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid low price".to_string()))?;
-        let amount = parts[37].parse::<f64>()
+        let amount = parts[37]
+            .parse::<f64>()
             .map_err(|_| CrawlerError::ParseError("Invalid amount".to_string()))?;
         let bid1_volume = parts[10].parse::<u64>().ok();
         let ask1_volume = parts[9].parse::<u64>().ok();
@@ -135,11 +146,10 @@ impl TencentSource {
 
     /// 构建批量请求 URL
     fn build_batch_url(symbols: &[String]) -> String {
-        let formatted: Vec<String> = symbols.iter()
-            .map(|s| Self::format_symbol(s))
-            .collect();
+        let formatted: Vec<String> = symbols.iter().map(|s| Self::format_symbol(s)).collect();
 
-        let vars = formatted.iter()
+        let vars = formatted
+            .iter()
             .map(|s| format!("v_{}", s))
             .collect::<Vec<_>>()
             .join(",");
@@ -165,7 +175,10 @@ impl DataSource for TencentSource {
 
     async fn get_realtime_quote(&self, symbol: &str) -> CrawlerResult<RealtimeQuote> {
         let formatted_symbol = Self::format_symbol(symbol);
-        let url = format!("{}/q={}?env=cd&v_={}", TENCENT_BASE_URL, formatted_symbol, formatted_symbol);
+        let url = format!(
+            "{}/q={}?env=cd&v_={}",
+            TENCENT_BASE_URL, formatted_symbol, formatted_symbol
+        );
 
         let mut request = self.client.get(&url);
         for (key, value) in Self::build_headers() {
@@ -353,7 +366,9 @@ impl DataSource for TencentSource {
     async fn health_check(&self) -> CrawlerResult<bool> {
         let url = format!("{}/q=sh000001?env=cd", TENCENT_BASE_URL);
 
-        let response = self.client.get(&url)
+        let response = self
+            .client
+            .get(&url)
             .timeout(Duration::from_secs(5))
             .send()
             .await?;

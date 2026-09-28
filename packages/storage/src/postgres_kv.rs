@@ -71,8 +71,7 @@ impl PostgresKvStorage {
     }
 
     fn ttl_i64(&self) -> Option<i64> {
-        self.default_ttl_seconds
-            .and_then(|v| i64::try_from(v).ok())
+        self.default_ttl_seconds.and_then(|v| i64::try_from(v).ok())
     }
 }
 
@@ -192,7 +191,8 @@ mod tests {
             return;
         }
 
-        let result = PostgresKvStorage::connect("postgres://invalid", "alpha_kv_test", Some(1), None).await;
+        let result =
+            PostgresKvStorage::connect("postgres://invalid", "alpha_kv_test", Some(1), None).await;
         assert!(result.is_err());
     }
 
@@ -209,7 +209,10 @@ mod tests {
         storage.store("quotes/MSFT", b"200".to_vec()).await?;
         storage.store("trades/AAPL", b"300".to_vec()).await?;
 
-        assert_eq!(storage.retrieve("quotes/AAPL").await?, Some(b"100".to_vec()));
+        assert_eq!(
+            storage.retrieve("quotes/AAPL").await?,
+            Some(b"100".to_vec())
+        );
         assert!(storage.exists("quotes/MSFT").await?);
 
         let keys = storage.list_keys("quotes/").await?;

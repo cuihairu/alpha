@@ -55,7 +55,8 @@ impl ClickHouseStorage {
 
     /// 执行 ClickHouse 查询
     pub async fn execute_query(&self, query: &str) -> Result<(), String> {
-        self.client.query(query)
+        self.client
+            .query(query)
             .execute()
             .await
             .map_err(|e| format!("查询执行失败: {}", e))?;
@@ -63,17 +64,16 @@ impl ClickHouseStorage {
     }
 
     /// 插入市场数据
-    pub async fn insert_market_data(
-        &self,
-        data: Vec<MarketDataInsert>,
-    ) -> Result<(), String> {
+    pub async fn insert_market_data(&self, data: Vec<MarketDataInsert>) -> Result<(), String> {
         if data.is_empty() {
             return Ok(());
         }
 
         // 使用 HTTP 接口插入数据
-        let url = format!("{}/?database={}&user={}&password={}",
-            self.config.url, self.config.database, self.config.user, self.config.password);
+        let url = format!(
+            "{}/?database={}&user={}&password={}",
+            self.config.url, self.config.database, self.config.user, self.config.password
+        );
 
         let mut payload = String::new();
         for item in data {
@@ -94,7 +94,8 @@ impl ClickHouseStorage {
         }
 
         let client = reqwest::Client::new();
-        let response = client.post(&url)
+        let response = client
+            .post(&url)
             .body(payload)
             .send()
             .await
@@ -129,12 +130,18 @@ impl ClickHouseStorage {
             query.push_str(&format!(" LIMIT {}", limit));
         }
 
-        let url = format!("{}/?database={}&user={}&password={}&query={}",
-            self.config.url, self.config.database, self.config.user, self.config.password,
-            urlencoding::encode(&query));
+        let url = format!(
+            "{}/?database={}&user={}&password={}&query={}",
+            self.config.url,
+            self.config.database,
+            self.config.user,
+            self.config.password,
+            urlencoding::encode(&query)
+        );
 
         let client = reqwest::Client::new();
-        let response = client.get(&url)
+        let response = client
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("HTTP 请求失败: {}", e))?;
@@ -143,7 +150,9 @@ impl ClickHouseStorage {
             return Err(format!("查询失败: {}", response.status()));
         }
 
-        let text = response.text().await
+        let text = response
+            .text()
+            .await
             .map_err(|e| format!("响应解析失败: {}", e))?;
 
         // 简单的 CSV 解析
@@ -152,7 +161,14 @@ impl ClickHouseStorage {
             for line in text.trim().lines().skip(1) {
                 let parts: Vec<&str> = line.split('\t').collect();
                 if parts.len() >= 7 {
-                    if let (Ok(timestamp), Ok(open_price), Ok(high_price), Ok(low_price), Ok(close_price), Ok(volume)) = (
+                    if let (
+                        Ok(timestamp),
+                        Ok(open_price),
+                        Ok(high_price),
+                        Ok(low_price),
+                        Ok(close_price),
+                        Ok(volume),
+                    ) = (
                         parts[0].parse::<DateTime<Utc>>(),
                         parts[2].parse::<f64>(),
                         parts[3].parse::<f64>(),
@@ -292,8 +308,10 @@ impl ClickHouseStorage {
         }
 
         // 使用 HTTP 接口插入数据
-        let url = format!("{}/?database={}&user={}&password={}",
-            self.config.url, self.config.database, self.config.user, self.config.password);
+        let url = format!(
+            "{}/?database={}&user={}&password={}",
+            self.config.url, self.config.database, self.config.user, self.config.password
+        );
 
         let mut payload = String::new();
         for item in indicators {
@@ -313,7 +331,8 @@ impl ClickHouseStorage {
         }
 
         let client = reqwest::Client::new();
-        let response = client.post(&url)
+        let response = client
+            .post(&url)
             .body(payload)
             .send()
             .await
@@ -330,12 +349,18 @@ impl ClickHouseStorage {
     pub async fn get_realtime_quotes(&self) -> Result<Vec<RealtimeQuoteRow>, String> {
         let query = "SELECT symbol, last_price, bid_price, ask_price, volume, timestamp, change_amount, change_percent FROM realtime_quotes";
 
-        let url = format!("{}/?database={}&user={}&password={}&query={}",
-            self.config.url, self.config.database, self.config.user, self.config.password,
-            urlencoding::encode(query));
+        let url = format!(
+            "{}/?database={}&user={}&password={}&query={}",
+            self.config.url,
+            self.config.database,
+            self.config.user,
+            self.config.password,
+            urlencoding::encode(query)
+        );
 
         let client = reqwest::Client::new();
-        let response = client.get(&url)
+        let response = client
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("HTTP 请求失败: {}", e))?;
@@ -344,7 +369,9 @@ impl ClickHouseStorage {
             return Err(format!("查询失败: {}", response.status()));
         }
 
-        let text = response.text().await
+        let text = response
+            .text()
+            .await
             .map_err(|e| format!("响应解析失败: {}", e))?;
 
         // 简单的 CSV 解析
@@ -353,7 +380,15 @@ impl ClickHouseStorage {
             for line in text.trim().lines().skip(1) {
                 let parts: Vec<&str> = line.split('\t').collect();
                 if parts.len() >= 8 {
-                    if let (Ok(last_price), Ok(bid_price), Ok(ask_price), Ok(volume), Ok(timestamp), Ok(change_amount), Ok(change_percent)) = (
+                    if let (
+                        Ok(last_price),
+                        Ok(bid_price),
+                        Ok(ask_price),
+                        Ok(volume),
+                        Ok(timestamp),
+                        Ok(change_amount),
+                        Ok(change_percent),
+                    ) = (
                         parts[1].parse::<f64>(),
                         parts[2].parse::<f64>(),
                         parts[3].parse::<f64>(),

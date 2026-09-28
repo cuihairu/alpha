@@ -91,6 +91,9 @@ grpc 零改动；wasm 侧取 `--no-default-features` 契约层，wasm32 编译�
 
 ## 6. 代码规范与兼容性检查
 
+> 完整 Rust 代码规范（格式化/clippy 零警告/错误处理/异步/日志/测试纪律）见
+> **docs/rust-code-standards.md**；本节只保留跨平台相关约定。
+
 强制检查 = `scripts/check-cross-platform.sh`（非交互可入 CI）；多目标构建入口 =
 `.cargo/config.toml` 的 cargo alias（`cargo wasm-check` / `cargo wasm-build`）：
 

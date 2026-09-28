@@ -33,7 +33,7 @@ pub mod time {
 
         // 简化处理：跳过周末
         while next_day.weekday().num_days_from_monday() >= 5 {
-            next_day = next_day + Duration::days(1);
+            next_day += Duration::days(1);
         }
 
         next_day

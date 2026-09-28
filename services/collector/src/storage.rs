@@ -140,7 +140,10 @@ impl StorageLayer {
                     // 测试连接
                     match client.get_multiplexed_async_connection().await {
                         Ok(mut conn) => {
-                            let _: () = redis::cmd("PING").query_async(&mut conn).await.unwrap_or(());
+                            let _: () = redis::cmd("PING")
+                                .query_async(&mut conn)
+                                .await
+                                .unwrap_or(());
                             redis_client = Some(client);
                             info!("Redis connected successfully");
                         }
@@ -164,9 +167,9 @@ impl StorageLayer {
 
     /// 保存实时行情数据到 TimescaleDB
     pub async fn save_realtime_quote(&self, quote: &RealtimeQuote) -> Result<(), StorageError> {
-        let pool = self.timescale_pool
-            .as_ref()
-            .ok_or_else(|| StorageError::ConnectionError("TimescaleDB not connected".to_string()))?;
+        let pool = self.timescale_pool.as_ref().ok_or_else(|| {
+            StorageError::ConnectionError("TimescaleDB not connected".to_string())
+        })?;
 
         let query = r#"
             INSERT INTO realtime_quotes (
@@ -209,10 +212,13 @@ impl StorageLayer {
     }
 
     /// 批量保存实时行情数据
-    pub async fn save_realtime_quotes(&self, quotes: &[RealtimeQuote]) -> Result<usize, StorageError> {
-        self.timescale_pool
-            .as_ref()
-            .ok_or_else(|| StorageError::ConnectionError("TimescaleDB not connected".to_string()))?;
+    pub async fn save_realtime_quotes(
+        &self,
+        quotes: &[RealtimeQuote],
+    ) -> Result<usize, StorageError> {
+        self.timescale_pool.as_ref().ok_or_else(|| {
+            StorageError::ConnectionError("TimescaleDB not connected".to_string())
+        })?;
 
         let mut saved_count = 0;
 
@@ -230,9 +236,9 @@ impl StorageLayer {
 
     /// 保存 K线数据
     pub async fn save_kline(&self, kline: &KlineData) -> Result<(), StorageError> {
-        let pool = self.timescale_pool
-            .as_ref()
-            .ok_or_else(|| StorageError::ConnectionError("TimescaleDB not connected".to_string()))?;
+        let pool = self.timescale_pool.as_ref().ok_or_else(|| {
+            StorageError::ConnectionError("TimescaleDB not connected".to_string())
+        })?;
 
         let kline_type_str = format!("{:?}", kline.kline_type);
 
@@ -266,13 +272,17 @@ impl StorageLayer {
             .await
             .map_err(|e| StorageError::DatabaseError(e.to_string()))?;
 
-        debug!("Saved kline data for {} {:?}", kline.symbol, kline.kline_type);
+        debug!(
+            "Saved kline data for {} {:?}",
+            kline.symbol, kline.kline_type
+        );
         Ok(())
     }
 
     /// 缓存实时行情到 Redis
     pub async fn cache_realtime_quote(&self, quote: &RealtimeQuote) -> Result<(), StorageError> {
-        let client = self.redis_client
+        let client = self
+            .redis_client
             .as_ref()
             .ok_or_else(|| StorageError::ConnectionError("Redis not connected".to_string()))?;
 
@@ -298,8 +308,12 @@ impl StorageLayer {
     }
 
     /// 从 Redis 获取缓存的实时行情
-    pub async fn get_cached_quote(&self, symbol: &str) -> Result<Option<RealtimeQuote>, StorageError> {
-        let client = self.redis_client
+    pub async fn get_cached_quote(
+        &self,
+        symbol: &str,
+    ) -> Result<Option<RealtimeQuote>, StorageError> {
+        let client = self
+            .redis_client
             .as_ref()
             .ok_or_else(|| StorageError::ConnectionError("Redis not connected".to_string()))?;
 
@@ -328,12 +342,13 @@ impl StorageLayer {
 
     /// 初始化数据库表
     pub async fn init_schema(&self) -> Result<(), StorageError> {
-        let pool = self.timescale_pool
-            .as_ref()
-            .ok_or_else(|| StorageError::ConnectionError("TimescaleDB not connected".to_string()))?;
+        let pool = self.timescale_pool.as_ref().ok_or_else(|| {
+            StorageError::ConnectionError("TimescaleDB not connected".to_string())
+        })?;
 
         // 创建实时行情表
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS realtime_quotes (
                 symbol VARCHAR(20) NOT NULL,
                 name VARCHAR(50),
@@ -354,13 +369,15 @@ impl StorageLayer {
                 source VARCHAR(20),
                 PRIMARY KEY (symbol, timestamp)
             );
-        "#)
+        "#,
+        )
         .execute(pool)
         .await
         .map_err(|e| StorageError::DatabaseError(e.to_string()))?;
 
         // 创建 K线数据表
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS kline_data (
                 symbol VARCHAR(20) NOT NULL,
                 kline_type VARCHAR(20) NOT NULL,
@@ -376,7 +393,8 @@ impl StorageLayer {
                 turnover_rate DECIMAL(10, 3),
                 PRIMARY KEY (symbol, kline_type, timestamp)
             );
-        "#)
+        "#,
+        )
         .execute(pool)
         .await
         .map_err(|e| StorageError::DatabaseError(e.to_string()))?;
@@ -403,15 +421,13 @@ impl StorageLayer {
         // 检查 Redis
         if let Some(client) = &self.redis_client {
             match client.get_multiplexed_async_connection().await {
-                Ok(mut conn) => {
-                    match redis::cmd("PING").query_async::<_, ()>(&mut conn).await {
-                        Ok(_) => debug!("Redis health check passed"),
-                        Err(e) => {
-                            warn!("Redis health check failed: {}", e);
-                            healthy = false;
-                        }
+                Ok(mut conn) => match redis::cmd("PING").query_async::<_, ()>(&mut conn).await {
+                    Ok(_) => debug!("Redis health check passed"),
+                    Err(e) => {
+                        warn!("Redis health check failed: {}", e);
+                        healthy = false;
                     }
-                }
+                },
                 Err(e) => {
                     warn!("Redis connection failed: {}", e);
                     healthy = false;

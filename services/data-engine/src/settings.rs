@@ -198,7 +198,10 @@ mod tests {
         assert!(!cfg.data.seed_demo_data);
         assert_eq!(cfg.server.grpc_addr, "127.0.0.1:50060");
         assert!(cfg.storage.persistence_enabled);
-        assert_eq!(cfg.storage.timescale_url.as_deref(), Some("postgres://demo"));
+        assert_eq!(
+            cfg.storage.timescale_url.as_deref(),
+            Some("postgres://demo")
+        );
         assert!(cfg.clickhouse.enabled);
         assert_eq!(cfg.clickhouse.url, "http://127.0.0.1:8123");
     }
