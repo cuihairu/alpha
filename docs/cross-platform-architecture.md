@@ -20,7 +20,7 @@
 
 | 模块 | 技术栈 | 平台约束 | 现状 |
 |---|---|---|---|
-| `packages/core` | serde/uuid/chrono + 纯计算（indicators/analytics/trading） | 无 tokio/reqwest/sqlx/redis/tonic | **wasm32 编译通过**（需 `--features wasm`：`chrono/wasmbind` + `uuid/js`，见 `packages/core/Cargo.toml:33`）；`errors.rs` 已有 `cfg(target_arch = "wasm32")` 分支 |
+| `packages/core` | serde/uuid/chrono + 纯计算（models/indicators/analytics/platform） | 无 tokio/reqwest/sqlx/redis/tonic | **wasm32 编译通过**（需 `--features wasm`：`chrono/wasmbind` + `uuid/js`，见 `packages/core/Cargo.toml:33`）；`errors.rs` 已有 `cfg(target_arch = "wasm32")` 分支 |
 | `packages/protocols` | tonic/prost + serde | tonic 默认特性拉 tokio/net | **wasm32 编译失败**（mio 不支持 wasm；见 §5 差距） |
 | `packages/storage` | sqlx/redis/clickhouse + DataFusion | 服务端专属 | 按 L1 设计即不追求 wasm |
 | `services/*` | Axum + Tokio + DataFusion | 服务端专属 | 已落地（P0–P3 行动清单全绿） |
@@ -41,7 +41,7 @@
 │  服务端专属；mobile 不直连 storage，经 L2 → REST/WS → services       │
 ├─────────────────────────── L0 共享核心层 ─────────────────────────┤
 │  packages/core：模型(models)、指标(indicators)、分析(analytics)、    │
-│  交易(trading)、错误(errors) —— 零平台依赖，wasm32 必须编译通过      │
+│  平台适配(platform)、错误(errors) —— 零平台依赖，wasm32 必须编译通过 │
 └───────────────────────────────────────────────────────────────────┘
 ```
 

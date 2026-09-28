@@ -8,6 +8,7 @@ pub mod analytics;
 pub mod errors;
 pub mod indicators;
 pub mod models;
+pub mod platform;
 pub mod utils;
 
 // 重新导出主要类型

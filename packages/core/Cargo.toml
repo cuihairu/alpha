@@ -32,6 +32,10 @@ default = ["std"]
 std = []
 wasm = ["chrono/wasmbind", "uuid/js"]
 
+[dev-dependencies]
+# 仅测试（platform 适配层参考实现的 #[tokio::test]）；不影响 lib/wasm 构建
+tokio = { workspace = true, features = ["macros", "rt"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
