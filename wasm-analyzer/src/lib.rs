@@ -35,6 +35,7 @@ pub fn init_panic_hook() {
 pub struct WasmAnalyzer {
     engine: AnalysisEngine,
     indicators: TechnicalIndicators,
+    advanced: AdvancedIndicators,
 }
 
 #[wasm_bindgen]
@@ -162,6 +163,152 @@ impl WasmAnalyzer {
         serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
     }
 
+    // ===== 高级指标 (AdvancedIndicators) =====
+
+    /// 计算随机指标 (Stochastic Oscillator)
+    /// 需要 high/low/close 三条价格序列
+    #[wasm_bindgen(js_name = calculateStochastic)]
+    pub fn calculate_stochastic(
+        &self,
+        highs_js: &js_sys::Float64Array,
+        lows_js: &js_sys::Float64Array,
+        closes_js: &js_sys::Float64Array,
+        k_period: usize,
+        d_period: usize,
+    ) -> JsValue {
+        let highs: Vec<f64> = highs_js.to_vec();
+        let lows: Vec<f64> = lows_js.to_vec();
+        let closes: Vec<f64> = closes_js.to_vec();
+        let (k_values, d_values) = self.advanced.calculate_stochastic(&highs, &lows, &closes, k_period, d_period);
+
+        let result = serde_json::json!({
+            "k": k_values,
+            "d": d_values
+        });
+
+        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    }
+
+    /// 计算威廉指标 (Williams %R)
+    #[wasm_bindgen(js_name = calculateWilliamsR)]
+    pub fn calculate_williams_r(
+        &self,
+        highs_js: &js_sys::Float64Array,
+        lows_js: &js_sys::Float64Array,
+        closes_js: &js_sys::Float64Array,
+        period: usize,
+    ) -> js_sys::Float64Array {
+        let highs: Vec<f64> = highs_js.to_vec();
+        let lows: Vec<f64> = lows_js.to_vec();
+        let closes: Vec<f64> = closes_js.to_vec();
+        let wr = self.advanced.calculate_williams_r(&highs, &lows, &closes, period);
+        js_sys::Float64Array::from(&wr[..])
+    }
+
+    /// 计算商品通道指数 (CCI)
+    #[wasm_bindgen(js_name = calculateCCI)]
+    pub fn calculate_cci(
+        &self,
+        highs_js: &js_sys::Float64Array,
+        lows_js: &js_sys::Float64Array,
+        closes_js: &js_sys::Float64Array,
+        period: usize,
+        constant: f64,
+    ) -> js_sys::Float64Array {
+        let highs: Vec<f64> = highs_js.to_vec();
+        let lows: Vec<f64> = lows_js.to_vec();
+        let closes: Vec<f64> = closes_js.to_vec();
+        let cci = self.advanced.calculate_cci(&highs, &lows, &closes, period, constant);
+        js_sys::Float64Array::from(&cci[..])
+    }
+
+    /// 计算平均真实波幅 (ATR)
+    #[wasm_bindgen(js_name = calculateATR)]
+    pub fn calculate_atr(
+        &self,
+        highs_js: &js_sys::Float64Array,
+        lows_js: &js_sys::Float64Array,
+        closes_js: &js_sys::Float64Array,
+        period: usize,
+    ) -> js_sys::Float64Array {
+        let highs: Vec<f64> = highs_js.to_vec();
+        let lows: Vec<f64> = lows_js.to_vec();
+        let closes: Vec<f64> = closes_js.to_vec();
+        let atr = self.advanced.calculate_atr(&highs, &lows, &closes, period);
+        js_sys::Float64Array::from(&atr[..])
+    }
+
+    /// 计算动量指标 (Momentum)
+    #[wasm_bindgen(js_name = calculateMomentum)]
+    pub fn calculate_momentum(
+        &self,
+        prices_js: &js_sys::Float64Array,
+        period: usize,
+    ) -> js_sys::Float64Array {
+        let prices: Vec<f64> = prices_js.to_vec();
+        let momentum = self.advanced.calculate_momentum(&prices, period);
+        js_sys::Float64Array::from(&momentum[..])
+    }
+
+    /// 计算变化率 (Rate of Change)
+    #[wasm_bindgen(js_name = calculateROC)]
+    pub fn calculate_roc(
+        &self,
+        prices_js: &js_sys::Float64Array,
+        period: usize,
+    ) -> js_sys::Float64Array {
+        let prices: Vec<f64> = prices_js.to_vec();
+        let roc = self.advanced.calculate_roc(&prices, period);
+        js_sys::Float64Array::from(&roc[..])
+    }
+
+    /// 计算布林带宽度
+    #[wasm_bindgen(js_name = calculateBollingerBandWidth)]
+    pub fn calculate_bollinger_band_width(
+        &self,
+        upper_js: &js_sys::Float64Array,
+        lower_js: &js_sys::Float64Array,
+        middle_js: &js_sys::Float64Array,
+    ) -> js_sys::Float64Array {
+        let upper: Vec<f64> = upper_js.to_vec();
+        let lower: Vec<f64> = lower_js.to_vec();
+        let middle: Vec<f64> = middle_js.to_vec();
+        let width = self.advanced.calculate_bollinger_band_width(&upper, &lower, &middle);
+        js_sys::Float64Array::from(&width[..])
+    }
+
+    /// 计算布林带位置 (%B)
+    #[wasm_bindgen(js_name = calculateBollingerBandPercentB)]
+    pub fn calculate_bollinger_band_percent_b(
+        &self,
+        price: f64,
+        upper_band: f64,
+        lower_band: f64,
+    ) -> f64 {
+        self.advanced.calculate_bollinger_band_percent_b(price, upper_band, lower_band)
+    }
+
+    /// 识别艾略特波浪模式
+    #[wasm_bindgen(js_name = identifyElliottWaves)]
+    pub fn identify_elliott_waves(
+        &self,
+        prices_js: &js_sys::Float64Array,
+    ) -> JsValue {
+        let prices: Vec<f64> = prices_js.to_vec();
+        let waves = self.advanced.identify_elliott_waves(&prices);
+
+        let result = serde_json::json!({
+            "waves": waves.iter().map(|w| serde_json::json!({
+                "startIndex": w.start_index,
+                "endIndex": w.end_index,
+                "waveType": format!("{:?}", w.wave_type),
+                "confidence": w.confidence
+            })).collect::<Vec<_>>()
+        });
+
+        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    }
+
     /// 批量计算多个指标
     /// （参数集镜像 web 前端表单：价格序列 + RSI/SMA 周期组，wasm_bindgen 契约不拆对象）
     #[allow(clippy::too_many_arguments)]
@@ -253,6 +400,58 @@ impl WasmAnalyzer {
             }
         }
     }
+}
+
+/// 零拷贝价格缓冲区分配：在 wasm 线性内存中分配定长 f64 缓冲区，
+/// 返回给 JS 的对象包含 `{ptr, len, view}`，其中 `view` 为
+/// `Float64Array` 直接映射 wasm 内存（数据 ingress 零拷贝）。
+/// 契约见 [`shared_buffer`] 模块文档。
+/// 简化口径：此处不携带 `capacity` 字段（`SharedF64Buffer` 保证 capacity==len）；
+/// 释放路径见 `freePriceBuffer`。
+#[wasm_bindgen(js_name = allocPriceBuffer)]
+pub fn alloc_price_buffer(len: usize) -> Result<JsValue, JsValue> {
+    if len == 0 {
+        return Err(JsValue::from_str(
+            "allocPriceBuffer: 长度须大于 0（空序列请直接走便捷接口 backtestSmaCross）",
+        ));
+    }
+    if len > MAX_BUFFER_LEN {
+        return Err(JsValue::from_str(&format!(
+            "allocPriceBuffer: 长度 {len} 超上限 {MAX_BUFFER_LEN}（防 wasm32 堆 OOM trap）",
+        )));
+    }
+    let buf = SharedF64Buffer::alloc(len);
+    let ptr = buf.as_ptr() as u32;
+    // SAFETY: ptr 来自刚分配且随即 forget 的 Vec<f64>（8 字节对齐、地址恒定），
+    // 此调用仅建视图、不分配；视图失效条件（后续 grow）已在文档契约声明
+    let view = unsafe { js_sys::Float64Array::view_mut_raw(buf.as_ptr() as *mut f64, len) };
+    let handle = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &handle,
+        &JsValue::from_str("ptr"),
+        &JsValue::from_f64(ptr as f64),
+    )?;
+    js_sys::Reflect::set(
+        &handle,
+        &JsValue::from_str("len"),
+        &JsValue::from_f64(len as f64),
+    )?;
+    js_sys::Reflect::set(&handle, &JsValue::from_str("view"), &view)?;
+    // 所有权移交 JS 侧（ forgotten 直到 freePriceBuffer 回传 (ptr, len) ）
+    std::mem::forget(buf);
+    Ok(handle.into())
+}
+
+/// 释放 `allocPriceBuffer` 分配的缓冲区。同一 `(ptr, len)` 只能调用一次。
+#[wasm_bindgen(js_name = freePriceBuffer)]
+pub fn free_price_buffer(ptr: u32, len: usize) -> Result<(), JsValue> {
+    if ptr == 0 || len == 0 {
+        return Err(JsValue::from_str("freePriceBuffer: 非法 (ptr, len)"));
+    }
+    // SAFETY: (ptr, len) 契约来自 allocPriceBuffer 且未释放过；
+    // wasm 无法校验外来指针，双 free/伪造指针 = UB，由调用方保证
+    drop(unsafe { SharedF64Buffer::from_raw(ptr as *mut f64, len) });
+    Ok(())
 }
 
 /// 工具函数
