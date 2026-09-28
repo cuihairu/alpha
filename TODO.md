@@ -18,7 +18,9 @@
 
 ### P2 数据落地
 - [x] data-engine 按 storage.persistence_enabled/timescale_url 装配 Timescale 落库：AppState 增 persistence 镜像，initialize_persistence 三态降级（与 ClickHouse 装配同口径：未启用→内存；URL 缺失/连接失败→告警降级内存，服务不拒启；正常→write_normalized 写内存后镜像落库）。三态单测齐备（正常写入 TIMESCALE_TEST_URL 门控），实机 PG15 进程级 E2E 验证 raw→normalized→内存+落库全链路（✅ 2026-09-27）
-- [ ] normalized 层去重（payload_hash）与 MemTable 全量重建热点优化
+- [x] normalized 层去重（payload_hash）：data-engine 写侧按原始 envelope 的 payload_hash 判重，重复投递（XAUTOCLAIM 重放、上游重复发布）不重复写内存/转发但仍 ack（防 PEL 重放）。窗口边界：进程内 FIFO、65536 条、重启清零；跨重启重复由 Timescale (symbol,ts) UPSERT 幂等兜底；指纹在「内存写+转发」成功后才记录，写失败重试不会被去重吞掉。实测：重复投递/sweeper 重放均只落地一条 normalized、PEL 清零（✅ 2026-09-28）
+- [x] MemTable 全量重建热点：实测全量重建 ~25-35µs/点（600 点 17.7ms/次、2.4 万点 850ms/次、48 万点 11.7s/次，随存量线性增长且在消费循环内同步执行）→ 写路径移除全量重建（/query 每次执行前自刷新、/stocks 与 /indicators 直读内存时序，语义不变，双查回归 200）；顺带修复 register_table 撞名潜伏 bug（datafusion 35 同名表报错：第二次 refresh 起必失败，/query 第二次 500 → 先 deregister 再 register）（✅ 2026-09-28）
+- [ ] （新发现 2026-09-28）内存时序 add_point 盲目 append 且逐条 sort（批量灌入 O(n²)，48 万点灌入实测耗时数分钟），也未按 (symbol,ts) 去重；应改批量插入+惰性排序或按 ts UPSERT
 - [ ] （新发现 2026-09-27）重投递无上限：claim_stale 未设 delivery-count 封顶，反复处理失败的消息会被无限认领重放；应按 XPENDING 的 delivery_count 封顶（超 N 次转 DLQ）
 - [ ] （新发现 2026-09-27）real-time-feed 用 tracing_subscriber::fmt::init()，未设 RUST_LOG 时 WARN 级兜底日志不可见（E2E 中隔离已发生但日志为空）；改为与 data-engine 一致的显式 level 初始化
 - [ ] （新发现 2026-09-27）持久化镜像失败仅告警不重试：Timescale 短暂不可用期间的写入会丢持久化副本（内存 serving 不受影响）；如需强持久化需引入重试/缓冲（outbox 类方案），当前定位为 best-effort 镜像

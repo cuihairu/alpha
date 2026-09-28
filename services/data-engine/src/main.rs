@@ -2,7 +2,12 @@
 //!
 //! 基于 Axum + DataFusion 的高性能数据处理服务
 
-use std::{net::SocketAddr, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, VecDeque},
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use alpha_core::{
     analytics::AnalysisEngine,
@@ -53,6 +58,43 @@ const NORMALIZED_QUOTES_STREAM: &str = "quotes.normalized";
 const NORMALIZER_GROUP: &str = "data-engine-normalizer";
 const QUOTES_DLQ_STREAM: &str = "quotes.dlq";
 
+/// normalized 层写侧去重窗口容量（条）。按内容判重的 FIFO 窗口，
+/// 容量取「远大于单进程任何瞬时重放量」的经验值。
+const PAYLOAD_DEDUP_WINDOW: usize = 65_536;
+
+/// payload_hash 去重窗口：进程内 FIFO，超容量淘汰最早记录，重启清零。
+#[derive(Default)]
+struct RecentPayloads {
+    seen: HashMap<String, ()>,
+    order: VecDeque<String>,
+    capacity: usize,
+}
+
+impl RecentPayloads {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            capacity,
+            ..Default::default()
+        }
+    }
+
+    fn contains(&self, hash: &str) -> bool {
+        self.seen.contains_key(hash)
+    }
+
+    /// 记录 hash；窗口满时淘汰最早一条。
+    fn insert(&mut self, hash: &str) {
+        if self.seen.insert(hash.to_string(), ()).is_none() {
+            self.order.push_back(hash.to_string());
+        }
+        while self.order.len() > self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.seen.remove(&oldest);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
     session: SessionContext,
@@ -60,6 +102,8 @@ struct AppState {
     /// TimescaleDB 持久化镜像（storage.persistence_enabled 装配；None = 仅内存）
     persistence: Option<Arc<TimescaleTimeSeriesStorage>>,
     clickhouse: Option<Arc<ClickHouseStorage>>,
+    /// normalized 层写侧去重窗口（payload_hash → 近期已成功处理的指纹）
+    seen_payloads: Arc<Mutex<RecentPayloads>>,
     indicators: TechnicalIndicators,
     analysis: AnalysisEngine,
     config: Arc<AppConfig>,
@@ -73,11 +117,31 @@ impl AppState {
             session: SessionContext::new(),
             storage: Arc::new(TimeSeriesStorage::new()),
             persistence,
+            seen_payloads: Arc::new(Mutex::new(RecentPayloads::with_capacity(
+                PAYLOAD_DEDUP_WINDOW,
+            ))),
             clickhouse,
             indicators: TechnicalIndicators::new(),
             analysis: AnalysisEngine::new(),
             config,
         }
+    }
+
+    /// 窗口内是否已成功处理过该 payload_hash（只读判定，不记录）
+    fn payload_hash_seen(&self, hash: &str) -> bool {
+        self.seen_payloads
+            .lock()
+            .expect("payload dedup mutex poisoned")
+            .contains(hash)
+    }
+
+    /// 在「内存写 + normalized 转发」都成功后记录指纹；此前记录会导致
+    /// 写失败重试被自己的去重窗口吞掉（消息永不落地）。
+    fn record_payload_hash(&self, hash: &str) {
+        self.seen_payloads
+            .lock()
+            .expect("payload dedup mutex poisoned")
+            .insert(hash);
     }
 
     /// 写入规范化行情：内存时序为主（服务查询层），启用持久化时镜像写 Timescale。
@@ -103,6 +167,12 @@ impl AppState {
         let batch = build_market_data_record_batch(&self.storage).await?;
         let schema = batch.schema();
         let table = MemTable::try_new(schema, vec![vec![batch]])?;
+        // datafusion 35 的 register_table 遇到同名表会报 "already exists"，
+        // 必须先注销旧表（此前第二次 refresh 起就一直失败：写路径 debug 级吞掉、
+        // /query 第二次起直接 500 的潜伏 bug）。
+        if self.session.table_exist("market_data")? {
+            self.session.deregister_table("market_data")?;
+        }
         self.session.register_table("market_data", Arc::new(table))?;
         Ok(())
     }
@@ -346,17 +416,42 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 处理一条 quotes.raw 消息：规范化 → 入内存时序 → 转发 normalized → ack。
+/// 处理一条 quotes.raw 消息：规范化 → 去重判定 → 入内存时序 → 转发 normalized → ack。
+///
+/// 去重（normalized 层写侧）：按原始 envelope 的 payload_hash 判重，窗口内重复的
+/// 重放（XAUTOCLAIM 重投递、上游重复发布）不重复写内存/转发，但仍须 ack（否则会
+/// 滞留 PEL 被 sweeper 无限重放）。指纹在「内存写 + 转发」都成功后才记录——提前
+/// 记录会让写失败的重试被自己的去重窗口吞掉。窗口边界：进程内 FIFO、容量
+/// PAYLOAD_DEDUP_WINDOW 条、重启清零；跨重启的重复由 Timescale 层 (symbol,ts)
+/// UPSERT 幂等兜底。判重是内容级的：同窗口内逐字段全同的新 tick（实践中采集端
+/// payload 带时间戳，几乎不可能）会被当作重放跳过，属已接受的取舍。
 ///
 /// 写入/转发失败时不 ack，消息留待周期 XAUTOCLAIM 兜底重放；
 /// payload 无法规范化（缺字段等）则直接 ack 跳过——这与 stream 条目解码失败的
 /// DLQ 隔离路径（quarantine_invalid）是不同层面的两回事。
+///
+/// 注意：写路径不再全量重建 DataFusion MemTable（实测 ~25-35µs/点、随存量线性
+/// 增长，见 TODO.md P2）——/query 每次执行前自行 refresh（execute_query），
+/// /stocks、/indicators 直读内存时序，均不依赖写路径刷新。
 async fn process_normalizer_message(state: &Arc<AppState>, queue: &RedisStreamQueue, message: &StreamMessage) {
     match normalize_quote(&message.envelope) {
         Some(market_data) => {
+            let payload_hash = message.envelope.payload_hash.clone();
+            if state.payload_hash_seen(&payload_hash) {
+                tracing::debug!(
+                    "Skipping duplicate payload {} (entry {})",
+                    payload_hash,
+                    message.id
+                );
+                if let Err(err) = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await {
+                    tracing::warn!("Failed to ack duplicate raw quote {}: {}", message.id, err);
+                }
+                return;
+            }
+
             if let Err(err) = state.write_normalized(&market_data).await {
                 tracing::warn!("Failed to write normalized quote to storage: {}", err);
-                return; // 不 ack：留待 XAUTOCLAIM 兜底重放
+                return; // 不 ack：留待 XAUTOCLAIM 兜底重放；指纹未记录，重试不会被去重吞掉
             }
 
             let normalized = StreamEnvelope::new(
@@ -369,12 +464,10 @@ async fn process_normalizer_message(state: &Arc<AppState>, queue: &RedisStreamQu
 
             if let Err(err) = queue.publish(NORMALIZED_QUOTES_STREAM, &normalized).await {
                 tracing::warn!("Failed to publish normalized quote: {}", err);
-                return; // 不 ack：留待 XAUTOCLAIM 兜底重放
+                return; // 不 ack：留待 XAUTOCLAIM 兜底重放；指纹未记录，重试不会被去重吞掉
             }
 
-            if let Err(err) = state.refresh_query_tables().await {
-                tracing::debug!("Failed to refresh query tables: {}", err);
-            }
+            state.record_payload_hash(&payload_hash);
 
             if let Err(err) = queue.ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id).await {
                 tracing::warn!("Failed to ack raw quote {}: {}", message.id, err);
@@ -1486,6 +1579,81 @@ mod tests {
         assert!(state.persistence.is_none());
     }
 
+    #[test]
+    fn dedup_window_tracks_and_evicts_oldest() {
+        let mut window = RecentPayloads::with_capacity(2);
+
+        assert!(window.contains("a") == false);
+        window.insert("a");
+        window.insert("b");
+        assert!(window.contains("a"));
+        assert!(window.contains("b"));
+
+        // 未淘汰前：重复判定生效
+        assert!(window.contains("a"));
+
+        // 窗口满：插入 c 淘汰最早的 a
+        window.insert("c");
+        assert!(!window.contains("a"), "oldest entry must be evicted at capacity");
+        assert!(window.contains("b"));
+        assert!(window.contains("c"));
+    }
+
+    /// 写路径不再全量重建 MemTable 后，查询仍必须看到最新数据，
+    /// 且连续两次 /query 可用（此前 register_table 撞名导致第二次 refresh 失败）。
+    #[tokio::test]
+    async fn consecutive_queries_after_write_return_fresh_data() {
+        let state = Arc::new(AppState::new(test_config()).await);
+        let now = Utc::now();
+
+        // 模拟 normalize 写路径：只写内存，不调用 refresh_query_tables
+        state
+            .write_normalized(&MarketData {
+                symbol: "DEDUP1".to_string(),
+                timestamp: now,
+                price: 55.5,
+                volume: 10,
+                bid: None,
+                ask: None,
+                open: None,
+                high: None,
+                low: None,
+            })
+            .await
+            .unwrap();
+
+        for expected_price in [55.5, 56.5] {
+            if expected_price == 56.5 {
+                state
+                    .write_normalized(&MarketData {
+                        symbol: "DEDUP1".to_string(),
+                        timestamp: now + Duration::minutes(1),
+                        price: 56.5,
+                        volume: 10,
+                        bid: None,
+                        ask: None,
+                        open: None,
+                        high: None,
+                        low: None,
+                    })
+                    .await
+                    .unwrap();
+            }
+
+            let Json(response) = execute_query(
+                State(state.clone()),
+                Json(QueryRequest {
+                    query: "SELECT MAX(price) AS max_price FROM market_data WHERE symbol = 'DEDUP1'"
+                        .to_string(),
+                }),
+            )
+            .await
+            .unwrap();
+            assert!(response.success, "query must succeed (register_table collision fixed)");
+            assert_eq!(response.data[0]["max_price"], serde_json::json!(expected_price));
+        }
+    }
+
     /// 三态之三：正常连接 → write_normalized 镜像落库（需真实 TimescaleDB，无库自动跳过）。
     #[tokio::test]
     async fn write_through_persists_to_timescale() -> AlphaResult<()> {
@@ -1500,6 +1668,9 @@ mod tests {
             storage: Arc::new(TimeSeriesStorage::new()),
             persistence: Some(persistence.clone()),
             clickhouse: None,
+            seen_payloads: Arc::new(Mutex::new(RecentPayloads::with_capacity(
+                PAYLOAD_DEDUP_WINDOW,
+            ))),
             indicators: TechnicalIndicators::new(),
             analysis: AnalysisEngine::new(),
             config: test_config(),
