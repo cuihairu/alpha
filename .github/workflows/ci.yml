@@ -22,6 +22,10 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: 安装 protobuf-compiler
+        # clippy 编译 alpha-protocols（默认 grpc 特性）触发 proto 代码生成，需要 protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: 缓存 Cargo
         uses: Swatinem/rust-cache@v2
 
