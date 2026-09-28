@@ -25,6 +25,30 @@ use tokio::{
     time::{interval, MissedTickBehavior},
 };
 
+/// 显式日志级别初始化：`tracing_subscriber::fmt::init()` 在未设 RUST_LOG 时只放行
+/// ERROR，WARN 级兜底日志（DLQ 隔离失败、毒消息告警等）会全部不可见。与 data-engine
+/// 的 telemetry.level 口径一致：默认 info，ALPHA_LOG_LEVEL 可调，RUST_LOG 兼容保留。
+fn init_tracing() {
+    let level = std::env::var("ALPHA_LOG_LEVEL")
+        .or_else(|_| std::env::var("RUST_LOG"))
+        .unwrap_or_else(|_| "info".to_string());
+    tracing_subscriber::fmt()
+        .with_max_level(parse_log_level(&level))
+        .with_target(false)
+        .init();
+}
+
+/// 日志级别字符串 → tracing::Level（未知取值回退 INFO，与 data-engine 同口径）。
+fn parse_log_level(level: &str) -> tracing::Level {
+    match level.to_lowercase().as_str() {
+        "debug" => tracing::Level::DEBUG,
+        "warn" => tracing::Level::WARN,
+        "error" => tracing::Level::ERROR,
+        "trace" => tracing::Level::TRACE,
+        _ => tracing::Level::INFO,
+    }
+}
+
 /// 实时数据消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RealTimeData {
@@ -78,7 +102,7 @@ const REALTIME_GROUP: &str = "real-time-feed";
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 初始化日志
-    tracing_subscriber::fmt::init();
+    init_tracing();
 
     tracing::info!("Starting Alpha Finance Real-Time Feed Service");
 
@@ -508,6 +532,18 @@ mod tests {
 
         assert_eq!(data.symbol, deserialized.symbol);
         assert_eq!(data.price, deserialized.price);
+    }
+
+    #[test]
+    fn test_parse_log_level_defaults_to_info_and_matches_data_engine() {
+        assert_eq!(parse_log_level("info"), tracing::Level::INFO);
+        assert_eq!(parse_log_level("DEBUG"), tracing::Level::DEBUG);
+        assert_eq!(parse_log_level("Warn"), tracing::Level::WARN);
+        assert_eq!(parse_log_level("error"), tracing::Level::ERROR);
+        assert_eq!(parse_log_level("trace"), tracing::Level::TRACE);
+        // 未设/未知取值兜底 INFO：保证 WARN 级兜底日志可见
+        assert_eq!(parse_log_level(""), tracing::Level::INFO);
+        assert_eq!(parse_log_level("bogus"), tracing::Level::INFO);
     }
 
     #[test]
