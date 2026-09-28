@@ -2,17 +2,23 @@
 //!
 //! 在浏览器中运行的高性能数据分析引擎
 
-use alpha_core::{analytics::AnalysisEngine, indicators::TechnicalIndicators, models::*};
+use alpha_core::{
+    analytics::AnalysisEngine,
+    indicators::{TechnicalIndicators, advanced::AdvancedIndicators},
+    models::*,
+};
 use chrono::Utc;
 use wasm_bindgen::prelude::*;
 
 mod arrow_adapter;
+mod shared_buffer;
 mod storage;
 mod streaming;
 mod websocket;
 mod worker;
 
-pub use arrow_adapter::ArrowBatch;
+pub use arrow_adapter::{ArrowBatch, ArrowMemoryPool};
+pub use shared_buffer::{SharedF64Buffer, MAX_BUFFER_LEN};
 pub use storage::{HybridStorage, IndexedDBStorage};
 pub use streaming::{BatchStreamProcessor, StreamProcessor};
 pub use websocket::WebSocketClient;
@@ -40,6 +46,7 @@ impl WasmAnalyzer {
         WasmAnalyzer {
             engine: AnalysisEngine::with_precision(precision),
             indicators: TechnicalIndicators::with_precision(precision),
+            advanced: AdvancedIndicators::with_precision(precision),
         }
     }
 
