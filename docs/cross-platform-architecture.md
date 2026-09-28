@@ -79,7 +79,7 @@ pub trait UserNotification {         // 桌面: Tauri notification；mobile: 系
 | alpha-core | ✅ | ✅（`--features wasm`，实测） | ✅（同 core 约束） | 规划 |
 | alpha-protocols | ✅ | ❌ 已知差距 | ✅ | 规划 |
 | alpha-storage / services | ✅ | 不适用（L1） | 不适用 | 不适用 |
-| wasm-analyzer | — | ✅（其主目标） | — | — |
+| alpha-wasm-analyzer | — | ✅（实测 `cargo wasm-build`） | — | — |
 
 **已知差距与 remediation（alpha-protocols）**：tonic 默认特性（`transport`）拉入
 tokio/net → mio，wasm32 编译失败（实测报错 `This wasm target is unsupported by mio`）。
@@ -90,12 +90,14 @@ tokio/net → mio，wasm32 编译失败（实测报错 `This wasm target is unsu
 
 ## 6. 代码规范与兼容性检查
 
-强制检查 = `scripts/check-cross-platform.sh`（本次新增，非交互可入 CI）：
+强制检查 = `scripts/check-cross-platform.sh`（非交互可入 CI）；多目标构建入口 =
+`.cargo/config.toml` 的 cargo alias（`cargo wasm-check` / `cargo wasm-build`）：
 
-1. `cargo check --target wasm32-unknown-unknown -p alpha-core --features wasm` 必须通过；
-2. `packages/core` 默认依赖黑名单扫描（tokio/reqwest/sqlx/redis/tonic/native-tls/
+1. `cargo wasm-check`（alpha-core @ wasm32，`--features wasm`）必须通过；
+2. `cargo wasm-build`（alpha-wasm-analyzer @ wasm32 cdylib 构建）必须通过；
+3. `packages/core` 默认依赖黑名单扫描（tokio/reqwest/sqlx/redis/tonic/native-tls/
    rustls/notify/directories/dirs）——命中即失败，新增平台能力先放 L1 或加 feature 门控；
-3. alpha-protocols 现状 informational 输出（差距消除后升级为门禁，见 §5）。
+4. alpha-protocols 现状 informational 输出（差距消除后升级为门禁，见 §5）。
 
 编码规范（评审口径，配合脚本执行）：
 
@@ -108,7 +110,7 @@ tokio/net → mio，wasm32 编译失败（实测报错 `This wasm target is unsu
 
 | TODO 项 | 依赖/顺序 | 说明 |
 |---|---|---|
-| Cargo workspace 多目标构建配置 | 本设计 | 补 `.cargo/config.toml` 目标别名 + CI 矩阵 |
+| Cargo workspace 多目标构建配置 | 本设计 | ✅ 已落地：`.cargo/config.toml` alias（wasm-check/wasm-build）+ 检查脚本纳入 wasm-analyzer wasm32 构建；CI 矩阵随「CI/CD」节推进 |
 | 跨平台共享核心库（core/protocols/storage） | §5 差距消除 | protocols grpc feature 门控 |
 | 平台适配层抽象接口 | §4 草案 | 随 Tauri 文件导出 / mobile 立项落地 `platform.rs` |
 | 统一 Rust 代码规范与兼容性检查 | 本设计 §6 | 脚本已落地，CI 集成随「CI/CD」节推进 |

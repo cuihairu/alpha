@@ -4,7 +4,8 @@
 # 检查项：
 #   1. alpha-core 在 wasm32-unknown-unknown 下编译通过（需 --features wasm，
 #      该 feature 启用 chrono/wasmbind + uuid/js）；
-#   2. packages/core 的默认依赖不得引入平台独占/重运行时库
+#   2. alpha-wasm-analyzer 在 wasm32 下构建通过（cdylib，浏览器分析引擎主目标）；
+#   3. packages/core 的默认依赖不得引入平台独占/重运行时库
 #      （tokio/reqwest/sqlx/redis/tonic 等）——core 是全平台共享层，
 #      异步 IO 与原生文件系统访问属于 storage/protocols/services 层职责。
 #
@@ -32,13 +33,19 @@ if ! rustup target list --installed 2>/dev/null | grep -q "^$TARGET$"; then
 fi
 
 # 1) alpha-core wasm32 编译
-echo "--- [1/3] alpha-core @ $TARGET (--features wasm)"
+echo "--- [1/4] alpha-core @ $TARGET (--features wasm)"
 cargo check --target "$TARGET" -p alpha-core --features wasm \
     || fail "alpha-core 在 $TARGET 下编译失败（检查是否引入了非 wasm 兼容依赖）"
 ok "alpha-core wasm32 编译通过"
 
-# 2) packages/core 默认依赖黑名单扫描
-echo "--- [2/3] packages/core 依赖黑名单扫描"
+# 2) alpha-wasm-analyzer wasm32 构建
+echo "--- [2/4] alpha-wasm-analyzer @ $TARGET"
+cargo build --target "$TARGET" -p alpha-wasm-analyzer \
+    || fail "alpha-wasm-analyzer 在 $TARGET 下构建失败（等价于 cargo wasm-build）"
+ok "alpha-wasm-analyzer wasm32 构建通过"
+
+# 3) packages/core 默认依赖黑名单扫描
+echo "--- [3/4] packages/core 依赖黑名单扫描"
 FORBIDDEN='^(tokio|reqwest|sqlx|redis|tonic|native-tls|rustls|notify|directories|dirs)$'
 VIOLATIONS=$(sed -n '/^\[dependencies\]/,/^\[/p' packages/core/Cargo.toml \
     | grep -oE '^[a-zA-Z0-9_-]+' | grep -E "$FORBIDDEN" || true)
@@ -47,8 +54,8 @@ if [ -n "$VIOLATIONS" ]; then
 fi
 ok "packages/core 默认依赖不含平台独占库"
 
-# 3) alpha-protocols wasm32 现状（informational，已知差距）
-echo "--- [3/3] alpha-protocols @ $TARGET（informational）"
+# 4) alpha-protocols wasm32 现状（informational，已知差距）
+echo "--- [4/4] alpha-protocols @ $TARGET（informational）"
 if cargo check --target "$TARGET" -p alpha-protocols --features alpha-core/wasm >/dev/null 2>&1; then
     ok "alpha-protocols wasm32 编译通过（已知差距已消除，请更新设计文档 §5）"
 else

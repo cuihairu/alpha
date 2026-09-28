@@ -33,7 +33,7 @@
 
 ## 🌍 跨平台 Rust 架构设计
 - [x] 设计统一跨平台架构（packages/、services/、web/、desktop/、mobile/）：docs/cross-platform-architecture.md v1 草案——L0 共享核心（packages/core，零平台依赖）/ L1 平台服务（storage/protocols/services，服务端专属）/ L2 平台表现（web+wasm-analyzer、desktop Tauri 1.5、mobile 预留）三层与依赖方向强制；现状盘点全部实测（core wasm32 编译通过需 --features wasm=chrono/wasmbind+uuid/js；protocols 因 tonic 默认特性拉 mio 在 wasm32 编译失败，remediation=default-features=false+grpc 模块 feature 门控，已写入差距清单）；平台适配层 trait 草案（KeyValueStore/LocalPersistence/UserNotification）；配套 scripts/check-cross-platform.sh 落地强制检查（wasm32 下 core 编译门禁 + core 依赖黑名单扫描 tokio/reqwest/sqlx/redis/tonic 等 + protocols informational 探测，非交互可入 CI，实测通过）；余项（workspace 多目标配置、共享核心库补齐、适配层落地）映射 §7 路线图（✅ 2026-09-28）
-- [ ] 配置 Cargo workspace 支持多目标平台构建
+- [x] 配置 Cargo workspace 支持多目标平台构建：.cargo/config.toml 落地 cargo alias（cargo wasm-check = alpha-core @ wasm32 --features wasm；cargo wasm-build = alpha-wasm-analyzer @ wasm32 cdylib 构建，两 alias 实测通过）；scripts/check-cross-platform.sh 扩为四步（core wasm32 编译门禁、wasm-analyzer wasm32 构建门禁——实测通过（cdylib+rlib，6 个既有 dead_code 警告不阻塞）、core 依赖黑名单扫描、protocols informational 探测）；docs/cross-platform-architecture.md §5 目标矩阵/§6 检查清单/§7 路线图同步（CI 多目标并行矩阵留待「跨平台 CI/CD」节）。全仓门禁复跑 0 失败（✅ 2026-09-28）
 - [ ] 建立跨平台共享核心库（core、protocols、storage）
 - [ ] 实现平台适配层抽象接口（Desktop、Web、Android、iOS）
 - [ ] 定义统一的 Rust 代码规范和跨平台兼容性检查

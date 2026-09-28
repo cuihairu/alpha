@@ -1,0 +1,11 @@
+# 多目标平台构建入口（TODO「跨平台 Rust 架构设计 — 配置 Cargo workspace 支持多目标平台构建」）
+# 目标矩阵与现状见 docs/cross-platform-architecture.md §5；完整兼容性检查跑
+# scripts/check-cross-platform.sh（wasm32 编译门禁 + 依赖黑名单）。
+#
+# 常用入口：
+#   cargo wasm-check   # alpha-core @ wasm32 兼容性门禁（--features wasm: chrono/wasmbind + uuid/js）
+#   cargo wasm-build   # alpha-wasm-analyzer @ wasm32 构建（cdylib，浏览器消费其产物）
+#   cargo build        # 服务端/桌面默认目标（x86_64-unknown-linux-gnu 等）
+[alias]
+wasm-check = "check --target wasm32-unknown-unknown -p alpha-core --features wasm"
+wasm-build = "build --target wasm32-unknown-unknown -p alpha-wasm-analyzer"
