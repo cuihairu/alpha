@@ -73,8 +73,10 @@ services:
       - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
       - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
       - REDIS_URL=redis://redis:6379
-      - ALPHA__STORAGE__PERSISTENCE_ENABLED=true
-      - ALPHA__STORAGE__TIMESCALE_URL=postgres://postgres:postgres@timescaledb:5432/alpha_finance
+      # 落库开关/地址部署时可从宿主机 env 或 .env 覆写（保持既有默认：启用 + timescaledb 服务）。
+      # 注意 config-rs 键内下划线为单下划线（PERSISTENCE_ENABLED），服务间分隔符才是双下划线。
+      - ALPHA__STORAGE__PERSISTENCE_ENABLED=${ALPHA__STORAGE__PERSISTENCE_ENABLED:-true}
+      - ALPHA__STORAGE__TIMESCALE_URL=${ALPHA__STORAGE__TIMESCALE_URL:-postgres://postgres:postgres@timescaledb:5432/alpha_finance}
       - RUST_LOG=info
     depends_on:
       - timescaledb
@@ -96,8 +98,10 @@ services:
       - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
       - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
       - REDIS_URL=redis://redis:6379
-      - ALPHA__STORAGE__PERSISTENCE_ENABLED=true
-      - ALPHA__STORAGE__TIMESCALE_URL=postgres://postgres:postgres@timescaledb:5432/alpha_finance
+      # 落库开关/地址部署时可从宿主机 env 或 .env 覆写（保持既有默认：启用 + timescaledb 服务）。
+      # 注意 config-rs 键内下划线为单下划线（PERSISTENCE_ENABLED），服务间分隔符才是双下划线。
+      - ALPHA__STORAGE__PERSISTENCE_ENABLED=${ALPHA__STORAGE__PERSISTENCE_ENABLED:-true}
+      - ALPHA__STORAGE__TIMESCALE_URL=${ALPHA__STORAGE__TIMESCALE_URL:-postgres://postgres:postgres@timescaledb:5432/alpha_finance}
       # settings.rs 前缀是 ALPHA__，CLICKHOUSE_* 直通变量不会生效；显式打开 ClickHouse 后端
       - ALPHA__CLICKHOUSE__ENABLED=true
       - ALPHA__CLICKHOUSE__URL=http://admin:admin123@clickhouse:8123

@@ -24,7 +24,7 @@
 - [x] 重投递封顶：claim_stale 按 XPENDING 明细 delivery_count 封顶（含首次投递，达到上限仍 pending 即判定「毒消息」）：不再认领重投，以 invalid（reason 携带 dc/cap）交回调用方走既有 DLQ 契约（publish_dlq→quotes.dlq + ack；DLQ 发布失败不 ack，下轮扫描重试），DLQ 条目携带原 stream/条目 ID/原 payload 可回溯，storage 层另发 tracing 告警。DLQ 形态取「Redis Stream（复用解码失败→quotes.dlq 既有契约与巡检链路）+ 告警日志」：「独立 consumer group」需跨组搬运语义，「登记表」则游离于既有 DLQ 工具之外，均不如复用。N 默认 5（默认 30s 扫描间隔 ≈2 分钟重试窗口，覆盖部署重启类瞬断、坏消息不空转），data-engine ALPHA__SWEEPER__MAX_DELIVERY_COUNT、real-time-feed ALPHA_CLAIM_MAX_DELIVERY 可调。实现由 XAUTOCLAIM 换为 XPENDING(IDLE 过滤)分页+XCLAIM 精确认领（XAUTOCLAIM 无法按 delivery_count 过滤且认领即递增不可反悔；XCLAIM 保留 min-idle 门槛防并发抢锁，Nil 先 XRANGE 核实空壳再 ack 防误清他人 pending；毒消息不占认领配额、单轮扫描量设上界）。测试：封顶触发+超限停投+DLQ 留痕、未超限不误杀、毒与新鲜孤儿同轮协同不饥饿；双服务集成（pipeline_compat）与全仓门禁复跑，二进制带新 env 启动冒烟通过（✅ 2026-09-28）
 - [x] real-time-feed 显式日志级别初始化：fmt::init() 在未设 RUST_LOG 时只放行 ERROR、WARN 级兜底日志不可见 → 与 data-engine 同口径的显式初始化（默认 info，ALPHA_LOG_LEVEL 可调、RUST_LOG 兼容保留，parse_log_level 纯函数 + 单测含未知值回退 INFO）；未设 RUST_LOG 启动冒烟可见 INFO（✅ 2026-09-28）
 - [x] 持久化镜像失败重试：镜像写失败不再直接丢副本，入进程内有界 FIFO 重试缓冲（10 万条，超限丢最旧并计数），后台任务每 5s 补写 Timescale（单轮 500 条，失败条起整批按原序回队首断点续写）；内存 serving 与消费管线不受影响。边界（非完整 outbox，已在代码注释与此处注明）：缓冲重启即失、跨重启缺口不弥补；补写与直写并发可能使极少数同 (symbol, ts) 冲突回写旧值（UPSERT 最后写赢）。未启用持久化时 worker 不启动（预期降级留痕）。强持久化（跨进程 outbox/落登记表）如需再立项。单测：回队首保序、超限丢最旧计数；二进制启动冒烟（✅ 2026-09-28）
-- [ ] （新发现 2026-09-27）compose 未透传 ALPHA__STORAGE__PERSISTENCE_ENABLED/ALPHA__STORAGE__TIMESCALE_URL；部署启用落库时需补（注意 env 键内下划线为单下划线，分隔符才是双下划线）
+- [x] compose 透传持久化 env：两键自 160b73e（2026-04）即已存在（该条目「未透传」对硬编码值而言已过时），本次升级为部署可调的 ${VAR:-默认值} 形式——默认保持既有行为（启用 + timescaledb 服务），宿主机 env/.env 可覆写开关与地址；docker compose config 验证默认渲染与宿主机覆写双向生效，键内单下划线规则就地注释（✅ 2026-09-28）
 
 ### P3 补对外链路
 - [ ] api-gateway 真实反代 data-engine/real-time-feed（当前 health/proxy 全是 mock）
