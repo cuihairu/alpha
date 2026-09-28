@@ -225,14 +225,28 @@ impl RedisStreamQueue {
         Ok(result)
     }
 
-    /// 周期兜底：用 XAUTOCLAIM 认领组内闲置超过 `min_idle_ms` 的 pending 条目
-    /// （典型场景：消费端在「已投递、未 ack」之间崩溃，消息滞留 PEL 永不清理）。
+    /// 周期兜底：认领组内闲置超过 `min_idle_ms` 的 pending 条目（典型场景：消费端在
+    /// 「已投递、未 ack」之间崩溃，消息滞留 PEL 永不清理），并按投递次数封顶：
     ///
-    /// 与「解码失败 → DLQ」是两条独立路径：本方法只负责把孤儿消息重新交付给调用者，
-    /// 返回的 `invalid` 条目（认领后发现解码失败）仍由消费者按既有 DLQ 契约处置。
-    /// 条目本体已被 XDEL 删除的 pending 项会被直接 ack 清理（无可重处理内容）。
+    /// * 投递预算：`max_delivery_count` 为单条消息累计投递次数（含首次投递）上限，
+    ///   按 XPENDING 明细行的 delivery_count 判定。达到上限仍未被 ack 的条目判定为
+    ///   「毒消息」：不再认领重投，而是作为 `invalid`（reason 标明 delivery_count 与
+    ///   cap）交回调用者按既有 DLQ 契约处置（publish_dlq + ack），杜绝反复处理失败的
+    ///   消息被无限认领重放。DLQ 发布失败时调用者不 ack，条目留在 PEL，下一轮扫描
+    ///   会再次尝试转 DLQ（毒消息不占认领配额，扫描分页越过，单轮扫描总量设上界）。
+    /// * 认领配额：`count` 为单轮最多认领重投的条目数（毒消息不计入）。
     ///
-    /// 需要 Redis ≥ 6.2；服务端不支持时返回 StorageError，调用方按需降级。
+    /// 与「解码失败 → DLQ」仍是两条独立路径：本方法把孤儿消息重新交付给调用者，
+    /// 认领后发现解码失败的条目同样走 invalid 契约。条目本体已被 XDEL 删除的
+    /// pending 项会被直接 ack 清理（无可重处理内容）。
+    ///
+    /// 实现：XPENDING(IDLE 过滤) 分页扫描 + 按条目 XCLAIM 精确认领（此前为 XAUTOCLAIM，
+    /// 但它无法按 delivery_count 过滤，认领即递增计数、无法反悔）。XCLAIM 保留
+    /// min-idle 门槛避免与并发认领者竞争；应答中的 Nil 先核实条目确实不存在（XDEL
+    /// 空壳）才 ack，竞争失败（条目仍在、已归他人）的条目不动。
+    ///
+    /// 需要 Redis ≥ 6.2（XPENDING IDLE 过滤 / 排他区间）；服务端不支持时返回
+    /// StorageError，调用方按需降级。
     pub async fn claim_stale(
         &self,
         stream: &str,
@@ -240,64 +254,198 @@ impl RedisStreamQueue {
         consumer: &str,
         min_idle_ms: u64,
         count: usize,
+        max_delivery_count: u32,
     ) -> AlphaResult<GroupRead> {
         let mut conn = self.get_conn().await?;
-        let reply: redis::Value = redis::cmd("XAUTOCLAIM")
-            .arg(stream)
-            .arg(group)
-            .arg(consumer)
-            .arg(min_idle_ms)
-            .arg("0-0")
-            .arg("COUNT")
-            .arg(count)
-            .query_async(&mut conn)
-            .await
-            .map_err(|e| AlphaError::StorageError(format!("redis XAUTOCLAIM failed: {e}")))?;
 
-        let mut result = GroupRead::default();
-        // RESP2 应答：[next_cursor, entries]（6.2）或 [next_cursor, entries, deleted]（7.0+）。
-        // entries 中已删除的条目以 [id, nil] 形式出现（7.0+ 也会汇总在第三段 deleted 里）。
-        let entries = match &reply {
-            redis::Value::Bulk(items) if items.len() >= 2 => &items[1],
-            _ => return Ok(result),
-        };
-        let entry_items = match entries {
-            redis::Value::Bulk(items) => items,
-            _ => return Ok(result),
-        };
+        // 1) XPENDING 明细分页：收集 idle ≥ min_idle 的可认领条目与毒消息。
+        //    排他起点逐条推进，毒消息不阻塞后续条目的认领配额。
+        let page_size = count.clamp(16, 1000);
+        let max_scan = count.saturating_mul(10).max(128);
+        let mut scanned = 0usize;
+        let mut cursor = "-".to_string();
+        let mut reclaimable: Vec<String> = Vec::new();
+        let mut poisoned: Vec<(String, u64)> = Vec::new();
 
-        for entry in entry_items {
-            let (id, field_values) = match entry {
-                redis::Value::Bulk(pair) if pair.len() == 2 => match &pair[0] {
-                    redis::Value::Data(bytes) => {
-                        let id = String::from_utf8_lossy(bytes).to_string();
-                        (id, &pair[1])
+        while reclaimable.len() < count && scanned < max_scan {
+            let rows =
+                Self::pending_rows(&mut conn, stream, group, min_idle_ms, &cursor, page_size)
+                    .await?;
+            if rows.is_empty() {
+                break;
+            }
+            let page_len = rows.len();
+            for (id, delivery_count) in rows {
+                scanned += 1;
+                cursor = format!("({id}"); // 排他区间：下一页从该条目之后继续
+                if delivery_count >= u64::from(max_delivery_count) {
+                    poisoned.push((id, delivery_count));
+                } else {
+                    reclaimable.push(id);
+                    if reclaimable.len() >= count {
+                        break;
                     }
-                    _ => continue,
-                },
-                _ => continue,
-            };
-
-            match field_values {
-                // 条目已被 XDEL：只剩 PEL 空壳，直接 ack 清理，避免空壳继续滞留
-                redis::Value::Nil => {
-                    self.ack(stream, group, &id).await?;
                 }
-                redis::Value::Bulk(flat) => {
-                    let field_pairs = flat
-                        .chunks_exact(2)
-                        .filter_map(|pair| {
-                            let key = redis::from_redis_value::<String>(&pair[0]).ok()?;
-                            let value = redis::from_redis_value::<String>(&pair[1]).ok()?;
-                            Some((key, value))
-                        })
-                        .collect::<Vec<_>>();
-                    Self::push_decoded(stream, id, field_pairs, &mut result);
-                }
-                _ => continue,
+            }
+            if page_len < page_size {
+                break;
             }
         }
+
+        // 2) XCLAIM 精确认领预算内条目（min-idle 再次校验，防止并发认领者竞争）
+        let mut result = GroupRead::default();
+        if !reclaimable.is_empty() {
+            let mut cmd = redis::cmd("XCLAIM");
+            cmd.arg(stream).arg(group).arg(consumer).arg(min_idle_ms);
+            for id in &reclaimable {
+                cmd.arg(id);
+            }
+            let reply: redis::Value = cmd
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| AlphaError::StorageError(format!("redis XCLAIM failed: {e}")))?;
+
+            let items = match reply {
+                redis::Value::Bulk(items) => items,
+                _ => return Ok(result),
+            };
+            for entry in items {
+                let pair = match entry {
+                    redis::Value::Bulk(pair) if pair.len() == 2 => pair,
+                    _ => continue,
+                };
+                let id = match &pair[0] {
+                    redis::Value::Data(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                    _ => continue,
+                };
+
+                match &pair[1] {
+                    // Nil：仅当条目本体确已删除（XDEL 空壳）才 ack 清理；
+                    // min-idle 竞争失败（条目仍在、已归其他消费者）时 ack 会
+                    // 破坏他人的 pending 状态，必须先核实。
+                    redis::Value::Nil => {
+                        if self.entry_fields(&mut conn, stream, &id).await?.is_empty() {
+                            self.ack(stream, group, &id).await?;
+                        }
+                    }
+                    redis::Value::Bulk(flat) => {
+                        let field_pairs = flat
+                            .chunks_exact(2)
+                            .filter_map(|pair| {
+                                let key = redis::from_redis_value::<String>(&pair[0]).ok()?;
+                                let value = redis::from_redis_value::<String>(&pair[1]).ok()?;
+                                Some((key, value))
+                            })
+                            .collect::<Vec<_>>();
+                        Self::push_decoded(stream, id, field_pairs, &mut result);
+                    }
+                    _ => continue,
+                }
+            }
+        }
+
+        // 3) 毒消息：不认领、不重投；带原因转 invalid 交调用者按 DLQ 契约处置。
+        //    条目本体若已被 XDEL 则只剩 PEL 空壳，直接 ack 清理。
+        for (id, delivery_count) in poisoned {
+            let fields = self.entry_fields(&mut conn, stream, &id).await?;
+            if fields.is_empty() {
+                self.ack(stream, group, &id).await?;
+                continue;
+            }
+            let fields: BTreeMap<String, String> = fields.into_iter().collect();
+            tracing::warn!(
+                stream = %stream,
+                group = %group,
+                entry_id = %id,
+                delivery_count,
+                cap = max_delivery_count,
+                "poison message: delivery count reached cap, redelivery stopped; routing to DLQ"
+            );
+            result.invalid.push(InvalidMessage {
+                id,
+                stream: stream.to_string(),
+                reason: format!(
+                    "delivery_count {delivery_count} reached cap {max_delivery_count} (poison message; redelivery stopped)"
+                ),
+                raw_payload: fields.get("payload").cloned(),
+                fields,
+            });
+        }
+
         Ok(result)
+    }
+
+    /// XPENDING 明细单页：idle ≥ `min_idle_ms` 的 pending 行（条目 ID + delivery_count）。
+    async fn pending_rows(
+        conn: &mut redis::aio::ConnectionManager,
+        stream: &str,
+        group: &str,
+        min_idle_ms: u64,
+        start: &str,
+        count: usize,
+    ) -> AlphaResult<Vec<(String, u64)>> {
+        let reply: redis::Value = redis::cmd("XPENDING")
+            .arg(stream)
+            .arg(group)
+            .arg("IDLE")
+            .arg(min_idle_ms)
+            .arg(start)
+            .arg("+")
+            // 注意：XPENDING 扩展形态的 count 是位置参数，不带 COUNT 关键字
+            // （与 XRANGE/XAUTOCLAIM 的 KEYWORD count 语法不同）
+            .arg(count)
+            .query_async(conn)
+            .await
+            .map_err(|e| AlphaError::StorageError(format!("redis XPENDING failed: {e}")))?;
+
+        let rows = match reply {
+            redis::Value::Bulk(rows) => rows,
+            _ => return Ok(Vec::new()),
+        };
+        // 明细行：[id, consumer, idle_ms, delivery_count]
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| match row {
+                redis::Value::Bulk(cells) if cells.len() >= 4 => {
+                    let id = match &cells[0] {
+                        redis::Value::Data(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                        _ => return None,
+                    };
+                    let delivery_count = match &cells[3] {
+                        redis::Value::Int(n) => *n as u64,
+                        redis::Value::Data(bytes) => String::from_utf8_lossy(bytes).parse().ok()?,
+                        _ => return None,
+                    };
+                    Some((id, delivery_count))
+                }
+                _ => None,
+            })
+            .collect())
+    }
+
+    /// 读取单条条目的全部字段（XRANGE 闭区间查询）；条目不存在时返回空。
+    async fn entry_fields(
+        &self,
+        conn: &mut redis::aio::ConnectionManager,
+        stream: &str,
+        id: &str,
+    ) -> AlphaResult<Vec<(String, String)>> {
+        let reply: StreamRangeReply = redis::cmd("XRANGE")
+            .arg(stream)
+            .arg(id)
+            .arg(id)
+            .query_async(conn)
+            .await
+            .map_err(|e| AlphaError::StorageError(format!("redis XRANGE failed: {e}")))?;
+        Ok(reply
+            .ids
+            .into_iter()
+            .flat_map(|entry| {
+                entry.map.into_iter().filter_map(|(k, v)| {
+                    redis::from_redis_value::<String>(&v).ok().map(|vv| (k, vv))
+                })
+            })
+            .collect())
     }
 
     /// 单条条目解码入库：可解码进 messages，失败进 invalid（不中断批次）。

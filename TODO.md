@@ -21,7 +21,7 @@
 - [x] normalized 层去重（payload_hash）：data-engine 写侧按原始 envelope 的 payload_hash 判重，重复投递（XAUTOCLAIM 重放、上游重复发布）不重复写内存/转发但仍 ack（防 PEL 重放）。窗口边界：进程内 FIFO、65536 条、重启清零；跨重启重复由 Timescale (symbol,ts) UPSERT 幂等兜底；指纹在「内存写+转发」成功后才记录，写失败重试不会被去重吞掉。实测：重复投递/sweeper 重放均只落地一条 normalized、PEL 清零（✅ 2026-09-28）
 - [x] MemTable 全量重建热点：实测全量重建 ~25-35µs/点（600 点 17.7ms/次、2.4 万点 850ms/次、48 万点 11.7s/次，随存量线性增长且在消费循环内同步执行）→ 写路径移除全量重建（/query 每次执行前自刷新、/stocks 与 /indicators 直读内存时序，语义不变，双查回归 200）；顺带修复 register_table 撞名潜伏 bug（datafusion 35 同名表报错：第二次 refresh 起必失败，/query 第二次 500 → 先 deregister 再 register）（✅ 2026-09-28）
 - [x] 内存时序 add_point 重写：单点改按 ts 二分有序插入 + 同 (symbol,ts) UPSERT 覆盖（最后写赢，与 Timescale ON CONFLICT 口径一致）；批量改 add_points（按 symbol 分组一次排序+一次去重），灌入从逐条全排序 O(n² log n)（48 万点分钟级）降至 48 万点 6.4s（剩余耗时为逐点 JSON metadata 构造，与排序无关）。data 恒有序 + ts 唯一不变式，/query、/stocks、/indicators 读路径与写侧去重窗口行为零改动。单测：乱序批量灌入有序、重复 ts 去重（单点/批内/批与存量）、写后立即可查；进程级 E2E 三读路径复跑通过（✅ 2026-09-28）
-- [ ] （新发现 2026-09-27）重投递无上限：claim_stale 未设 delivery-count 封顶，反复处理失败的消息会被无限认领重放；应按 XPENDING 的 delivery_count 封顶（超 N 次转 DLQ）
+- [x] 重投递封顶：claim_stale 按 XPENDING 明细 delivery_count 封顶（含首次投递，达到上限仍 pending 即判定「毒消息」）：不再认领重投，以 invalid（reason 携带 dc/cap）交回调用方走既有 DLQ 契约（publish_dlq→quotes.dlq + ack；DLQ 发布失败不 ack，下轮扫描重试），DLQ 条目携带原 stream/条目 ID/原 payload 可回溯，storage 层另发 tracing 告警。DLQ 形态取「Redis Stream（复用解码失败→quotes.dlq 既有契约与巡检链路）+ 告警日志」：「独立 consumer group」需跨组搬运语义，「登记表」则游离于既有 DLQ 工具之外，均不如复用。N 默认 5（默认 30s 扫描间隔 ≈2 分钟重试窗口，覆盖部署重启类瞬断、坏消息不空转），data-engine ALPHA__SWEEPER__MAX_DELIVERY_COUNT、real-time-feed ALPHA_CLAIM_MAX_DELIVERY 可调。实现由 XAUTOCLAIM 换为 XPENDING(IDLE 过滤)分页+XCLAIM 精确认领（XAUTOCLAIM 无法按 delivery_count 过滤且认领即递增不可反悔；XCLAIM 保留 min-idle 门槛防并发抢锁，Nil 先 XRANGE 核实空壳再 ack 防误清他人 pending；毒消息不占认领配额、单轮扫描量设上界）。测试：封顶触发+超限停投+DLQ 留痕、未超限不误杀、毒与新鲜孤儿同轮协同不饥饿；双服务集成（pipeline_compat）与全仓门禁复跑，二进制带新 env 启动冒烟通过（✅ 2026-09-28）
 - [ ] （新发现 2026-09-27）real-time-feed 用 tracing_subscriber::fmt::init()，未设 RUST_LOG 时 WARN 级兜底日志不可见（E2E 中隔离已发生但日志为空）；改为与 data-engine 一致的显式 level 初始化
 - [ ] （新发现 2026-09-27）持久化镜像失败仅告警不重试：Timescale 短暂不可用期间的写入会丢持久化副本（内存 serving 不受影响）；如需强持久化需引入重试/缓冲（outbox 类方案），当前定位为 best-effort 镜像
 - [ ] （新发现 2026-09-27）compose 未透传 ALPHA__STORAGE__PERSISTENCE_ENABLED/ALPHA__STORAGE__TIMESCALE_URL；部署启用落库时需补（注意 env 键内下划线为单下划线，分隔符才是双下划线）
@@ -165,4 +165,4 @@
 - [ ] 配置 iOS IPA 签名和 TestFlight/App Store 发布
 - [ ] 构建自动更新和增量更新机制
 - [ ] 开发平台合规性检查和适配（隐私政策、权限申请）
-- [ ] （未来项）消息投递/重送交付计数上限：避免单条消息在 PEL 中不断重试重放导致无限循环，建设投递计数上限与毒串消息机制，与 `claim_stale` 兜底路径协同防止资源耗尽
+- [x] （未来项 → 已落地 2026-09-28，见 P2「重投递封顶」条）消息投递/重送交付计数上限：claim_stale 按 delivery_count 封顶（默认 5，env 可调），超限毒消息不再重投、转 quotes.dlq 留痕并 ack 停投，与兜底扫描路径协同防止资源耗尽；毒串消息的完整运营机制（批量重放工具、DLQ 内容级再处理）留待后续

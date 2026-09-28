@@ -16,7 +16,7 @@ pub struct AppConfig {
     pub sweeper: SweeperConfig,
 }
 
-/// 消费组孤儿 pending 周期兜底（XAUTOCLAIM）配置
+/// 消费组孤儿 pending 周期兜底（claim_stale：XPENDING 扫描 + XCLAIM 认领）配置
 #[derive(Debug, Clone, Deserialize)]
 pub struct SweeperConfig {
     pub enabled: bool,
@@ -24,6 +24,10 @@ pub struct SweeperConfig {
     pub min_idle_ms: u64,
     /// 兜底扫描间隔（秒）
     pub interval_secs: u64,
+    /// 单条消息累计投递次数封顶（含首次投递）：达到上限仍 pending 即判定「毒消息」，
+    /// sweeper 不再认领重投，转 DLQ 契约隔离（publish_dlq + ack）。默认 5：按默认
+    /// 30s 扫描间隔约 2 分钟重试窗口，足以覆盖部署重启类瞬断，又不会让坏消息无限空转。
+    pub max_delivery_count: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,6 +116,8 @@ impl AppConfig {
             .expect("failed to set sweeper.min_idle_ms default")
             .set_default("sweeper.interval_secs", 30_u64)
             .expect("failed to set sweeper.interval_secs default")
+            .set_default("sweeper.max_delivery_count", 5_u64)
+            .expect("failed to set sweeper.max_delivery_count default")
     }
 
     fn load_from_builder(builder: ConfigBuilder<DefaultState>) -> Result<Self, ConfigError> {
@@ -162,6 +168,7 @@ mod tests {
         assert!(cfg.sweeper.enabled);
         assert_eq!(cfg.sweeper.min_idle_ms, 30_000);
         assert_eq!(cfg.sweeper.interval_secs, 30);
+        assert_eq!(cfg.sweeper.max_delivery_count, 5);
     }
 
     #[test]

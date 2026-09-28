@@ -350,6 +350,7 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
 
     let sweeper_enabled = state.config.sweeper.enabled;
     let min_idle_ms = state.config.sweeper.min_idle_ms;
+    let max_delivery_count = state.config.sweeper.max_delivery_count;
     let sweep_interval = StdDuration::from_secs(state.config.sweeper.interval_secs.max(1));
     let sweeper_state = state.clone();
     let sweeper_queue = queue.clone();
@@ -374,8 +375,9 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
         }
     });
 
-    // 周期 XAUTOCLAIM 兜底：消费端崩溃遗留的「已投递、未 ack」孤儿 pending 由独立的
-    // sweeper 认领后重放，处理路径与实时消费完全一致（注意：这与解码失败 → DLQ 是
+    // 周期兜底：消费端崩溃遗留的「已投递、未 ack」孤儿 pending 由独立的 sweeper 认领后
+    // 重放，处理路径与实时消费完全一致；投递次数达到 sweeper.max_delivery_count 仍
+    // pending 的「毒消息」不再重投，走 DLQ 契约隔离（注意：这与解码失败 → DLQ 是
     // 两条不同路径，后者发生在读取时，见 quarantine_invalid/process_normalizer_message）。
     if sweeper_enabled {
         let sweeper_consumer = format!("de-sweep-{}", uuid::Uuid::new_v4());
@@ -394,6 +396,7 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
                         &sweeper_consumer,
                         min_idle_ms,
                         100,
+                        max_delivery_count,
                     )
                     .await
                 {
@@ -406,8 +409,8 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
                             process_normalizer_message(&sweeper_state, &sweeper_queue, &message).await;
                         }
                     }
-                    // Redis < 6.2 无 XAUTOCLAIM：兜底不可用属预期降级，debug 级避免刷屏
-                    Err(err) => tracing::debug!("XAUTOCLAIM sweep skipped: {}", err),
+                    // Redis < 6.2 无 XPENDING IDLE/XCLAIM 认领：兜底不可用属预期降级，debug 级避免刷屏
+                    Err(err) => tracing::debug!("claim_stale sweep skipped: {}", err),
                 }
             }
         });
@@ -419,14 +422,14 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
 /// 处理一条 quotes.raw 消息：规范化 → 去重判定 → 入内存时序 → 转发 normalized → ack。
 ///
 /// 去重（normalized 层写侧）：按原始 envelope 的 payload_hash 判重，窗口内重复的
-/// 重放（XAUTOCLAIM 重投递、上游重复发布）不重复写内存/转发，但仍须 ack（否则会
+/// 重放（claim_stale 兜底重投递、上游重复发布）不重复写内存/转发，但仍须 ack（否则会
 /// 滞留 PEL 被 sweeper 无限重放）。指纹在「内存写 + 转发」都成功后才记录——提前
 /// 记录会让写失败的重试被自己的去重窗口吞掉。窗口边界：进程内 FIFO、容量
 /// PAYLOAD_DEDUP_WINDOW 条、重启清零；跨重启的重复由 Timescale 层 (symbol,ts)
 /// UPSERT 幂等兜底。判重是内容级的：同窗口内逐字段全同的新 tick（实践中采集端
 /// payload 带时间戳，几乎不可能）会被当作重放跳过，属已接受的取舍。
 ///
-/// 写入/转发失败时不 ack，消息留待周期 XAUTOCLAIM 兜底重放；
+/// 写入/转发失败时不 ack，消息留待周期 claim_stale 兜底重放；
 /// payload 无法规范化（缺字段等）则直接 ack 跳过——这与 stream 条目解码失败的
 /// DLQ 隔离路径（quarantine_invalid）是不同层面的两回事。
 ///
@@ -451,7 +454,7 @@ async fn process_normalizer_message(state: &Arc<AppState>, queue: &RedisStreamQu
 
             if let Err(err) = state.write_normalized(&market_data).await {
                 tracing::warn!("Failed to write normalized quote to storage: {}", err);
-                return; // 不 ack：留待 XAUTOCLAIM 兜底重放；指纹未记录，重试不会被去重吞掉
+                return; // 不 ack：留待 claim_stale 兜底重放；指纹未记录，重试不会被去重吞掉
             }
 
             let normalized = StreamEnvelope::new(
@@ -464,7 +467,7 @@ async fn process_normalizer_message(state: &Arc<AppState>, queue: &RedisStreamQu
 
             if let Err(err) = queue.publish(NORMALIZED_QUOTES_STREAM, &normalized).await {
                 tracing::warn!("Failed to publish normalized quote: {}", err);
-                return; // 不 ack：留待 XAUTOCLAIM 兜底重放；指纹未记录，重试不会被去重吞掉
+                return; // 不 ack：留待 claim_stale 兜底重放；指纹未记录，重试不会被去重吞掉
             }
 
             state.record_payload_hash(&payload_hash);

@@ -353,7 +353,7 @@ async fn orphaned_pending_message_is_claimed_and_reprocessed() {
 
     // 闲置未过阈值不认领
     let not_yet = queue
-        .claim_stale(&stream, "real-time-feed", "rtf-sweep", 60_000, 10)
+        .claim_stale(&stream, "real-time-feed", "rtf-sweep", 60_000, 10, 5)
         .await
         .unwrap();
     assert!(not_yet.is_empty());
@@ -362,7 +362,7 @@ async fn orphaned_pending_message_is_claimed_and_reprocessed() {
     // 闲置超过阈值：认领后按既有转换路径重放（合法行情不被误入 DLQ），随后 ack 清零
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let claimed = queue
-        .claim_stale(&stream, "real-time-feed", "rtf-sweep", 1000, 10)
+        .claim_stale(&stream, "real-time-feed", "rtf-sweep", 1000, 10, 5)
         .await
         .unwrap();
     assert_eq!(claimed.messages.len(), 1, "orphaned message must be reclaimed");

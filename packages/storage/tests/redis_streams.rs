@@ -305,7 +305,7 @@ async fn claim_stale_reclaims_orphaned_pending_messages() {
 
     // 闲置时长未过阈值：不应认领
     let not_yet = queue
-        .claim_stale(&stream, "grp", "sweeper", 60_000, 10)
+        .claim_stale(&stream, "grp", "sweeper", 60_000, 10, 10)
         .await
         .unwrap();
     assert!(not_yet.messages.is_empty(), "entries below min idle must not be claimed");
@@ -314,7 +314,7 @@ async fn claim_stale_reclaims_orphaned_pending_messages() {
     // 闲置超过阈值（消息投递至今已 >1s）：认领并重新交付
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let claimed = queue
-        .claim_stale(&stream, "grp", "sweeper", 1000, 10)
+        .claim_stale(&stream, "grp", "sweeper", 1000, 10, 10)
         .await
         .unwrap();
     assert_eq!(claimed.messages.len(), 2, "orphaned entries must be reclaimed");
@@ -362,7 +362,7 @@ async fn claim_stale_acks_entries_deleted_from_stream() {
     assert_eq!(deleted, 1);
 
     let claimed = queue
-        .claim_stale(&stream, "grp", "sweeper", 0, 10)
+        .claim_stale(&stream, "grp", "sweeper", 0, 10, 10)
         .await
         .unwrap();
     assert!(claimed.messages.is_empty(), "deleted entry has nothing to reprocess");
@@ -370,4 +370,170 @@ async fn claim_stale_acks_entries_deleted_from_stream() {
     assert_eq!(pending_count(&url, &stream, "grp").await, 0, "PEL shell must be acked away");
 
     cleanup(&url, &[&stream]).await;
+}
+
+/// 投递次数封顶：反复处理失败的消息经多轮兜底重投达到上限后判定为「毒消息」——
+/// 不再认领重投，以 invalid（reason 携带 delivery_count 与 cap）交回调用者按既有
+/// DLQ 契约处置（publish_dlq + ack），此后永不再现。
+#[tokio::test]
+async fn claim_stale_caps_redelivery_and_routes_poison_to_dlq() {
+    let Some((queue, url)) = test_queue() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+
+    let stream = unique_stream("cap");
+    let dlq_stream = unique_stream("cap-dlq");
+    queue.ensure_consumer_group(&stream, "grp").await.unwrap();
+
+    // 首次投递（delivery_count = 1），读走后不 ack 模拟反复处理失败
+    queue.publish(&stream, &sample_envelope(&stream, "000001", 10.0)).await.unwrap();
+    let first = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    assert_eq!(first.messages.len(), 1);
+
+    // cap=3：前两轮兜底重投照常（未达上限不误杀）
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let sweep1 = queue
+        .claim_stale(&stream, "grp", "sweeper", 1000, 10, 3)
+        .await
+        .unwrap();
+    assert_eq!(sweep1.messages.len(), 1, "delivery below cap must still be reclaimed");
+    assert!(sweep1.invalid.is_empty());
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let sweep2 = queue
+        .claim_stale(&stream, "grp", "sweeper", 1000, 10, 3)
+        .await
+        .unwrap();
+    assert_eq!(sweep2.messages.len(), 1);
+    assert!(sweep2.invalid.is_empty());
+
+    // 第三轮：delivery_count 已达 cap（=3），不再认领重投，转 invalid
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let sweep3 = queue
+        .claim_stale(&stream, "grp", "sweeper", 1000, 10, 3)
+        .await
+        .unwrap();
+    assert!(sweep3.messages.is_empty(), "poison message must not be redelivered");
+    assert_eq!(sweep3.invalid.len(), 1);
+    let poison = &sweep3.invalid[0];
+    assert_eq!(poison.id, first.messages[0].id);
+    assert!(
+        poison.reason.contains("delivery_count") && poison.reason.contains("cap 3"),
+        "reason must carry delivery count and cap: {}",
+        poison.reason
+    );
+    assert!(
+        poison
+            .raw_payload
+            .as_deref()
+            .is_some_and(|p| p.contains("000001")),
+        "original payload must be preserved for DLQ traceability"
+    );
+    // 未 ack 前仍留 PEL（DLQ 发布失败时下轮重试的语义基础）
+    assert_eq!(pending_count(&url, &stream, "grp").await, 1);
+
+    // 调用者按既有 DLQ 契约处置：publish_dlq + ack
+    queue.publish_dlq(&dlq_stream, poison).await.unwrap();
+    queue.ack(&stream, "grp", &poison.id).await.unwrap();
+    assert_eq!(pending_count(&url, &stream, "grp").await, 0);
+
+    // DLQ 留痕：原因、原 stream/条目 ID 与原 payload 均可回溯
+    let dlq_messages = queue.read_latest(&dlq_stream, 10).await.unwrap();
+    assert_eq!(dlq_messages.len(), 1);
+    assert_eq!(dlq_messages[0].envelope.event_type, "invalid_message");
+    let payload = &dlq_messages[0].envelope.payload;
+    assert!(payload["dlq_reason"].as_str().unwrap().contains("cap 3"));
+    assert_eq!(payload["original_stream"].as_str().unwrap(), stream);
+    assert_eq!(payload["entry_id"].as_str().unwrap(), poison.id);
+    assert!(payload["original_payload"].as_str().unwrap().contains("000001"));
+
+    // 超限 ack 后不再认领：再次兜底扫描无任何产出
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let sweep4 = queue
+        .claim_stale(&stream, "grp", "sweeper", 1000, 10, 3)
+        .await
+        .unwrap();
+    assert!(sweep4.is_empty(), "acked poison message must never resurface");
+
+    cleanup(&url, &[&stream, &dlq_stream]).await;
+}
+
+/// 未达上限不误杀：投递次数低于 cap 的孤儿条目仍走正常认领重放路径。
+#[tokio::test]
+async fn claim_stale_does_not_poison_below_cap() {
+    let Some((queue, url)) = test_queue() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+
+    let stream = unique_stream("below-cap");
+    queue.ensure_consumer_group(&stream, "grp").await.unwrap();
+
+    queue.publish(&stream, &sample_envelope(&stream, "600519", 1700.0)).await.unwrap();
+    let first = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    assert_eq!(first.messages.len(), 1);
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let claimed = queue
+        .claim_stale(&stream, "grp", "sweeper", 1000, 10, 5)
+        .await
+        .unwrap();
+    assert_eq!(claimed.messages.len(), 1, "orphan below cap must be reclaimed normally");
+    assert!(claimed.invalid.is_empty());
+
+    queue.ack(&stream, "grp", &claimed.messages[0].id).await.unwrap();
+    assert_eq!(pending_count(&url, &stream, "grp").await, 0);
+
+    cleanup(&url, &[&stream]).await;
+}
+
+/// 协同：同一轮兜底扫描中，毒消息转 DLQ 契约且不阻塞其后发布的新鲜孤儿条目
+/// 的认领重放（分页扫描越过毒消息，不产生饥饿）。
+#[tokio::test]
+async fn claim_stale_sweep_handles_poison_and_fresh_orphans_together() {
+    let Some((queue, url)) = test_queue() else {
+        eprintln!("skipping: REDIS_TEST_URL not set");
+        return;
+    };
+
+    let stream = unique_stream("mixed");
+    let dlq_stream = unique_stream("mixed-dlq");
+    queue.ensure_consumer_group(&stream, "grp").await.unwrap();
+
+    // A：投递一次后经一轮兜底重投到 dc=2（恰好达 cap=2）
+    queue.publish(&stream, &sample_envelope(&stream, "000001", 10.0)).await.unwrap();
+    let batch = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    let poisoned_id = batch.messages[0].id.clone();
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let warm = queue
+        .claim_stale(&stream, "grp", "sweeper", 1000, 10, 2)
+        .await
+        .unwrap();
+    assert_eq!(warm.messages.len(), 1, "dc=1 below cap must be claimed");
+
+    // B：在 A 之后发布（条目 ID 更大，XPENDING 中排在毒消息之后），投递一次不 ack
+    queue.publish(&stream, &sample_envelope(&stream, "000002", 11.0)).await.unwrap();
+    let fresh = queue.read_group(&stream, "grp", "consumer-1", 10, 100).await.unwrap();
+    assert_eq!(fresh.messages.len(), 1);
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let swept = queue
+        .claim_stale(&stream, "grp", "sweeper", 1000, 10, 2)
+        .await
+        .unwrap();
+    // 同一轮：A（老条目，dc 达 cap）→ invalid；B（dc=1 < cap）→ 正常重放
+    assert_eq!(swept.invalid.len(), 1, "capped entry must be routed to DLQ contract");
+    assert_eq!(swept.invalid[0].id, poisoned_id);
+    assert_eq!(swept.messages.len(), 1, "fresh orphan behind a poison entry must still be claimed");
+    assert_eq!(swept.messages[0].envelope.payload["symbol"], "000002");
+    assert_eq!(pending_count(&url, &stream, "grp").await, 2);
+
+    // A 走 DLQ 契约隔离，B 重放完成后 ack：PEL 清零，DLQ 恰好一条
+    queue.publish_dlq(&dlq_stream, &swept.invalid[0]).await.unwrap();
+    queue.ack(&stream, "grp", &swept.invalid[0].id).await.unwrap();
+    queue.ack(&stream, "grp", &swept.messages[0].id).await.unwrap();
+    assert_eq!(pending_count(&url, &stream, "grp").await, 0);
+    assert_eq!(queue.read_latest(&dlq_stream, 10).await.unwrap().len(), 1);
+
+    cleanup(&url, &[&stream, &dlq_stream]).await;
 }

@@ -276,7 +276,7 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
         .await;
     let consumer = format!("rtf-{}", uuid::Uuid::new_v4());
 
-    let (min_idle_ms, sweep_secs) = claim_sweep_config();
+    let (min_idle_ms, sweep_secs, max_delivery) = claim_sweep_config();
     let sweeper_state = app_state.clone();
     let sweeper_queue = queue.clone();
 
@@ -310,9 +310,10 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
         }
     });
 
-    // 周期 XAUTOCLAIM 兜底：消费端崩溃遗留的「已投递、未 ack」孤儿 pending 由独立的
-    // sweeper 认领后重放，处理路径与实时消费完全一致。注意：这与解码失败 → DLQ 是
-    // 两条不同路径，后者发生在读取时（见 quarantine_invalid/process_realtime_message）。
+    // 周期兜底：消费端崩溃遗留的「已投递、未 ack」孤儿 pending 由独立的 sweeper 认领后
+    // 重放，处理路径与实时消费完全一致；投递次数达到封顶（ALPHA_CLAIM_MAX_DELIVERY）仍
+    // pending 的「毒消息」不再重投，走 DLQ 契约隔离。注意：这与解码失败 → DLQ 是两条
+    // 不同路径，后者发生在读取时（见 quarantine_invalid/process_realtime_message）。
     let sweeper_consumer = format!("rtf-sweep-{}", uuid::Uuid::new_v4());
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(sweep_secs.max(1)));
@@ -323,7 +324,14 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
             ticker.tick().await;
             for stream in [NORMALIZED_QUOTES_STREAM, QUOTES_STREAM] {
                 match sweeper_queue
-                    .claim_stale(stream, REALTIME_GROUP, &sweeper_consumer, min_idle_ms, 100)
+                    .claim_stale(
+                        stream,
+                        REALTIME_GROUP,
+                        &sweeper_consumer,
+                        min_idle_ms,
+                        100,
+                        max_delivery,
+                    )
                     .await
                 {
                     Ok(result) => {
@@ -339,8 +347,8 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
                             process_realtime_message(&sweeper_state, &sweeper_queue, &message).await;
                         }
                     }
-                    // Redis < 6.2 无 XAUTOCLAIM：兜底不可用属预期降级，debug 级避免刷屏
-                    Err(err) => tracing::debug!("XAUTOCLAIM sweep skipped for {}: {}", stream, err),
+                    // Redis < 6.2 无 XPENDING IDLE/XCLAIM 认领：兜底不可用属预期降级，debug 级避免刷屏
+                    Err(err) => tracing::debug!("claim_stale sweep skipped for {}: {}", stream, err),
                 }
             }
         }
@@ -349,8 +357,9 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 孤儿 pending 兜底参数（env 可调便于测试/演练；生产默认闲置 30s、每 30s 扫一轮）。
-fn claim_sweep_config() -> (u64, u64) {
+/// 孤儿 pending 兜底参数（env 可调便于测试/演练；生产默认闲置 30s、每 30s 扫一轮、
+/// 单条累计投递封顶 5 次）。
+fn claim_sweep_config() -> (u64, u64, u32) {
     let min_idle_ms = std::env::var("ALPHA_CLAIM_MIN_IDLE_MS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -359,7 +368,11 @@ fn claim_sweep_config() -> (u64, u64) {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(30);
-    (min_idle_ms, sweep_secs)
+    let max_delivery = std::env::var("ALPHA_CLAIM_MAX_DELIVERY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
+    (min_idle_ms, sweep_secs, max_delivery)
 }
 
 /// 处理一条行情 stream 消息：转换 → 广播 → ack；
