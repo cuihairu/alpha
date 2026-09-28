@@ -1,0 +1,114 @@
+# 跨平台 Rust 架构设计
+
+> 状态：v1 草案（2026-09-28），对应 TODO「🌍 跨平台 Rust 架构设计」首项「设计统一跨平台架构」。
+> 文中编译结论均为本机实测（wasm32-unknown-unknown target），非纸面推断。
+
+## 1. 目标与范围
+
+一套 Rust 工作区同时支撑四类交付面：
+
+| 交付面 | 目录 | 形态 |
+|---|---|---|
+| 服务端 | `services/*` | Axum/gRPC 微服务（Linux 容器） |
+| Web | `web/` + `wasm-analyzer/` | 静态前端 + Rust→WASM 分析引擎 |
+| 桌面 | `desktop/` | Tauri 1.5（Windows/macOS/Linux） |
+| 移动 | `mobile/`（规划中，尚不存在） | Kotlin/Swift 壳 + Rust 核心库（JNI/UniFFI） |
+
+原则：**业务逻辑下沉共享库，平台能力走适配层**。任何一层不反向依赖交付面。
+
+## 2. 现状盘点（实测）
+
+| 模块 | 技术栈 | 平台约束 | 现状 |
+|---|---|---|---|
+| `packages/core` | serde/uuid/chrono + 纯计算（indicators/analytics/trading） | 无 tokio/reqwest/sqlx/redis/tonic | **wasm32 编译通过**（需 `--features wasm`：`chrono/wasmbind` + `uuid/js`，见 `packages/core/Cargo.toml:33`）；`errors.rs` 已有 `cfg(target_arch = "wasm32")` 分支 |
+| `packages/protocols` | tonic/prost + serde | tonic 默认特性拉 tokio/net | **wasm32 编译失败**（mio 不支持 wasm；见 §5 差距） |
+| `packages/storage` | sqlx/redis/clickhouse + DataFusion | 服务端专属 | 按 L1 设计即不追求 wasm |
+| `services/*` | Axum + Tokio + DataFusion | 服务端专属 | 已落地（P0–P3 行动清单全绿） |
+| `wasm-analyzer` | wasm-bindgen + Arrow | 浏览器 | 已有 arrow_adapter/streaming/websocket/worker 模块 |
+| `web/` | 原生 JS + duckdb-wasm vendor + WebSocket | 浏览器 | 已接 real-time-feed WS 与 data-engine REST（见 TODO P3-2） |
+| `desktop/` | Tauri 1.5（fs/dialog/tray/notification/global-shortcut 特性） | 桌面三 OS | 已有壳；gate 中以 `--exclude alpha-desktop` 排除 |
+| `mobile/` | — | — | **不存在**，本设计预留接口 |
+
+## 3. 统一分层架构
+
+```
+┌────────────────────────── L2 平台表现层 ──────────────────────────┐
+│  web/ (JS + wasm-analyzer)   desktop/ (Tauri)   mobile/ (规划)     │
+│  只做 UI/交互/平台 API 调用，业务计算一律调 L0                        │
+├─────────────────────────── L1 平台服务层 ─────────────────────────┤
+│  packages/storage (时序/缓存/DLQ)   packages/protocols (传输协议)   │
+│  services/* (data-engine / real-time-feed / api-gateway / collector)│
+│  服务端专属；mobile 不直连 storage，经 L2 → REST/WS → services       │
+├─────────────────────────── L0 共享核心层 ─────────────────────────┤
+│  packages/core：模型(models)、指标(indicators)、分析(analytics)、    │
+│  交易(trading)、错误(errors) —— 零平台依赖，wasm32 必须编译通过      │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+依赖方向强制：L2 → L0/L1（按平台取用）、L1 → L0、**禁止 L0 → L1/L2**。
+桌面 Tauri 与未来 mobile 的 Rust 侧只允许依赖 L0（+ 经 feature 门控的 L1 子集）。
+
+## 4. 平台适配层接口草案
+
+平台差异（存储键值、HTTP、文件系统、通知）收敛为 `packages/core` 内的 trait 面，
+各交付面给出实现；Rust 业务代码面向 trait，不直接摸平台 API：
+
+```rust
+// packages/core/platform.rs（草案，随 mobile 立项时落地）
+pub trait KeyValueStore {            // 桌面: 文件/SQLite；Web: IndexedDB(wasm 侧)；
+    async fn get(&self, key: &str) -> Option<Vec<u8>>;   // 服务端: Redis
+    async fn set(&self, key: &str, value: &[u8]);
+}
+
+pub trait LocalPersistence {         // 桌面: 原生 fs；mobile: 应用沙箱目录
+    async fn export_file(&self, name: &str, data: &[u8]) -> Result<(), AlphaError>;
+}
+
+pub trait UserNotification {         // 桌面: Tauri notification；mobile: 系统推送
+    fn notify(&self, title: &str, body: &str);
+}
+```
+
+约束：trait 方法均为 async 且不带平台类型；实现放各交付面 crate
+（如 `desktop/src/platform.rs`），通过依赖注入进入业务代码。
+
+## 5. 构建目标矩阵与兼容性差距
+
+| Crate | x86_64 linux | wasm32-unknown-unknown | 桌面三 OS | android/ios |
+|---|---|---|---|---|
+| alpha-core | ✅ | ✅（`--features wasm`，实测） | ✅（同 core 约束） | 规划 |
+| alpha-protocols | ✅ | ❌ 已知差距 | ✅ | 规划 |
+| alpha-storage / services | ✅ | 不适用（L1） | 不适用 | 不适用 |
+| wasm-analyzer | — | ✅（其主目标） | — | — |
+
+**已知差距与 remediation（alpha-protocols）**：tonic 默认特性（`transport`）拉入
+tokio/net → mio，wasm32 编译失败（实测报错 `This wasm target is unsupported by mio`）。
+计划：`tonic = { default-features = false, features = ["prost"] }`，把
+`grpc.rs`（服务端传输）挂到 `grpc` feature 门控之后，`rest.rs`/`websocket.rs`
+的 serde 契约保持无门控共享；`packages/protocols` 的 wasm 目标检查在差距消除后
+并入 `scripts/check-cross-platform.sh` 门禁（脚本已预留 informational 探测）。
+
+## 6. 代码规范与兼容性检查
+
+强制检查 = `scripts/check-cross-platform.sh`（本次新增，非交互可入 CI）：
+
+1. `cargo check --target wasm32-unknown-unknown -p alpha-core --features wasm` 必须通过；
+2. `packages/core` 默认依赖黑名单扫描（tokio/reqwest/sqlx/redis/tonic/native-tls/
+   rustls/notify/directories/dirs）——命中即失败，新增平台能力先放 L1 或加 feature 门控；
+3. alpha-protocols 现状 informational 输出（差距消除后升级为门禁，见 §5）。
+
+编码规范（评审口径，配合脚本执行）：
+
+* L0 crate 禁平台独占依赖与 `std::fs`/`std::net` 直接使用（wasm32 无文件系统）；
+* 平台分支统一 `cfg(target_arch = "wasm32")` / `cfg(target_os = ...)`，禁止散落 link；
+* 时间处理用 chrono（开启 `wasmbind`）；ID 用 uuid（wasm 侧开启 `js`）；
+* 新增共享计算逻辑先进 `packages/core`，再由各交付面消费；反向搬运会破坏 §3 依赖方向。
+
+## 7. 落地路线图（映射本节 TODO 余项）
+
+| TODO 项 | 依赖/顺序 | 说明 |
+|---|---|---|
+| Cargo workspace 多目标构建配置 | 本设计 | 补 `.cargo/config.toml` 目标别名 + CI 矩阵 |
+| 跨平台共享核心库（core/protocols/storage） | §5 差距消除 | protocols grpc feature 门控 |
+| 平台适配层抽象接口 | §4 草案 | 随 Tauri 文件导出 / mobile 立项落地 `platform.rs` |
+| 统一 Rust 代码规范与兼容性检查 | 本设计 §6 | 脚本已落地，CI 集成随「CI/CD」节推进 |

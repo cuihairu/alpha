@@ -32,7 +32,7 @@
 - [x] 清理 collector 未挂载死模块与根目录孤儿文件：根 Cargo.toml 是纯 [workspace]（无 [package]），根目录 src/main.rs（ClickHouse 集成试验程序）与 tests/clickhouse_test.rs 从未被任何 crate 编译；collector 的 crawler_discovery.rs / distributed_crawler.rs / integrated_crawler_demo.rs / multilang.rs / multilang_simple_old.rs / data_sources.rs 六个文件均未在 lib.rs/main.rs 挂载（全仓 grep 确认无 #[path] 引用，examples 自带内联 mod、仅在打印文案中提及文件名，属自包含示例）。全部删除；编译集严格缩小，存活代码零改动，alpha-collector --all-targets 编译通过、全仓门禁复跑 0 失败（✅ 2026-09-28）
 
 ## 🌍 跨平台 Rust 架构设计
-- [ ] 设计统一跨平台架构（packages/、services/、web/、desktop/、mobile/）
+- [x] 设计统一跨平台架构（packages/、services/、web/、desktop/、mobile/）：docs/cross-platform-architecture.md v1 草案——L0 共享核心（packages/core，零平台依赖）/ L1 平台服务（storage/protocols/services，服务端专属）/ L2 平台表现（web+wasm-analyzer、desktop Tauri 1.5、mobile 预留）三层与依赖方向强制；现状盘点全部实测（core wasm32 编译通过需 --features wasm=chrono/wasmbind+uuid/js；protocols 因 tonic 默认特性拉 mio 在 wasm32 编译失败，remediation=default-features=false+grpc 模块 feature 门控，已写入差距清单）；平台适配层 trait 草案（KeyValueStore/LocalPersistence/UserNotification）；配套 scripts/check-cross-platform.sh 落地强制检查（wasm32 下 core 编译门禁 + core 依赖黑名单扫描 tokio/reqwest/sqlx/redis/tonic 等 + protocols informational 探测，非交互可入 CI，实测通过）；余项（workspace 多目标配置、共享核心库补齐、适配层落地）映射 §7 路线图（✅ 2026-09-28）
 - [ ] 配置 Cargo workspace 支持多目标平台构建
 - [ ] 建立跨平台共享核心库（core、protocols、storage）
 - [ ] 实现平台适配层抽象接口（Desktop、Web、Android、iOS）
