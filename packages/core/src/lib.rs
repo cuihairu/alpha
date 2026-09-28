@@ -5,6 +5,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod analytics;
+pub mod backtest;
 pub mod errors;
 pub mod indicators;
 pub mod models;

@@ -39,8 +39,18 @@
 - [x] 定义统一的 Rust 代码规范和跨平台兼容性检查：docs/rust-code-standards.md v1（格式化 rustfmt 唯一权威、clippy 零警告且 allow 必须留痕禁 blanket、错误处理 AlphaError/anyhow 分层与 lib 禁 unwrap、模块挂载纪律〔引 trading.rs 孤儿案例〕、tokio/async-trait 惯例、tracing 级别语义与显式初始化、平台依赖黑名单与 feature 默认值策略、测试 env 门控/契约 helper/空断言禁令、提交纪律）；可执行门禁 scripts/check-lint.sh（fmt --check + clippy -D warnings，与 CI 完全一致）。全仓一次性清零到位：clippy --fix 自动修 21 处 + 人工修 ~25 处（clamp/迭代器求和/copy_from_slice/Default 补齐/嵌套 format 提取/生成代码 result_large_err include 处压制/路线图预留 API 与调度器传参形态按「allow 必须注释理由」规范标注），cargo fmt --all 机械重排 53 文件；本地验证 fmt --check 绿、workspace clippy -D warnings 绿、全量测试 0 失败、双服务二进制重建启动冒烟 healthy、check-cross-platform.sh 四步绿。CI 集成（.github/workflows/ci.yml 修复三处长期红灯）：lint 作业从裸 clippy 升级为 fmt+clippy 真门禁并排除 desktop（原在 ubuntu 必因缺 GUI 库失败）；test 作业补 protobuf-compiler（proto 代码生成缺 protoc 即败）+ Redis service 让 REDIS_TEST_URL 门控测试真实运行；wasm 作业并入 check-cross-platform.sh；security 作业降为 continue-on-error 报告型（8 个 cargo 依赖漏洞属升级债另行立项，避免长期红灯淹没真信号，已在规范 §11 注明）。跨平台兼容性检查（check-cross-platform.sh 四步）保持既有（✅ 2026-09-28）
 
 ## 🚀 Rust WASM Web 分析引擎
-- [ ] 集成 wasm-bindgen 和 wasm-pack 构建工具链
-- [ ] 开发高性能 Rust WASM 核心计算库（指标算法、回测引擎）
+- [x] 集成 wasm-bindgen 和 wasm-pack 构建工具链
+  （2026-09-28 落地：wasm32 target + `cargo wasm-check`/`wasm-build` alias；CI wasm 作业
+  jetli/wasm-pack-action + `wasm-pack build --target web` 长期绿；本地 wasm-pack release
+  构建冒烟通过，pkg 产物已 gitignore 不入库）
+- [x] 开发高性能 Rust WASM 核心计算库（指标算法、回测引擎）
+  （2026-09-28 最小可用版本：指标算法 = alpha-core `indicators` + wasm-analyzer 既有绑定
+  （RSI/SMA/EMA/BOLL/MACD/analyzeSymbol）；回测引擎 = alpha-core `backtest` 纯计算模块
+  （Signal/Strategy trait/SmaCrossStrategy O(1) 滚动窗口/BacktestEngine，口径：单标的日频、
+  多空两态、收盘成交、fee_bps 双边、夏普 √252 年化）+ wasm 绑定 `backtestSmaCross`
+  （serde snake_case 输出，node 冒烟验证持有收益与费用记账）；接口缝：多标的/止损/滑点
+  经 Strategy trait 扩展，Worker 并行走 worker.rs BacktestStrategy 协议预留，
+  零拷贝 memcpy 简化待「零拷贝内存管理」项统一处理）
 - [ ] 实现零拷贝内存管理与 Arrow 数据格式优化
 - [ ] 构建混合存储架构（WASM 内存 + IndexedDB + 服务端缓存）
 - [ ] 开发流式数据处理和并行计算机制（Web Workers + Rayon）

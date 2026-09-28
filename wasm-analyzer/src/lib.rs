@@ -199,6 +199,27 @@ impl WasmAnalyzer {
         serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
     }
 
+    /// SMA 双均线交叉回测（TODO「开发高性能 Rust WASM 核心计算库」最小可用版本）。
+    /// 记账与信号逻辑全部在 alpha-core（L0 纯计算层，单测覆盖），此处仅做 JS 边界转换。
+    /// JS 侧字段为 serde 默认 snake_case（equity_curve/total_return_pct/…，
+    /// 与 calculateAllIndicators 输出键风格一致），方法名 camelCase 与既有导出一致。
+    /// 简化口径：`to_vec()` 一次 memcpy 拷入；零拷贝视图留待「零拷贝内存管理」立项统一处理。
+    /// 非法参数（fast >= slow、空序列）会触发 wasm trap——与全 crate 的边界口径一致，
+    /// 参数校验由 JS 调用方负责。
+    #[wasm_bindgen(js_name = backtestSmaCross)]
+    pub fn backtest_sma_cross(
+        &self,
+        prices_js: &js_sys::Float64Array,
+        fast_period: usize,
+        slow_period: usize,
+        fee_bps: f64,
+    ) -> JsValue {
+        let prices: Vec<f64> = prices_js.to_vec();
+        let mut strategy = alpha_core::backtest::SmaCrossStrategy::new(fast_period, slow_period);
+        let report = alpha_core::backtest::BacktestEngine::new(fee_bps).run(&prices, &mut strategy);
+        serde_wasm_bindgen::to_value(&report).unwrap_or(JsValue::NULL)
+    }
+
     /// 获取性能指标
     #[wasm_bindgen(js_name = getPerformanceMetrics)]
     pub fn get_performance_metrics(&self) -> JsValue {
@@ -301,5 +322,25 @@ mod tests {
     fn test_analyzer_creation() {
         let _analyzer = WasmAnalyzer::new(None);
         let _analyzer_with_precision = WasmAnalyzer::new(Some(4));
+    }
+
+    /// 回测绑定：上涨序列净值应为持有收益（逻辑断言在 alpha-core 单测，
+    /// 此处验证 JS 边界转换后报告结构完整、字段为 serde 默认 snake_case）
+    #[wasm_bindgen_test]
+    fn test_backtest_sma_cross_binding() {
+        let analyzer = WasmAnalyzer::new(None);
+        let prices = js_sys::Float64Array::from(&[10.0, 20.0, 30.0, 40.0, 50.0][..]);
+        let report = analyzer.backtest_sma_cross(&prices, 1, 2, 0.0);
+        let equity = js_sys::Reflect::get(&report, &JsValue::from_str("equity_curve"))
+            .expect("报告应含 equity_curve");
+        assert!(js_sys::Array::is_array(&equity), "equity_curve 应为数组");
+        let equity_len = js_sys::Array::from(&equity).length();
+        assert_eq!(equity_len, 5, "逐 bar 净值长度应等于价格序列长度");
+        let total_return = js_sys::Reflect::get(&report, &JsValue::from_str("total_return_pct"))
+            .expect("报告应含 total_return_pct");
+        assert!(
+            (total_return.as_f64().unwrap_or(0.0) - 150.0).abs() < 1e-9,
+            "bar1 入场 20 持有到 50 = 2.5x 应 +150%"
+        );
     }
 }
