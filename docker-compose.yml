@@ -70,18 +70,15 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
-      - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
-      - REDIS_URL=redis://redis:6379
-      # 落库开关/地址部署时可从宿主机 env 或 .env 覆写（保持既有默认：启用 + timescaledb 服务）。
-      # 注意 config-rs 键内下划线为单下划线（PERSISTENCE_ENABLED），服务间分隔符才是双下划线。
-      - ALPHA__STORAGE__PERSISTENCE_ENABLED=${ALPHA__STORAGE__PERSISTENCE_ENABLED:-true}
-      - ALPHA__STORAGE__TIMESCALE_URL=${ALPHA__STORAGE__TIMESCALE_URL:-postgres://postgres:postgres@timescaledb:5432/alpha_finance}
+      # 真实反代上游（容器网络内按 compose 服务名解析；env 可覆写）
+      - ALPHA_GATEWAY_DATA_ENGINE_URL=http://data-engine:8081
+      - ALPHA_GATEWAY_REALTIME_URL=http://real-time-feed:8082
+      - ALPHA_GATEWAY_COLLECTOR_URL=http://collector:8083
       - RUST_LOG=info
     depends_on:
-      - timescaledb
-      - clickhouse
-      - redis
+      - data-engine
+      - real-time-feed
+      - collector
     networks:
       - alpha-network
     restart: unless-stopped

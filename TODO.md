@@ -27,7 +27,7 @@
 - [x] compose 透传持久化 env：两键自 160b73e（2026-04）即已存在（该条目「未透传」对硬编码值而言已过时），本次升级为部署可调的 ${VAR:-默认值} 形式——默认保持既有行为（启用 + timescaledb 服务），宿主机 env/.env 可覆写开关与地址；docker compose config 验证默认渲染与宿主机覆写双向生效，键内单下划线规则就地注释（✅ 2026-09-28）
 
 ### P3 补对外链路
-- [ ] api-gateway 真实反代 data-engine/real-time-feed（当前 health/proxy 全是 mock）
+- [x] api-gateway 真实反代：/api/v1/* 透明反代 data-engine（方法/查询串/头[滤逐跳头]/体透传，上游不可达 502）；/ws 与 /ws/* 双向泵反代 real-time-feed（tokio-tungstenite 上游，升级握手前失败拒绝 502）；/health 真实并发探测三上游（实测时延，data-engine+real-time-feed 任一不可达整体 degraded）。上游地址 CLI/env（ALPHA_GATEWAY_*，compose 按容器网络注入并替换原无用 CLICKHOUSE_* env）。单测 6：健康探测真实/降级、REST 透传（路径+方法+体）、502、WS 回环（tungstenite 客户端经网关↔上游 axum echo）、URL 转换；进程级 E2E：网关 /health 真实时延、/api/v1/stocks/* 与 /api/v1/query 透传 200 真实数据、WS 握手 101（✅ 2026-09-28）
 - [ ] web 前端接 real-time-feed WS + data-engine REST
 - [ ] 清理 collector 未挂载死模块与根目录孤儿文件（src/、tests/clickhouse_test.rs）
 
