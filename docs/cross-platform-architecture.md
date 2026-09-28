@@ -77,16 +77,17 @@ pub trait UserNotification {         // 桌面: Tauri notification；mobile: 系
 | Crate | x86_64 linux | wasm32-unknown-unknown | 桌面三 OS | android/ios |
 |---|---|---|---|---|
 | alpha-core | ✅ | ✅（`--features wasm`，实测） | ✅（同 core 约束） | 规划 |
-| alpha-protocols | ✅ | ❌ 已知差距 | ✅ | 规划 |
+| alpha-protocols | ✅（default=grpc） | ✅（`--no-default-features` 纯 serde 契约，实测） | ✅ | 规划 |
 | alpha-storage / services | ✅ | 不适用（L1） | 不适用 | 不适用 |
 | alpha-wasm-analyzer | — | ✅（实测 `cargo wasm-build`） | — | — |
 
-**已知差距与 remediation（alpha-protocols）**：tonic 默认特性（`transport`）拉入
-tokio/net → mio，wasm32 编译失败（实测报错 `This wasm target is unsupported by mio`）。
-计划：`tonic = { default-features = false, features = ["prost"] }`，把
-`grpc.rs`（服务端传输）挂到 `grpc` feature 门控之后，`rest.rs`/`websocket.rs`
-的 serde 契约保持无门控共享；`packages/protocols` 的 wasm 目标检查在差距消除后
-并入 `scripts/check-cross-platform.sh` 门禁（脚本已预留 informational 探测）。
+**alpha-protocols 分层（原「已知差距」，2026-09-28 已消除）**：tonic 默认特性
+（`transport`）拉入 tokio/net → mio，wasm32 编译失败（实测报错 `This wasm target is
+unsupported by mio`）。已落地：tonic/prost/tonic-build 转 optional，`grpc` feature
+（default = ["grpc"]）门控 proto 代码生成（build.rs 按 cfg 跳过）与 `proto` 模块；
+`rest.rs`/`websocket.rs`/`grpc.rs`（纯 serde 结构体）保持无门控共享。服务端默认开启
+grpc 零改动；wasm 侧取 `--no-default-features` 契约层，wasm32 编译实测通过，
+并已并入 `scripts/check-cross-platform.sh` 门禁（第 4 步）。
 
 ## 6. 代码规范与兼容性检查
 
@@ -111,6 +112,6 @@ tokio/net → mio，wasm32 编译失败（实测报错 `This wasm target is unsu
 | TODO 项 | 依赖/顺序 | 说明 |
 |---|---|---|
 | Cargo workspace 多目标构建配置 | 本设计 | ✅ 已落地：`.cargo/config.toml` alias（wasm-check/wasm-build）+ 检查脚本纳入 wasm-analyzer wasm32 构建；CI 矩阵随「CI/CD」节推进 |
-| 跨平台共享核心库（core/protocols/storage） | §5 差距消除 | protocols grpc feature 门控 |
+| 跨平台共享核心库（core/protocols/storage） | §5 | ✅ 已落地：core wasm-clean（wasm feature）；protocols grpc feature 门控后 wasm32 契约层编译通过；storage 按设计属 L1 服务端专属（移动端经 REST/WS 访问 services，不直连 storage） |
 | 平台适配层抽象接口 | §4 草案 | 随 Tauri 文件导出 / mobile 立项落地 `platform.rs` |
 | 统一 Rust 代码规范与兼容性检查 | 本设计 §6 | 脚本已落地，CI 集成随「CI/CD」节推进 |

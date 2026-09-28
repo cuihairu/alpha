@@ -9,9 +9,9 @@
 #      （tokio/reqwest/sqlx/redis/tonic 等）——core 是全平台共享层，
 #      异步 IO 与原生文件系统访问属于 storage/protocols/services 层职责。
 #
-# 已知差距（设计文档 docs/cross-platform-architecture.md §5）：alpha-protocols
-# 因 tonic 默认特性拉入 tokio/net 尚不 wasm-clean， remediation 是给 grpc 模块
-# 加 feature 门控；在此以 informational 输出，不作为门禁失败条件。
+#   4. alpha-protocols 在 wasm32 下以 --no-default-features（纯 serde 契约层：
+#      rest/websocket/grpc 结构体）编译通过；proto/gRPC 传输为 grpc feature 门控的
+#      服务端专属能力，不在 wasm 契约层内。
 #
 # 用法：scripts/check-cross-platform.sh   （非交互；缺 wasm32 target 自动 rustup 安装）
 
@@ -54,12 +54,10 @@ if [ -n "$VIOLATIONS" ]; then
 fi
 ok "packages/core 默认依赖不含平台独占库"
 
-# 4) alpha-protocols wasm32 现状（informational，已知差距）
-echo "--- [4/4] alpha-protocols @ $TARGET（informational）"
-if cargo check --target "$TARGET" -p alpha-protocols --features alpha-core/wasm >/dev/null 2>&1; then
-    ok "alpha-protocols wasm32 编译通过（已知差距已消除，请更新设计文档 §5）"
-else
-    info "alpha-protocols 尚不 wasm-clean（tonic→tokio/net→mio；remediation 见 docs/cross-platform-architecture.md §5），不作为本次门禁失败条件"
-fi
+# 4) alpha-protocols wasm32 纯契约层（--no-default-features，grpc/proto 已 feature 门控）
+echo "--- [4/4] alpha-protocols @ $TARGET (--no-default-features 纯 serde 契约)"
+cargo check --target "$TARGET" -p alpha-protocols --no-default-features --features alpha-core/wasm \
+    || fail "alpha-protocols 契约层在 $TARGET 下编译失败"
+ok "alpha-protocols wasm32 契约层编译通过"
 
 echo "=== 跨平台兼容性检查全部通过 ==="

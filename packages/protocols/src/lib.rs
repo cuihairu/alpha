@@ -5,6 +5,8 @@
 pub mod grpc;
 pub mod rest;
 pub mod websocket;
+// proto 代码生成依赖 tonic transport（服务端专属）；wasm 侧 --no-default-features 时不存在
+#[cfg(feature = "grpc")]
 pub mod proto {
     pub mod data_engine {
         tonic::include_proto!("alpha.dataengine");
