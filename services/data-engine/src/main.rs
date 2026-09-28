@@ -62,6 +62,67 @@ const QUOTES_DLQ_STREAM: &str = "quotes.dlq";
 /// 容量取「远大于单进程任何瞬时重放量」的经验值。
 const PAYLOAD_DEDUP_WINDOW: usize = 65_536;
 
+/// 持久化镜像失败重试缓冲容量（条），超限丢最旧并计数（内存 serving 不受影响）。
+const MIRROR_RETRY_BUFFER_CAP: usize = 100_000;
+/// 持久化镜像失败补写：后台轮询间隔（秒）与单轮最大补写条数。
+const MIRROR_RETRY_INTERVAL_SECS: u64 = 5;
+const MIRROR_RETRY_BATCH: usize = 500;
+
+/// 持久化镜像失败重试缓冲：进程内有界 FIFO。镜像写失败的条目入队，
+/// 后台任务周期补写 Timescale；超容量丢最旧并累计计数（可观测）。
+/// 边界（非完整 outbox，定位为 best-effort 的有限增强）：重启即失，
+/// 跨重启缺口不由本机制弥补；补写与直写并发可能使极少数同 (symbol, ts)
+/// 冲突回写旧值（Timescale UPSERT 最后写赢），内存 serving 不受影响。
+struct MirrorRetryBuffer {
+    queue: Mutex<VecDeque<MarketData>>,
+    capacity: usize,
+    dropped_total: std::sync::atomic::AtomicU64,
+}
+
+impl MirrorRetryBuffer {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            queue: Mutex::new(VecDeque::new()),
+            capacity,
+            dropped_total: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// 镜像写失败的条目入队；满则丢最旧一条腾位。
+    fn push(&self, market_data: MarketData) {
+        let mut queue = self.queue.lock().expect("mirror retry mutex poisoned");
+        if queue.len() >= self.capacity {
+            queue.pop_front();
+            self.dropped_total
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        queue.push_back(market_data);
+    }
+
+    /// 从队首取至多 `max` 条等待补写。
+    fn drain_for_retry(&self, max: usize) -> Vec<MarketData> {
+        let mut queue = self.queue.lock().expect("mirror retry mutex poisoned");
+        (0..max).map_while(|_| queue.pop_front()).collect()
+    }
+
+    /// 补写失败：失败条 + 未尝试条按原序回队首（下一轮从断点继续）。
+    fn requeue_front(&self, batch: Vec<MarketData>) {
+        let mut queue = self.queue.lock().expect("mirror retry mutex poisoned");
+        for market_data in batch.into_iter().rev() {
+            queue.push_front(market_data);
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.queue.lock().expect("mirror retry mutex poisoned").len()
+    }
+
+    fn dropped_total(&self) -> u64 {
+        self.dropped_total
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// payload_hash 去重窗口：进程内 FIFO，超容量淘汰最早记录，重启清零。
 #[derive(Default)]
 struct RecentPayloads {
@@ -104,6 +165,8 @@ struct AppState {
     clickhouse: Option<Arc<ClickHouseStorage>>,
     /// normalized 层写侧去重窗口（payload_hash → 近期已成功处理的指纹）
     seen_payloads: Arc<Mutex<RecentPayloads>>,
+    /// Timescale 镜像写失败的重试缓冲（有界，后台周期补写；未启用持久化时闲置）
+    mirror_retries: Arc<MirrorRetryBuffer>,
     indicators: TechnicalIndicators,
     analysis: AnalysisEngine,
     config: Arc<AppConfig>,
@@ -120,6 +183,7 @@ impl AppState {
             seen_payloads: Arc::new(Mutex::new(RecentPayloads::with_capacity(
                 PAYLOAD_DEDUP_WINDOW,
             ))),
+            mirror_retries: Arc::new(MirrorRetryBuffer::with_capacity(MIRROR_RETRY_BUFFER_CAP)),
             clickhouse,
             indicators: TechnicalIndicators::new(),
             analysis: AnalysisEngine::new(),
@@ -150,7 +214,14 @@ impl AppState {
         self.storage.add_market_data(market_data).await?;
         if let Some(persistence) = self.persistence.as_ref() {
             if let Err(err) = persistence.insert_market_data(market_data).await {
-                tracing::warn!("Failed to persist normalized quote to Timescale: {}", err);
+                // 镜像失败不阻断管线（内存仍是 serving 层）；条目入有界缓冲由
+                // 后台任务周期补写，短暂不可用期间不再直接丢持久化副本。
+                self.mirror_retries.push(market_data.clone());
+                tracing::warn!(
+                    "Failed to persist normalized quote to Timescale (queued for retry, backlog {}): {}",
+                    self.mirror_retries.len(),
+                    err
+                );
             }
         }
         Ok(())
@@ -234,6 +305,7 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("Failed to seed demo data: {}", err);
     }
     start_quote_normalizer(state.clone()).await?;
+    start_mirror_retry_worker(state.clone());
 
     let router = build_router(state.clone());
     let addr = config.server.addr.clone();
@@ -417,6 +489,58 @@ async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// 持久化镜像失败的后台补写：周期从重试缓冲取批次重写 Timescale。未启用持久化
+/// 时不启动（预期降级，info 留痕）。
+fn start_mirror_retry_worker(state: Arc<AppState>) {
+    let Some(persistence) = state.persistence.clone() else {
+        tracing::info!("Mirror retry worker not started: persistence disabled");
+        return;
+    };
+    let buffer = state.mirror_retries.clone();
+    tokio::spawn(async move {
+        let mut ticker = interval(StdDuration::from_secs(MIRROR_RETRY_INTERVAL_SECS));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        ticker.tick().await; // interval 首个 tick 立即返回，跳过以保证先等一个周期
+
+        loop {
+            ticker.tick().await;
+            let rewrote = run_mirror_retry_round(&persistence, &buffer).await;
+            if rewrote > 0 {
+                tracing::info!(
+                    "Mirror retry round rewrote {} buffered quotes to Timescale (backlog {})",
+                    rewrote,
+                    buffer.len()
+                );
+            }
+        }
+    });
+}
+
+/// 单轮补写：按序重写缓冲批次；任一条失败则该条起（含未尝试）按原序回队首，
+/// 返回本轮成功条数。
+async fn run_mirror_retry_round(
+    persistence: &Arc<TimescaleTimeSeriesStorage>,
+    buffer: &Arc<MirrorRetryBuffer>,
+) -> usize {
+    let batch = buffer.drain_for_retry(MIRROR_RETRY_BATCH);
+    if batch.is_empty() {
+        return 0;
+    }
+    for (idx, market_data) in batch.iter().enumerate() {
+        if let Err(err) = persistence.insert_market_data(market_data).await {
+            buffer.requeue_front(batch[idx..].to_vec());
+            tracing::warn!(
+                "Mirror retry write failed (backlog {}, dropped {} since start): {}",
+                buffer.len(),
+                buffer.dropped_total(),
+                err
+            );
+            return idx;
+        }
+    }
+    batch.len()
 }
 
 /// 处理一条 quotes.raw 消息：规范化 → 去重判定 → 入内存时序 → 转发 normalized → ack。
@@ -1535,6 +1659,53 @@ mod tests {
     }
 
     /// 三态之一：未启用 → 不装配持久化，写入仅走内存 serving 层。
+    fn mirror_md(price: f64) -> MarketData {
+        MarketData {
+            symbol: "MIRROR".to_string(),
+            timestamp: Utc::now(),
+            price,
+            volume: 100,
+            bid: None,
+            ask: None,
+            open: None,
+            high: None,
+            low: None,
+        }
+    }
+
+    /// 镜像重试缓冲：补写失败回队首后保持原序（断点续写语义）。
+    #[test]
+    fn mirror_retry_buffer_requeues_in_order_to_front() {
+        let buffer = MirrorRetryBuffer::with_capacity(8);
+        for price in [10.0, 11.0, 12.0] {
+            buffer.push(mirror_md(price));
+        }
+        let first_batch = buffer.drain_for_retry(2);
+        assert_eq!(2, first_batch.len());
+        assert_eq!(10.0, first_batch[0].price);
+        assert_eq!(11.0, first_batch[1].price);
+        assert_eq!(1, buffer.len(), "undrained entries stay in queue");
+
+        // 模拟补写失败：整批按原序回队首，且排在未消费条目之前
+        buffer.requeue_front(first_batch);
+        let all = buffer.drain_for_retry(10);
+        assert_eq!(3, all.len());
+        assert_eq!(vec![10.0, 11.0, 12.0], all.iter().map(|d| d.price).collect::<Vec<_>>());
+    }
+
+    /// 镜像重试缓冲：超容量丢最旧并累计 dropped 计数（内存 serving 不受影响）。
+    #[test]
+    fn mirror_retry_buffer_drops_oldest_and_counts_on_overflow() {
+        let buffer = MirrorRetryBuffer::with_capacity(2);
+        for price in [10.0, 11.0, 12.0] {
+            buffer.push(mirror_md(price));
+        }
+        assert_eq!(2, buffer.len());
+        assert_eq!(1, buffer.dropped_total());
+        let remaining = buffer.drain_for_retry(10);
+        assert_eq!(vec![11.0, 12.0], remaining.iter().map(|d| d.price).collect::<Vec<_>>());
+    }
+
     #[tokio::test]
     async fn persistence_disabled_writes_memory_only() {
         let disabled = storage_settings(false, Some("postgres://would-be-ignored"));
@@ -1674,6 +1845,7 @@ mod tests {
             seen_payloads: Arc::new(Mutex::new(RecentPayloads::with_capacity(
                 PAYLOAD_DEDUP_WINDOW,
             ))),
+            mirror_retries: Arc::new(MirrorRetryBuffer::with_capacity(MIRROR_RETRY_BUFFER_CAP)),
             indicators: TechnicalIndicators::new(),
             analysis: AnalysisEngine::new(),
             config: test_config(),
