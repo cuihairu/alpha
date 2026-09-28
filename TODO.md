@@ -58,7 +58,19 @@
   生命周期契约（定长、grow 后视图失效、双 free UB）文档化；
   arrow_adapter.rs：ArrowBatch.from_market_data 零拷贝列构建、
   exportPrices/exportVolumes 导出、ArrowMemoryPool 预留；
-  wasm32 target 编译通过、原生测试 17 通过 3 自跳过、全仓门禁复跑 0 失败）
+  wasm32 target 编译通过、原生测试 17 通过 3 自跳过、全仓门禁复跑 0 失败；
+  同日续作（计算缝 + 基准验证）：backtestSmaCrossPtr 零拷贝计算绑定 +
+  test_zero_copy_backtest_flow 全流程 wasm 测试；A/B 基准实测——
+  native（examples/zero_copy_bench.rs，release）：10k bars 347.4→341.4µs/次、
+  100k 4382.2→4307.0µs/次（引擎计算占主导，每次调用消除 78/781KB memcpy+堆分配）；
+  JS 边界（node-bench/zero-copy.mjs，交错 10 轮取 min）：10k 960.4→738.1µs/次
+  （-23.1%）、100k 11788.2→11405.6µs/次（-3.2%，equity_curve 报告序列化两侧
+  同量占主导，收益下限；JSON/JS 转换优化另行立项）；
+  复现：cargo run -p alpha-wasm-analyzer --example zero_copy_bench --release、
+  wasm-pack build 后 node node-bench/zero-copy.mjs；
+  并行会话注：本项 shared_buffer/alloc/free 及本注首段由并行会话 a8aaa97 入库
+  （其提交吸收了本会话未提交 WIP），backtestSmaCrossPtr/测试亦随其入库，
+  续作提交补齐 fmt 红灯修复与基准数据）
 - [ ] 构建混合存储架构（WASM 内存 + IndexedDB + 服务端缓存）
 - [ ] 开发流式数据处理和并行计算机制（Web Workers + Rayon）
 - [ ] 实现实时数据同步协议（WebSocket 增量更新 + 版本控制）

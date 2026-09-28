@@ -4,7 +4,7 @@
 
 use alpha_core::{
     analytics::AnalysisEngine,
-    indicators::{TechnicalIndicators, advanced::AdvancedIndicators},
+    indicators::{advanced::AdvancedIndicators, TechnicalIndicators},
     models::*,
 };
 use chrono::Utc;
@@ -179,7 +179,9 @@ impl WasmAnalyzer {
         let highs: Vec<f64> = highs_js.to_vec();
         let lows: Vec<f64> = lows_js.to_vec();
         let closes: Vec<f64> = closes_js.to_vec();
-        let (k_values, d_values) = self.advanced.calculate_stochastic(&highs, &lows, &closes, k_period, d_period);
+        let (k_values, d_values) = self
+            .advanced
+            .calculate_stochastic(&highs, &lows, &closes, k_period, d_period);
 
         let result = serde_json::json!({
             "k": k_values,
@@ -201,7 +203,9 @@ impl WasmAnalyzer {
         let highs: Vec<f64> = highs_js.to_vec();
         let lows: Vec<f64> = lows_js.to_vec();
         let closes: Vec<f64> = closes_js.to_vec();
-        let wr = self.advanced.calculate_williams_r(&highs, &lows, &closes, period);
+        let wr = self
+            .advanced
+            .calculate_williams_r(&highs, &lows, &closes, period);
         js_sys::Float64Array::from(&wr[..])
     }
 
@@ -218,7 +222,9 @@ impl WasmAnalyzer {
         let highs: Vec<f64> = highs_js.to_vec();
         let lows: Vec<f64> = lows_js.to_vec();
         let closes: Vec<f64> = closes_js.to_vec();
-        let cci = self.advanced.calculate_cci(&highs, &lows, &closes, period, constant);
+        let cci = self
+            .advanced
+            .calculate_cci(&highs, &lows, &closes, period, constant);
         js_sys::Float64Array::from(&cci[..])
     }
 
@@ -273,7 +279,9 @@ impl WasmAnalyzer {
         let upper: Vec<f64> = upper_js.to_vec();
         let lower: Vec<f64> = lower_js.to_vec();
         let middle: Vec<f64> = middle_js.to_vec();
-        let width = self.advanced.calculate_bollinger_band_width(&upper, &lower, &middle);
+        let width = self
+            .advanced
+            .calculate_bollinger_band_width(&upper, &lower, &middle);
         js_sys::Float64Array::from(&width[..])
     }
 
@@ -285,15 +293,13 @@ impl WasmAnalyzer {
         upper_band: f64,
         lower_band: f64,
     ) -> f64 {
-        self.advanced.calculate_bollinger_band_percent_b(price, upper_band, lower_band)
+        self.advanced
+            .calculate_bollinger_band_percent_b(price, upper_band, lower_band)
     }
 
     /// 识别艾略特波浪模式
     #[wasm_bindgen(js_name = identifyElliottWaves)]
-    pub fn identify_elliott_waves(
-        &self,
-        prices_js: &js_sys::Float64Array,
-    ) -> JsValue {
+    pub fn identify_elliott_waves(&self, prices_js: &js_sys::Float64Array) -> JsValue {
         let prices: Vec<f64> = prices_js.to_vec();
         let waves = self.advanced.identify_elliott_waves(&prices);
 
@@ -575,9 +581,13 @@ mod tests {
             .as_f64()
             .unwrap() as usize;
         assert_eq!(len, 5);
-        let view: js_sys::Float64Array =
-            js_sys::Reflect::get(&handle, &JsValue::from_str("view")).unwrap().into();
-        view.set(&js_sys::Float64Array::from(&[10.0, 20.0, 30.0, 40.0, 50.0][..]), 0);
+        let view: js_sys::Float64Array = js_sys::Reflect::get(&handle, &JsValue::from_str("view"))
+            .unwrap()
+            .into();
+        view.set(
+            &js_sys::Float64Array::from(&[10.0, 20.0, 30.0, 40.0, 50.0][..]),
+            0,
+        );
 
         let analyzer = WasmAnalyzer::new(None);
         let report = analyzer
