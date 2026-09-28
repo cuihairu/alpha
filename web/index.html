@@ -20,6 +20,32 @@
             <p>高性能金融数据分析平台</p>
         </header>
 
+        <!-- 后端连接配置 -->
+        <div class="card">
+            <h3>🔌 后端连接</h3>
+            <div id="api-config-status"></div>
+
+            <div class="form-group">
+                <label for="rest-base">data-engine REST 地址</label>
+                <input type="text" id="rest-base" placeholder="http://127.0.0.1:8081">
+            </div>
+
+            <div class="form-group">
+                <label for="ws-url">real-time-feed WebSocket 地址</label>
+                <input type="text" id="ws-url" placeholder="ws://127.0.0.1:8082/ws">
+            </div>
+
+            <button class="btn" onclick="applyApiConfig()">
+                应用连接配置
+            </button>
+
+            <p style="font-size: 0.85rem; color: #6b7280; margin-top: 8px;">
+                默认直连各服务（data-engine 已默认开启 CORS）。也可改指 api-gateway 统一入口：
+                REST <code>http://127.0.0.1:8080/api/v1</code>、WS <code>ws://127.0.0.1:8080/ws</code>
+                （网关默认端口与本页静态服务器同为 8080，同机同跑时需错开）。配置保存在浏览器 localStorage。
+            </p>
+        </div>
+
         <div class="dashboard">
             <!-- 股票分析卡片 -->
             <div class="card">

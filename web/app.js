@@ -1,8 +1,60 @@
 // Alpha Finance Web 应用主逻辑
 
 // 全局变量
-let realtimeInterval = null;
-let chartInstances = {};
+let realtimeSocket = null;
+const realtimeQuotes = {}; // symbol → 最近一条实时报价（WebSocket 推送）
+
+// ===== 后端接入配置 =====
+// 默认直连服务（data-engine 的 CORS 默认开启，浏览器跨源可直连）；
+// 也可改指 api-gateway（注意其默认端口同为 8080，与 web 静态服务器同机同跑时需错开）：
+//   REST → http://127.0.0.1:8080/api/v1   WS → ws://127.0.0.1:8080/ws
+// 修改后点「应用连接配置」持久化到 localStorage。
+let apiConfig = {
+    restBase: localStorage.getItem('alpha.restBase') || 'http://127.0.0.1:8081',
+    wsUrl: localStorage.getItem('alpha.wsUrl') || 'ws://127.0.0.1:8082/ws',
+};
+
+function initApiConfigInputs() {
+    document.getElementById('rest-base').value = apiConfig.restBase;
+    document.getElementById('ws-url').value = apiConfig.wsUrl;
+}
+
+function applyApiConfig() {
+    const rest = document.getElementById('rest-base').value.trim().replace(/\/+$/, '');
+    const ws = document.getElementById('ws-url').value.trim();
+    if (rest) apiConfig.restBase = rest;
+    if (ws) apiConfig.wsUrl = ws;
+    localStorage.setItem('alpha.restBase', apiConfig.restBase);
+    localStorage.setItem('alpha.wsUrl', apiConfig.wsUrl);
+    showStatus('api-config-status', 'success', `✅ 已应用：REST ${apiConfig.restBase} / WS ${apiConfig.wsUrl}`);
+}
+
+// 拉取真实历史（data-engine /stocks/:symbol/history），映射为分析器所需数据形状。
+// 响应数据项：{timestamp, price, volume, metadata:{bid,ask,open,high,low}}
+async function fetchStockHistory(symbol, days = 90) {
+    const url = `${apiConfig.restBase}/stocks/${encodeURIComponent(symbol)}/history?days=${days}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`data-engine HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    if (!payload.success) {
+        throw new Error(payload.error || '查询失败');
+    }
+    return (payload.data || []).map(point => ({
+        symbol: symbol,
+        timestamp: point.timestamp,
+        price: point.price,
+        volume: point.volume || 0,
+        bid: point.metadata ? point.metadata.bid : null,
+        ask: point.metadata ? point.metadata.ask : null,
+        open: point.metadata ? point.metadata.open : null,
+        high: point.metadata ? point.metadata.high : null,
+        low: point.metadata ? point.metadata.low : null,
+    }));
+}
+
+document.addEventListener('DOMContentLoaded', initApiConfigInputs);
 
 // 分析股票
 async function analyzeStock() {
@@ -20,18 +72,31 @@ async function analyzeStock() {
     showStatus('analysis-status', 'loading', '🔄 正在分析 ' + symbol + '...');
 
     try {
-        // 生成模拟数据
-        const mockData = generateMockData(symbol, 252); // 一年的交易日
+        // 真实历史优先（data-engine），不可达时回退演示数据并在状态中注明
+        let marketData;
+        let dataSource;
+        try {
+            marketData = await fetchStockHistory(symbol, 252); // 一年的交易日
+            if (marketData.length === 0) {
+                throw new Error('后端无该股票历史数据');
+            }
+            dataSource = `data-engine（${marketData.length} 个真实数据点）`;
+        } catch (backendError) {
+            console.warn('data-engine 不可达，回退演示数据:', backendError);
+            marketData = generateMockData(symbol, 252);
+            dataSource = '演示数据（后端不可达）';
+        }
+        window.lastHistorySeries = marketData;
 
         // 执行分析
-        const result = await window.analyzer.analyzeSymbol(symbol, mockData);
+        const result = await window.analyzer.analyzeSymbol(symbol, marketData);
 
         // 显示分析结果
         displayAnalysisResults(symbol, result);
-        showStatus('analysis-status', 'success', '✅ ' + symbol + ' 分析完成');
+        showStatus('analysis-status', 'success', `✅ ${symbol} 分析完成（${dataSource}）`);
 
         // 同时计算技术指标
-        calculateIndicatorsForData(mockData);
+        calculateIndicatorsForData(marketData);
 
     } catch (error) {
         console.error('分析失败:', error);
@@ -117,10 +182,19 @@ async function calculateIndicators() {
     showStatus('indicators-status', 'loading', '🔄 正在计算技术指标...');
 
     try {
-        // 生成模拟价格数据
-        const symbol = 'DEMO';
-        const mockData = generateMockData(symbol, 100);
-        const prices = mockData.map(d => d.price);
+        // 真实历史优先（复用分析卡片输入的股票代码），不可达时回退演示数据
+        const symbol = document.getElementById('symbol').value.trim() || 'DEMO';
+        let marketData;
+        try {
+            marketData = await fetchStockHistory(symbol, 100);
+            if (marketData.length === 0) {
+                throw new Error('后端无该股票历史数据');
+            }
+        } catch (backendError) {
+            console.warn('data-engine 不可达，回退演示数据:', backendError);
+            marketData = generateMockData(symbol, 100);
+        }
+        const prices = marketData.map(d => d.price);
 
         const rsiPeriod = parseInt(document.getElementById('rsi-period').value);
         const smaShort = parseInt(document.getElementById('sma-short').value);
@@ -260,70 +334,127 @@ function startRealTime() {
     }
 
     window.isRealTimeRunning = true;
+    window.realtimeWatchlist = watchlist;
     document.querySelector('.btn[onclick="startRealTime()"]').textContent = '停止监控';
 
-    showStatus('realtime-status', 'loading', `🔄 开始监控 ${watchlist.length} 只股票...`);
+    showStatus('realtime-status', 'loading', `🔄 连接 real-time-feed（${apiConfig.wsUrl}）...`);
+    connectRealtimeSocket(watchlist);
+}
 
-    // 立即更新一次
-    updateRealTimeData(watchlist);
+// 连接 real-time-feed 的 /ws，接收 real_time_quotes 通道推送。
+// 消息协议（实测；serde tag，变体名 Data 未 rename 为小写）：
+//   {"type":"Data","channel":"real_time_quotes","data":{symbol,price,volume,change,change_percent,timestamp},"timestamp":ms}
+// data-engine 会把 normalized 转发回 quotes.normalized，同一条行情可能推两帧，渲染按 symbol 覆盖去重。
+function connectRealtimeSocket(watchlist) {
+    let socket;
+    try {
+        socket = new WebSocket(apiConfig.wsUrl);
+    } catch (error) {
+        finishRealtimeStopped();
+        showStatus('realtime-status', 'error', '❌ WS 地址无效: ' + error.message);
+        return;
+    }
+    realtimeSocket = socket;
 
-    // 设置定时更新 (每5秒)
-    realtimeInterval = setInterval(() => {
-        updateRealTimeData(watchlist);
-    }, 5000);
+    socket.onopen = () => {
+        if (!window.isRealTimeRunning) return;
+        showStatus('realtime-status', 'success', `✅ 已连接 real-time-feed，等待 ${watchlist.length} 只股票的行情推送...`);
+        // 先渲染「等待推送」占位，避免空白
+        renderRealtimeQuotes();
+    };
+
+    socket.onmessage = (event) => {
+        if (!window.isRealTimeRunning) return;
+        let message;
+        try {
+            message = JSON.parse(event.data);
+        } catch (error) {
+            return; // 非JSON帧（如欢迎语）忽略
+        }
+        // 注意：服务端 serde 变体名未 rename，线上实际是 "Data"（PascalCase），大小写不敏感匹配
+        if (String(message.type || '').toLowerCase() !== 'data') return;
+        if (message.channel !== 'real_time_quotes') return;
+        const quote = message.data;
+        if (!quote || !quote.symbol) return;
+        const symbol = String(quote.symbol).toUpperCase();
+        if (!watchlist.includes(symbol)) return;
+        realtimeQuotes[symbol] = quote;
+        renderRealtimeQuotes();
+    };
+
+    socket.onerror = () => {
+        if (window.isRealTimeRunning) {
+            showStatus('realtime-status', 'error', '❌ WebSocket 连接失败，请确认 real-time-feed 已启动且 WS 地址正确');
+        }
+    };
+
+    socket.onclose = () => {
+        if (window.isRealTimeRunning) {
+            finishRealtimeStopped();
+            showStatus('realtime-status', 'error', '❌ 连接已断开，实时监控停止');
+        }
+    };
+}
+
+// 渲染观察列表：已收到推送的显示最新报价，未收到的显示等待占位
+function renderRealtimeQuotes() {
+    const container = document.getElementById('realtime-results');
+    const watchlist = window.realtimeWatchlist || [];
+    const timestamp = new Date().toLocaleTimeString();
+
+    const rows = watchlist.map(symbol => {
+        const quote = realtimeQuotes[symbol];
+        if (!quote) {
+            return `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #f9fafb; border-radius: 8px; color: #6b7280;">
+                <div><strong>${symbol}</strong></div>
+                <div>等待行情推送…</div>
+            </div>`;
+        }
+        const currentPrice = quote.price;
+        const changePercent = quote.change_percent || 0;
+        const isPositive = changePercent >= 0;
+
+        return `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #f9fafb; border-radius: 8px;">
+                <div>
+                    <strong>${symbol}</strong>
+                    <div style="font-size: 1.2rem; margin: 4px 0;">$${Number(currentPrice).toFixed(2)}</div>
+                    <div style="font-size: 0.8rem; color: #9ca3af;">成交量 ${formatNumber(quote.volume || 0)}</div>
+                </div>
+                <div style="text-align: right; color: ${isPositive ? '#10b981' : '#ef4444'};">
+                    <div style="font-size: 1.1rem;">
+                        ${isPositive ? '↑' : '↓'} ${Math.abs(changePercent).toFixed(2)}%
+                    </div>
+                    <div style="font-size: 0.85rem;">
+                        ${isPositive ? '+' : '-'}$${Math.abs(quote.change || 0).toFixed(2)}
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+
+    container.innerHTML = `
+        <div style="margin-top: 20px;">
+            <h5>🕐 最后更新: ${timestamp}（WebSocket 推送）</h5>
+            <div style="display: grid; gap: 12px; margin-top: 12px;">${rows}</div>
+        </div>`;
+}
+
+// 复位按钮与运行状态（连接断开或手动停止共用）
+function finishRealtimeStopped() {
+    window.isRealTimeRunning = false;
+    const btn = document.querySelector('.btn[onclick="startRealTime()"]');
+    if (btn) btn.textContent = '开始实时监控';
 }
 
 // 停止实时监控
 function stopRealTime() {
-    window.isRealTimeRunning = false;
-    document.querySelector('.btn[onclick="startRealTime()"]').textContent = '开始实时监控';
-
-    if (realtimeInterval) {
-        clearInterval(realtimeInterval);
-        realtimeInterval = null;
+    finishRealtimeStopped();
+    if (realtimeSocket) {
+        try { realtimeSocket.close(); } catch (error) { /* 已关闭则忽略 */ }
+        realtimeSocket = null;
     }
-
     showStatus('realtime-status', 'success', '⏹️ 实时监控已停止');
-}
-
-// 更新实时数据
-function updateRealTimeData(watchlist) {
-    const container = document.getElementById('realtime-results');
-    const timestamp = new Date().toLocaleTimeString();
-
-    let html = `
-        <div style="margin-top: 20px;">
-            <h5>🕐 最后更新: ${timestamp}</h5>
-            <div style="display: grid; gap: 12px; margin-top: 12px;">
-    `;
-
-    watchlist.forEach(symbol => {
-        const mockData = generateMockData(symbol, 1);
-        const currentPrice = mockData[0].price;
-        const previousPrice = currentPrice + (Math.random() - 0.5) * 5;
-        const change = ((currentPrice - previousPrice) / previousPrice) * 100;
-        const isPositive = change >= 0;
-
-        html += `
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #f9fafb; border-radius: 8px;">
-                <div>
-                    <strong>${symbol}</strong>
-                    <div style="font-size: 1.2rem; margin: 4px 0;">$${currentPrice.toFixed(2)}</div>
-                </div>
-                <div style="text-align: right; color: ${isPositive ? '#10b981' : '#ef4444'};">
-                    <div style="font-size: 1.1rem;">
-                        ${isPositive ? '↑' : '↓'} ${Math.abs(change).toFixed(2)}%
-                    </div>
-                    <div style="font-size: 0.85rem;">
-                        ${isPositive ? '+$' : '-$'}${Math.abs(currentPrice - previousPrice).toFixed(2)}
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-
-    html += '</div></div>';
-    container.innerHTML = html;
 }
 
 // 获取性能指标
@@ -366,12 +497,17 @@ function drawPriceChart() {
     canvas.style.display = 'block';
     const ctx = canvas.getContext('2d');
 
-    // 生成一些示例数据
-    const prices = [];
-    let basePrice = 100;
-    for (let i = 0; i < 50; i++) {
-        basePrice += (Math.random() - 0.5) * 2;
-        prices.push(basePrice);
+    // 优先使用分析时拉取的真实历史收盘价；无数据时回退随机示例
+    let prices;
+    if (window.lastHistorySeries && window.lastHistorySeries.length > 1) {
+        prices = window.lastHistorySeries.map(d => d.price);
+    } else {
+        prices = [];
+        let basePrice = 100;
+        for (let i = 0; i < 50; i++) {
+            basePrice += (Math.random() - 0.5) * 2;
+            prices.push(basePrice);
+        }
     }
 
     // 清除画布
@@ -427,7 +563,7 @@ function formatCurrency(amount) {
 
 // 页面卸载时清理
 window.addEventListener('beforeunload', () => {
-    if (realtimeInterval) {
-        clearInterval(realtimeInterval);
+    if (realtimeSocket) {
+        try { realtimeSocket.close(); } catch (error) { /* 已关闭则忽略 */ }
     }
 });
