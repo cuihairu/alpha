@@ -17,6 +17,21 @@ pub struct TimeSeriesPoint {
     pub metadata: Option<serde_json::Value>,
 }
 
+fn market_data_to_point(data: &MarketData) -> TimeSeriesPoint {
+    TimeSeriesPoint {
+        timestamp: data.timestamp,
+        value: data.price,
+        volume: Some(data.volume),
+        metadata: Some(serde_json::json!({
+            "bid": data.bid,
+            "ask": data.ask,
+            "open": data.open,
+            "high": data.high,
+            "low": data.low,
+        })),
+    }
+}
+
 /// 时间序列数据段
 #[derive(Debug, Clone)]
 pub struct TimeSeries {
@@ -37,9 +52,39 @@ impl TimeSeries {
         }
     }
 
+    /// 写入单点：按 ts 二分定位，有序插入或覆盖同 ts 旧点（UPSERT，最后写赢，
+    /// 与 Timescale 层 ON CONFLICT DO UPDATE 口径一致）。
+    /// 不变量：`data` 恒按 ts 升序且 (symbol, ts) 唯一——所有读路径
+    /// （get_latest / get_points_in_range / resample / get_series）零改动。
+    /// 此前实现是 push + 全量排序（逐条灌入 O(n² log n)，48 万点需数分钟）。
     pub fn add_point(&mut self, point: TimeSeriesPoint) {
-        self.data.push(point);
-        self.data.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        match self
+            .data
+            .binary_search_by(|p| p.timestamp.cmp(&point.timestamp))
+        {
+            Ok(idx) => self.data[idx] = point, // 同 ts：覆盖旧点（最后写赢）
+            Err(idx) => self.data.insert(idx, point),
+        }
+        self.updated_at = Utc::now();
+    }
+
+    /// 批量写入：一次追加 + 一次排序 + 一次去重，把批量灌入从
+    /// 逐条全排序的 O(n² log n) 降到 O((n+m) log(n+m))。
+    /// 同 ts 冲突同为最后写赢（含批内重复、批与存量重复两种情况）。
+    pub fn add_points<I: IntoIterator<Item = TimeSeriesPoint>>(&mut self, points: I) {
+        let mut merged = std::mem::take(&mut self.data);
+        merged.extend(points);
+        // 稳定排序：同 ts 保持插入顺序，下面的去重因此天然「后者覆盖前者」
+        merged.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+
+        let mut deduped: Vec<TimeSeriesPoint> = Vec::with_capacity(merged.len());
+        for point in merged {
+            match deduped.last_mut() {
+                Some(last) if last.timestamp == point.timestamp => *last = point,
+                _ => deduped.push(point),
+            }
+        }
+        self.data = deduped;
         self.updated_at = Utc::now();
     }
 
@@ -125,18 +170,7 @@ impl TimeSeriesStorage {
 
     /// 添加市场数据
     pub async fn add_market_data(&self, data: &MarketData) -> AlphaResult<()> {
-        let point = TimeSeriesPoint {
-            timestamp: data.timestamp,
-            value: data.price,
-            volume: Some(data.volume),
-            metadata: Some(serde_json::json!({
-                "bid": data.bid,
-                "ask": data.ask,
-                "open": data.open,
-                "high": data.high,
-                "low": data.low,
-            })),
-        };
+        let point = market_data_to_point(data);
 
         let mut series_map = self.series.write().await;
         let series = series_map
@@ -147,28 +181,23 @@ impl TimeSeriesStorage {
         Ok(())
     }
 
-    /// 批量添加市场数据
+    /// 批量添加市场数据：按 symbol 分组，每个序列一次批量写入
+    /// （一次排序/去重），不再逐条触发全量排序。
     pub async fn add_market_data_batch(&self, data_list: &[MarketData]) -> AlphaResult<()> {
-        let mut series_map = self.series.write().await;
-
+        let mut grouped: BTreeMap<String, Vec<TimeSeriesPoint>> = BTreeMap::new();
         for market_data in data_list {
-            let point = TimeSeriesPoint {
-                timestamp: market_data.timestamp,
-                value: market_data.price,
-                volume: Some(market_data.volume),
-                metadata: Some(serde_json::json!({
-                    "bid": market_data.bid,
-                    "ask": market_data.ask,
-                    "open": market_data.open,
-                    "high": market_data.high,
-                    "low": market_data.low,
-                })),
-            };
-
-            let series = series_map
+            grouped
                 .entry(market_data.symbol.clone())
-                .or_insert_with(|| TimeSeries::new(market_data.symbol.clone()));
-            series.add_point(point);
+                .or_default()
+                .push(market_data_to_point(market_data));
+        }
+
+        let mut series_map = self.series.write().await;
+        for (symbol, points) in grouped {
+            let series = series_map
+                .entry(symbol.clone())
+                .or_insert_with(|| TimeSeries::new(symbol));
+            series.add_points(points);
         }
 
         Ok(())
@@ -343,4 +372,102 @@ mod tests {
         assert_eq!(range_data[0].value, 150.0);
         assert_eq!(range_data[4].value, 154.0);
     }
+
+    fn md(symbol: &str, ts: DateTime<Utc>, price: f64) -> MarketData {
+        MarketData {
+            symbol: symbol.to_string(),
+            timestamp: ts,
+            price,
+            volume: 100,
+            bid: None,
+            ask: None,
+            open: None,
+            high: None,
+            low: None,
+        }
+    }
+
+    /// 批量乱序灌入后：内存序列恒有序，区间查询有序返回（读路径不变式）。
+    #[tokio::test]
+    async fn batch_out_of_order_insert_is_sorted_and_queryable() {
+        let storage = TimeSeriesStorage::new();
+        let base = Utc::now();
+
+        let shuffled: Vec<MarketData> = [3_i64, 0, 7, 2, 9, 1, 5, 8, 4, 6]
+            .iter()
+            .map(|&i| md("SHUF", base + chrono::Duration::seconds(i), 100.0 + i as f64))
+            .collect();
+        storage.add_market_data_batch(&shuffled).await.unwrap();
+
+        let series = storage.get_series("SHUF").await.unwrap().unwrap();
+        let timestamps: Vec<i64> = series
+            .data
+            .iter()
+            .map(|p| (p.timestamp - base).num_seconds())
+            .collect();
+        assert_eq!(timestamps, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "series must stay sorted");
+
+        let range = storage
+            .get_data_in_range("SHUF", base, base + chrono::Duration::seconds(4))
+            .await
+            .unwrap();
+        assert_eq!(range.len(), 5);
+        assert_eq!(range[0].value, 100.0);
+        assert_eq!(range[4].value, 104.0);
+        assert_eq!(storage.get_latest_price("SHUF").await.unwrap(), Some(109.0));
+    }
+
+    /// 重复 (symbol, ts) 去重：单点与批量路径同为「最后写赢」，只留一条。
+    #[tokio::test]
+    async fn duplicate_symbol_ts_upserts_last_write_wins() {
+        let storage = TimeSeriesStorage::new();
+        let base = Utc::now();
+        let ts1 = base;
+        let ts2 = base + chrono::Duration::seconds(1);
+
+        // 单点路径：同 ts 后写覆盖前写
+        storage.add_market_data(&md("DUP", ts1, 10.0)).await.unwrap();
+        storage.add_market_data(&md("DUP", ts1, 20.0)).await.unwrap();
+
+        // 批量路径：批内重复 + 与存量重复，均保留最后写入
+        storage
+            .add_market_data_batch(&[md("DUP", ts1, 30.0), md("DUP", ts2, 99.0), md("DUP", ts2, 88.0)])
+            .await
+            .unwrap();
+
+        let series = storage.get_series("DUP").await.unwrap().unwrap();
+        assert_eq!(series.data.len(), 2, "duplicate (symbol, ts) must collapse to one point");
+        assert_eq!(series.data[0].timestamp, ts1);
+        assert_eq!(series.data[0].value, 30.0, "batch later write must win over existing point");
+        assert_eq!(series.data[1].timestamp, ts2);
+        assert_eq!(series.data[1].value, 88.0, "within-batch later write must win");
+    }
+
+    /// 写后立即查询可见（单点路径，含乱序插入后 get_latest 语义）。
+    #[tokio::test]
+    async fn single_write_is_immediately_visible_in_range_query() {
+        let storage = TimeSeriesStorage::new();
+        let base = Utc::now();
+        let late = base + chrono::Duration::hours(1);
+        let early = base - chrono::Duration::hours(1);
+
+        storage.add_market_data(&md("VIS", late, 42.0)).await.unwrap();
+        // 写入乱序的更早点后，区间查询与最新价都要立即反映
+        let visible = storage
+            .get_data_in_range("VIS", late, late)
+            .await
+            .unwrap();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].value, 42.0);
+
+        storage.add_market_data(&md("VIS", early, 41.0)).await.unwrap();
+        let all = storage
+            .get_data_in_range("VIS", early, late)
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].value, 41.0, "earlier point must sort first");
+        assert_eq!(storage.get_latest_price("VIS").await.unwrap(), Some(42.0));
+    }
 }
+
