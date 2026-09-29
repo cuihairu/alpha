@@ -7,6 +7,7 @@
 pub mod analytics;
 pub mod backtest;
 pub mod errors;
+pub mod hybrid_cache;
 pub mod indicators;
 pub mod models;
 pub mod platform;

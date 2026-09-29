@@ -71,7 +71,21 @@
   并行会话注：本项 shared_buffer/alloc/free 及本注首段由并行会话 a8aaa97 入库
   （其提交吸收了本会话未提交 WIP），backtestSmaCrossPtr/测试亦随其入库，
   续作提交补齐 fmt 红灯修复与基准数据）
-- [ ] 构建混合存储架构（WASM 内存 + IndexedDB + 服务端缓存）
+- [x] 构建混合存储架构（WASM 内存 + IndexedDB + 服务端缓存）
+  （2026-09-29 最小可用版本，三层 read-through 分工：
+  packages/core/src/hybrid_cache.rs = L0 纯计算核心——LruCache O(1) 内存层
+  （命中提新鲜度/超容驱逐/分层计数）、PersistentStore trait（L2 持久层契约，
+  InMemoryPersistentStore 参考实现 + 契约测试锁定语义）、RemoteSource trait
+  （L3 服务端源缝——HTTP 属 L1 服务层，L0 黑名单禁 reqwest）、HybridCacheService
+  read-through 组合（L1→L2 回填 L1→L3 写穿 L2+L1）+ write_through/invalidate/stats，
+  10 单测含 LRU 驱逐序/三层命中回填/NotFound 传播/失效重拉/容量 0 拒绝；
+  wasm-analyzer/storage.rs = HybridStorage 由元信息空壳升级为真行为：内嵌 core
+  LruCache，putPrices/getPrices（miss→NULL）/invalidateSymbol/getStorageStats
+  （lru_len/hits/misses/evictions 分层计数）；IndexedDB 真实异步读写为 JS glue
+  实现 PersistentStore 契约（schema 元信息导出保留），服务端缓存经
+  RemoteSource 缝接——两端均为显式接口缝，最小口径注明非敷衍简化；
+  native 20 通过 3 自跳过 + wasm32 边界测试 1（浏览器跑，门禁编译验证），
+  check-lint/check-cross-platform/全量 17 套件全绿）
 - [ ] 开发流式数据处理和并行计算机制（Web Workers + Rayon）
 - [ ] 实现实时数据同步协议（WebSocket 增量更新 + 版本控制）
 
