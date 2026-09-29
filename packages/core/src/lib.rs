@@ -10,7 +10,10 @@ pub mod errors;
 pub mod hybrid_cache;
 pub mod indicators;
 pub mod models;
+pub mod parallel;
 pub mod platform;
+pub mod streaming;
+pub mod sync;
 pub mod utils;
 
 // 重新导出主要类型
@@ -18,6 +21,7 @@ pub use analytics::AnalysisEngine;
 pub use errors::*;
 pub use indicators::TechnicalIndicators;
 pub use models::*;
+pub use sync::{SyncEngine, SyncError, SyncOutcome};
 pub use utils::numeric;
 pub use utils::string;
 pub use utils::time;

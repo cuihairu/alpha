@@ -66,6 +66,9 @@ redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 tonic = "0.10"
 prost = "0.12"
 
+# 并行计算（native 多核；wasm32 无线程，不引入）
+rayon = "1.10"
+
 # WebAssembly
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

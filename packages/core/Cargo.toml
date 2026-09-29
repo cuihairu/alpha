@@ -39,3 +39,9 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
+
+# Rayon 多核并行：wasm32-unknown-unknown 无线程模型（Web Worker 承担并行，
+# 见 wasm-analyzer/src/worker.rs），故按 target 门控——native 走真线程池，
+# wasm32 由 parallel.rs 的顺序分支兜底（语义等价，见 check-cross-platform.sh 门禁）。
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { workspace = true }

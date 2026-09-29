@@ -22,7 +22,10 @@ pub use shared_buffer::{SharedF64Buffer, MAX_BUFFER_LEN};
 pub use storage::{HybridStorage, IndexedDBStorage};
 pub use streaming::{BatchStreamProcessor, StreamProcessor};
 pub use websocket::WebSocketClient;
-pub use worker::{BatchComputer, ParallelScheduler, WorkerPool};
+pub use worker::{
+    handle_task, init_worker_panic_hook, plan_chunks, BatchComputer, ParallelScheduler,
+    PoolStrategy, WorkerPool, WorkerResult, WorkerTask,
+};
 
 // 在浏览器控制台中显示 panic 信息
 #[wasm_bindgen(start)]
@@ -543,6 +546,144 @@ impl Utils {
     }
 }
 
+/// 实时数据同步的 wasm 薄绑定（算法核心在 `alpha_core::sync`，此处只做 JS 边界转换）
+///
+/// 架构注：浏览器侧 WebSocket 与同步状态机归属 JS 主线程（wasm-analyzer 的
+/// `WebSocketClient` 只管传输），本段提供两条缝：
+/// * [`sync_build_delta`]/[`sync_apply_delta`]：增量帧生成/合入落在 Rust 侧，
+///   与 real-time-feed 服务端复用同一 `build_delta` 实现，两端协议不漂移；
+/// * [`WasmSyncEngine`]：把 alpha-core 的版本/丢帧状态机暴露为 JS 对象句柄，
+///   Full/Delta 接入、Gap 检测、Resync 基线恢复由同一实现驱动（逻辑单测在
+///   alpha-core，此处验证 JS 边界转换形态）。
+
+/// 增量生成：`prev`/`next` 对象 → 仅变化字段的 Delta（与服务端同实现）。
+/// `#[allow(clippy::empty_line_after_outer_attr)]`：此块 `///` 后留有空行是故意的，
+/// 保持多行文档注释在视觉上与随后的 `#[wasm_bindgen]` 属性分组整洁。
+#[allow(clippy::empty_line_after_outer_attr)]
+#[wasm_bindgen(js_name = buildSyncDelta)]
+pub fn sync_build_delta(prev: JsValue, next: JsValue) -> Result<JsValue, JsValue> {
+    let prev: serde_json::Value = serde_wasm_bindgen::from_value(prev)
+        .map_err(|e| JsValue::from_str(&format!("prev 解析失败: {e}")))?;
+    let next: serde_json::Value = serde_wasm_bindgen::from_value(next)
+        .map_err(|e| JsValue::from_str(&format!("next 解析失败: {e}")))?;
+    serde_wasm_bindgen::to_value(&alpha_core::sync::build_delta(&prev, &next))
+        .map_err(|e| JsValue::from_str(&format!("delta 序列化失败: {e}")))
+}
+
+/// 增量合入：`base` 快照 ⊕ `delta` → 新快照（与 `buildSyncDelta` 互为逆操作）
+#[wasm_bindgen(js_name = applySyncDelta)]
+pub fn sync_apply_delta(base: JsValue, delta: JsValue) -> Result<JsValue, JsValue> {
+    let base: serde_json::Value = serde_wasm_bindgen::from_value(base)
+        .map_err(|e| JsValue::from_str(&format!("base 解析失败: {e}")))?;
+    let delta: serde_json::Value = serde_wasm_bindgen::from_value(delta)
+        .map_err(|e| JsValue::from_str(&format!("delta 解析失败: {e}")))?;
+    serde_wasm_bindgen::to_value(&alpha_core::sync::apply_delta(&base, &delta))
+        .map_err(|e| JsValue::from_str(&format!("合并结果序列化失败: {e}")))
+}
+
+/// 版本化同步状态机（JS 对象句柄）：Full/Delta 接入、丢帧检测、Resync 基线恢复。
+/// 语义与 `alpha_core::sync::SyncEngine` 完全一致（同一实现），此处仅包
+/// `RefCell` 暴露可变状态（JS 单线程，无并发借用）。
+#[wasm_bindgen]
+pub struct WasmSyncEngine {
+    inner: std::cell::RefCell<alpha_core::sync::SyncEngine>,
+}
+
+#[wasm_bindgen]
+impl WasmSyncEngine {
+    /// 新建空状态机（未跟踪任何通道）
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: std::cell::RefCell::new(alpha_core::sync::SyncEngine::new()),
+        }
+    }
+
+    /// 应用一帧。`op` 取 `"full"` | `"delta"`（大小写不敏感）。
+    /// 返回结果对象（snake_case）：
+    /// `{"kind":"Advanced","seq":N}` / `{"kind":"Idempotent","seq":N}` /
+    /// `{"kind":"Gap","expected":N,"got":M}`；Delta 无本地快照报错。
+    ///
+    /// `seq` 以 f64 传入（JS number），通道版本号远小于 2^53 精度上限。
+    pub fn apply(
+        &self,
+        channel: &str,
+        seq: f64,
+        op: &str,
+        data: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let data: serde_json::Value = serde_wasm_bindgen::from_value(data)
+            .map_err(|e| JsValue::from_str(&format!("data 解析失败: {e}")))?;
+        let outcome = match op.to_ascii_lowercase().as_str() {
+            "full" => self
+                .inner
+                .borrow_mut()
+                .apply_full(channel, seq as u64, data),
+            "delta" => match self
+                .inner
+                .borrow_mut()
+                .apply_delta(channel, seq as u64, data)
+            {
+                Ok(outcome) => outcome,
+                Err(e) => return Err(JsValue::from_str(&e.to_string())),
+            },
+            other => {
+                return Err(JsValue::from_str(&format!(
+                    "未知 op: {other}（应为 full|delta）"
+                )))
+            }
+        };
+        let result = match outcome {
+            alpha_core::sync::SyncOutcome::Advanced { seq } => {
+                serde_json::json!({"kind": "Advanced", "seq": seq})
+            }
+            alpha_core::sync::SyncOutcome::Idempotent { seq } => {
+                serde_json::json!({"kind": "Idempotent", "seq": seq})
+            }
+            alpha_core::sync::SyncOutcome::Gap { expected, got } => {
+                serde_json::json!({"kind": "Gap", "expected": expected, "got": got})
+            }
+        };
+        serde_wasm_bindgen::to_value(&result)
+            .map_err(|e| JsValue::from_str(&format!("结果序列化失败: {e}")))
+    }
+
+    /// 通道本地快照（对象），未跟踪/无快照返回 `null`
+    pub fn snapshot(&self, channel: &str) -> Result<JsValue, JsValue> {
+        match self.inner.borrow().snapshot(channel) {
+            Some(value) => serde_wasm_bindgen::to_value(value)
+                .map_err(|e| JsValue::from_str(&format!("快照序列化失败: {e}"))),
+            None => Ok(JsValue::NULL),
+        }
+    }
+
+    /// 通道最近应用版本（number），未跟踪返回 `null`
+    pub fn last_seq(&self, channel: &str) -> JsValue {
+        match self.inner.borrow().last_seq(channel) {
+            Some(seq) => JsValue::from_f64(seq as f64),
+            None => JsValue::NULL,
+        }
+    }
+
+    /// 检测到 Gap 后 Resync 应发起的基准版本（number）
+    pub fn resync_from(&self, channel: &str) -> JsValue {
+        JsValue::from_f64(self.inner.borrow().resync_from(channel) as f64)
+    }
+
+    /// 重连清理：丢弃通道本地状态（下个 `full` 帧重建基线）
+    pub fn reset_channel(&self, channel: &str) {
+        self.inner.borrow_mut().reset_channel(channel);
+    }
+}
+
+/// Default 契约：等价于 `Self::new()`，便于 `#[serde]` / 反序列化场景默认值。
+#[allow(clippy::new_without_default)]
+impl Default for WasmSyncEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,6 +704,107 @@ mod tests {
     fn test_analyzer_creation() {
         let _analyzer = WasmAnalyzer::new(None);
         let _analyzer_with_precision = WasmAnalyzer::new(Some(4));
+    }
+
+    /// 同步绑定：增量生成/合入 + 状态机全链路（Full→Delta→Gap→Resync 恢复）。
+    /// 逻辑断言在 alpha-core 单测，此处锁定 JS 边界转换形态（snake_case 结果对象）
+    #[wasm_bindgen_test]
+    fn test_sync_binding_delta_and_engine() {
+        // 纯函数：buildSyncDelta 只保留变化字段
+        let prev = serde_wasm_bindgen::to_value(&serde_json::json!({"price": 10.0, "volume": 100}))
+            .unwrap();
+        let next = serde_wasm_bindgen::to_value(&serde_json::json!({"price": 10.5, "volume": 100}))
+            .unwrap();
+        let delta = sync_build_delta(prev, next).unwrap();
+        let delta_val: serde_json::Value = serde_wasm_bindgen::from_value(delta).unwrap();
+        assert_eq!(delta_val, serde_json::json!({"price": 10.5}));
+
+        // 纯函数：applySyncDelta 与 buildSyncDelta 互逆
+        let merged = sync_apply_delta(
+            serde_wasm_bindgen::to_value(&serde_json::json!({"price": 10.0, "volume": 100}))
+                .unwrap(),
+            serde_wasm_bindgen::to_value(&serde_json::json!({"price": 10.5})).unwrap(),
+        )
+        .unwrap();
+        let merged_val: serde_json::Value = serde_wasm_bindgen::from_value(merged).unwrap();
+        assert_eq!(
+            merged_val,
+            serde_json::json!({"price": 10.5, "volume": 100})
+        );
+
+        // 状态机：Full 建基线 → Delta 丢帧（seq 3）→ Gap → Resync Full 恢复
+        let engine = WasmSyncEngine::new();
+        let out_full = engine
+            .apply(
+                "rtq",
+                1.0,
+                "full",
+                serde_wasm_bindgen::to_value(&serde_json::json!({"price": 10.0})).unwrap(),
+            )
+            .unwrap();
+        let out_full_val: serde_json::Value = serde_wasm_bindgen::from_value(out_full).unwrap();
+        assert_eq!(out_full_val["kind"], "Advanced");
+        assert_eq!(out_full_val["seq"], 1);
+
+        let out_gap = engine
+            .apply(
+                "rtq",
+                3.0,
+                "delta",
+                serde_wasm_bindgen::to_value(&serde_json::json!({"price": 12.0})).unwrap(),
+            )
+            .unwrap();
+        let out_gap_val: serde_json::Value = serde_wasm_bindgen::from_value(out_gap).unwrap();
+        assert_eq!(out_gap_val["kind"], "Gap");
+        assert_eq!(out_gap_val["expected"], 2);
+        assert_eq!(out_gap_val["got"], 3);
+        // Gap 不污染快照
+        let snap_val: serde_json::Value =
+            serde_wasm_bindgen::from_value(engine.snapshot("rtq").unwrap()).unwrap();
+        assert_eq!(snap_val["price"], 10.0);
+        // resync_from 给出恢复基准
+        assert_eq!(engine.resync_from("rtq").as_f64().unwrap(), 1.0);
+
+        // Resync 恢复：Full 以最新版本重建基线
+        let out_recover = engine
+            .apply(
+                "rtq",
+                3.0,
+                "full",
+                serde_wasm_bindgen::to_value(&serde_json::json!({"price": 12.0, "volume": 99}))
+                    .unwrap(),
+            )
+            .unwrap();
+        let out_rec_val: serde_json::Value = serde_wasm_bindgen::from_value(out_recover).unwrap();
+        assert_eq!(out_rec_val["kind"], "Advanced");
+        let restored: serde_json::Value =
+            serde_wasm_bindgen::from_value(engine.snapshot("rtq").unwrap()).unwrap();
+        assert_eq!(restored["price"], 12.0);
+        assert_eq!(restored["volume"], 99);
+        assert_eq!(engine.last_seq("rtq").as_f64().unwrap(), 3.0);
+
+        // Delta 无本地快照：报错（协议违约直接暴露给 JS）
+        assert!(engine
+            .apply(
+                "nope",
+                1.0,
+                "delta",
+                serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap(),
+            )
+            .is_err());
+        // 未知 op：报错
+        assert!(engine
+            .apply(
+                "rtq",
+                4.0,
+                "bogus",
+                serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap(),
+            )
+            .is_err());
+
+        // reset_channel：清理后 last_seq 回 null
+        engine.reset_channel("rtq");
+        assert!(engine.last_seq("rtq").is_null());
     }
 
     /// 回测绑定：上涨序列净值应为持有收益（逻辑断言在 alpha-core 单测，

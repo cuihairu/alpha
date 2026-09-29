@@ -2,7 +2,8 @@
 //!
 //! 实时数据流推送服务，支持 WebSocket 连接和广播
 
-use alpha_protocols::websocket::{channels, DataMessage, WsMessage};
+use alpha_core::sync::build_delta;
+use alpha_protocols::websocket::{channels, SyncOp, WsMessage};
 use alpha_storage::{InvalidMessage, RedisStreamQueue, StreamEnvelope, StreamMessage};
 use axum::{
     extract::{
@@ -21,7 +22,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    sync::broadcast,
+    sync::{broadcast, mpsc},
     time::{interval, MissedTickBehavior},
 };
 
@@ -91,6 +92,68 @@ impl ConnectionManager {
 struct AppState {
     connection_manager: ConnectionManager,
     data_sender: broadcast::Sender<RealTimeData>,
+    /// 逐通道版本化发布状态：seq 递增 + 最近全量快照（增量基准）
+    sync_state: Arc<Mutex<HashMap<String, ChannelSyncState>>>,
+}
+
+/// 服务端单通道同步状态（版本控制的服务端半边，见 [`next_versioned_frame`]）
+#[derive(Debug, Clone)]
+struct ChannelSyncState {
+    /// 通道内已发布的帧数（= 最新版本号），全连接共享同一序列
+    seq: u64,
+    /// 最近一次广播的全量快照：非空时下一帧发 Delta（相对此快照的字段差）
+    last_snapshot: Option<serde_json::Value>,
+}
+
+impl ChannelSyncState {
+    fn new() -> Self {
+        Self {
+            seq: 0,
+            last_snapshot: None,
+        }
+    }
+}
+
+/// 构造版本化同步帧：通道 seq 递增；首帧 `Full` 全量，后续 `Delta` 差异（只含变化字段）。
+/// seq 与快照在锁内更新——全连接共享同一序列，客户端据此做丢帧检测/Resync。
+fn next_versioned_frame(
+    hub: &Mutex<HashMap<String, ChannelSyncState>>,
+    channel: &str,
+    data: &RealTimeData,
+) -> WsMessage {
+    let value = serde_json::to_value(data).unwrap_or_default();
+    let mut hub = hub.lock().unwrap();
+    let state = hub
+        .entry(channel.to_string())
+        .or_insert_with(ChannelSyncState::new);
+    state.seq += 1;
+    let payload = match &state.last_snapshot {
+        Some(prev) => build_delta(prev, &value),
+        None => value.clone(),
+    };
+    let op = if state.last_snapshot.is_some() {
+        SyncOp::Delta
+    } else {
+        SyncOp::Full
+    };
+    state.last_snapshot = Some(value);
+    WsMessage::sync(channel.to_string(), state.seq, op, payload)
+}
+
+/// Resync 响应：返回通道当前版本的 `Full` 快照帧（无快照/未知通道返回 None）
+fn resync_full_snapshot(
+    hub: &Mutex<HashMap<String, ChannelSyncState>>,
+    channel: &str,
+) -> Option<WsMessage> {
+    let hub = hub.lock().unwrap();
+    let state = hub.get(channel)?;
+    let snapshot = state.last_snapshot.clone()?;
+    Some(WsMessage::sync(
+        channel.to_string(),
+        state.seq,
+        SyncOp::Full,
+        snapshot,
+    ))
 }
 
 const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
@@ -113,6 +176,7 @@ async fn main() -> anyhow::Result<()> {
     let app_state = Arc::new(AppState {
         connection_manager: ConnectionManager::new(),
         data_sender,
+        sync_state: Arc::new(Mutex::new(HashMap::new())),
     });
 
     // 优先从 Redis Streams 消费；不可用时回退到本地模拟数据。
@@ -213,31 +277,63 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
     let send_connection_id = connection_id.clone();
     let recv_connection_id = connection_id.clone();
 
-    // 发送数据的任务
+    // 发送数据的任务：广播帧走版本化同步（首帧 Full、后续 Delta），
+    // 与 Resync 定向回复（mpsc 带外通道）合并到同一发送循环。
+    let send_sync_state = app_state.sync_state.clone();
+    let recv_sync_state = app_state.sync_state.clone();
+    let (resync_tx, mut resync_rx) = mpsc::unbounded_channel::<WsMessage>();
     let send_task = tokio::spawn(async move {
-        while let Ok(data) = data_receiver.recv().await {
-            let ws_message = WsMessage::Data(DataMessage {
-                channel: channels::REAL_TIME_QUOTES.to_string(),
-                data: serde_json::to_value(&data).unwrap_or_default(),
-                timestamp: data.timestamp.timestamp_millis(),
-            });
-
-            let message = match serde_json::to_string(&ws_message) {
-                Ok(json) => Message::Text(json),
-                Err(e) => {
-                    tracing::error!("Failed to serialize real-time data: {}", e);
-                    continue;
+        loop {
+            tokio::select! {
+                res = resync_rx.recv() => {
+                    match res {
+                        Some(frame) => {
+                            let message = match serde_json::to_string(&frame) {
+                                Ok(json) => Message::Text(json),
+                                Err(e) => {
+                                    tracing::error!("Failed to serialize resync frame: {}", e);
+                                    continue;
+                                }
+                            };
+                            if sender.send(message).await.is_err() {
+                                tracing::debug!("Send loop closed for {}", send_connection_id);
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
                 }
-            };
-
-            if sender.send(message).await.is_err() {
-                tracing::debug!("Send loop closed for {}", send_connection_id);
-                break;
+                data = data_receiver.recv() => {
+                    let data = match data {
+                        Ok(data) => data,
+                        Err(e) => {
+                            // 广播 lagged（订阅过慢被丢弃）或通道关闭：与旧实现同等退出语义
+                            tracing::debug!("Broadcast recv failed for {}: {}", send_connection_id, e);
+                            break;
+                        }
+                    };
+                    let frame = next_versioned_frame(
+                        &send_sync_state,
+                        channels::REAL_TIME_QUOTES,
+                        &data,
+                    );
+                    let message = match serde_json::to_string(&frame) {
+                        Ok(json) => Message::Text(json),
+                        Err(e) => {
+                            tracing::error!("Failed to serialize sync frame: {}", e);
+                            continue;
+                        }
+                    };
+                    if sender.send(message).await.is_err() {
+                        tracing::debug!("Send loop closed for {}", send_connection_id);
+                        break;
+                    }
+                }
             }
         }
     });
 
-    // 接收消息的任务（处理心跳等）
+    // 接收消息的任务（处理心跳、订阅与 Resync）
     let receive_task = tokio::spawn(async move {
         while let Some(msg) = receiver.next().await {
             match msg {
@@ -248,7 +344,35 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
                         text
                     );
 
-                    // 处理订阅请求
+                    // 版本化同步协议：Resync（丢帧恢复）与订阅请求
+                    if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
+                        match ws_msg {
+                            WsMessage::Resync(req) => {
+                                tracing::info!(
+                                    "Client {} resync channel {} from seq {}",
+                                    recv_connection_id,
+                                    req.channel,
+                                    req.from_seq
+                                );
+                                if let Some(full) =
+                                    resync_full_snapshot(&recv_sync_state, &req.channel)
+                                {
+                                    let _ = resync_tx.send(full);
+                                }
+                            }
+                            WsMessage::Subscribe(sub) => {
+                                tracing::info!(
+                                    "Client {} subscribed to: {:?} (channels {:?})",
+                                    recv_connection_id,
+                                    sub.symbols,
+                                    sub.channels
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // 处理订阅请求（旧版兼容）
                     if let Ok(subscribe_msg) = serde_json::from_str::<SubscribeMessage>(&text) {
                         tracing::info!(
                             "Client {} subscribed to: {:?}",
@@ -633,5 +757,143 @@ mod tests {
         );
 
         assert!(envelope_to_realtime(&envelope).is_none());
+    }
+
+    /// 合成一条实时数据（price/volume 可变，其余字段固定；timestamp 固定保证
+    /// Delta 断言精确——增量只含受控变化字段）
+    fn sample_data(price: f64, volume: u64) -> RealTimeData {
+        RealTimeData {
+            symbol: "sz000001".to_string(),
+            price,
+            volume,
+            change: 0.5,
+            change_percent: 0.98,
+            timestamp: chrono::DateTime::parse_from_rfc3339("2026-09-29T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        }
+    }
+
+    /// 首帧 Full（seq=1，含全字段），第二帧 Delta（seq=2，只含变化字段）
+    #[test]
+    fn test_versioned_frame_starts_full_then_delta() {
+        let hub = Mutex::new(HashMap::new());
+
+        let first = next_versioned_frame(&hub, channels::REAL_TIME_QUOTES, &sample_data(10.0, 100));
+        match first {
+            WsMessage::Sync(s) => {
+                assert_eq!(s.seq, 1);
+                assert_eq!(s.op, SyncOp::Full);
+                assert_eq!(s.data["symbol"], "sz000001");
+                assert_eq!(s.data["price"], 10.0);
+                assert_eq!(s.data["volume"], 100);
+            }
+            other => panic!("首帧应为 Sync::Full，实际 {other:?}"),
+        }
+
+        // 价格变化：Delta 只携带变化字段；未变化字段（symbol/change 等）不重复传输
+        let second =
+            next_versioned_frame(&hub, channels::REAL_TIME_QUOTES, &sample_data(10.5, 100));
+        match second {
+            WsMessage::Sync(s) => {
+                assert_eq!(s.seq, 2);
+                assert_eq!(s.op, SyncOp::Delta);
+                assert_eq!(s.data, serde_json::json!({"price": 10.5}));
+            }
+            other => panic!("第二帧应为 Sync::Delta，实际 {other:?}"),
+        }
+
+        // 多字段变化：Delta 含全部差异字段
+        let third = next_versioned_frame(&hub, channels::REAL_TIME_QUOTES, &sample_data(11.0, 250));
+        match third {
+            WsMessage::Sync(s) => {
+                assert_eq!(s.seq, 3);
+                assert_eq!(s.op, SyncOp::Delta);
+                assert_eq!(s.data, serde_json::json!({"price": 11.0, "volume": 250}));
+            }
+            other => panic!("第三帧应为 Sync::Delta，实际 {other:?}"),
+        }
+    }
+
+    /// seq 逐通道独立递增（channel 维度隔离，互不串号）
+    #[test]
+    fn test_versioned_seq_increments_per_channel() {
+        let hub = Mutex::new(HashMap::new());
+        for _ in 0..3 {
+            next_versioned_frame(&hub, channels::REAL_TIME_QUOTES, &sample_data(1.0, 1));
+        }
+        next_versioned_frame(&hub, channels::MARKET_DEPTH, &sample_data(2.0, 2));
+
+        let hub = hub.lock().unwrap();
+        assert_eq!(hub[channels::REAL_TIME_QUOTES].seq, 3);
+        assert_eq!(hub[channels::MARKET_DEPTH].seq, 1);
+    }
+
+    /// Resync：未知通道/无快照返回 None；已广播过则回当前版本的 Full 快照
+    #[test]
+    fn test_resync_returns_current_full_snapshot() {
+        let hub = Mutex::new(HashMap::new());
+        // 未知通道
+        assert!(resync_full_snapshot(&hub, "nope").is_none());
+
+        // 广播两帧后 Resync：全量恢复 + 当前 seq
+        next_versioned_frame(&hub, channels::REAL_TIME_QUOTES, &sample_data(10.0, 100));
+        next_versioned_frame(&hub, channels::REAL_TIME_QUOTES, &sample_data(10.5, 100));
+        let full = resync_full_snapshot(&hub, channels::REAL_TIME_QUOTES).unwrap();
+        match full {
+            WsMessage::Sync(s) => {
+                assert_eq!(s.seq, 2);
+                assert_eq!(s.op, SyncOp::Full);
+                assert_eq!(s.data["price"], 10.5);
+                // Full 快照必须含全字段（客户端替换本地快照的基线）
+                assert_eq!(s.data["symbol"], "sz000001");
+                assert_eq!(s.data["volume"], 100);
+            }
+            other => panic!("Resync 响应应为 Sync::Full，实际 {other:?}"),
+        }
+    }
+
+    /// 服务端 Delta 与客户端 (alpha_core::sync) 合成为闭环：服务端发的差异
+    /// 在客户端引擎里应用后，快照收敛到服务端最新全量（端到端一致）
+    #[test]
+    fn test_server_delta_applies_on_client_engine() {
+        use alpha_core::sync::SyncEngine;
+        use alpha_protocols::websocket::SyncMessage;
+
+        let hub = Mutex::new(HashMap::new());
+        let mut engine = SyncEngine::new();
+
+        // 服务端广播两帧（Full + Delta），模拟客户端逐帧应用
+        for data in [sample_data(10.0, 100), sample_data(10.5, 150)] {
+            match next_versioned_frame(&hub, channels::REAL_TIME_QUOTES, &data) {
+                WsMessage::Sync(SyncMessage {
+                    channel,
+                    seq,
+                    op,
+                    data,
+                    ..
+                }) => match op {
+                    SyncOp::Full => {
+                        engine.apply_full(&channel, seq, data);
+                    }
+                    SyncOp::Delta => {
+                        engine.apply_delta(&channel, seq, data).unwrap();
+                    }
+                },
+                other => panic!("应为 Sync 帧，实际 {other:?}"),
+            }
+        }
+
+        // 客户端快照与服务端最新快照一致（字段逐项核对）
+        let client_snapshot = engine.snapshot(channels::REAL_TIME_QUOTES).unwrap();
+        let hub_guard = hub.lock().unwrap();
+        let server_snapshot = hub_guard[channels::REAL_TIME_QUOTES]
+            .last_snapshot
+            .as_ref()
+            .unwrap();
+        assert_eq!(client_snapshot, server_snapshot);
+        assert_eq!(client_snapshot["price"], 10.5);
+        assert_eq!(client_snapshot["volume"], 150);
+        assert_eq!(engine.last_seq(channels::REAL_TIME_QUOTES), Some(2));
     }
 }

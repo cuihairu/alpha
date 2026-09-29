@@ -86,7 +86,14 @@
   RemoteSource 缝接——两端均为显式接口缝，最小口径注明非敷衍简化；
   native 20 通过 3 自跳过 + wasm32 边界测试 1（浏览器跑，门禁编译验证），
   check-lint/check-cross-platform/全量 17 套件全绿）
-- [ ] 开发流式数据处理和并行计算机制（Web Workers + Rayon）
+- [x] 开发流式数据处理和并行计算机制（Web Workers + Rayon）
+  （2026-09-29 最小可用版本：wasm-analyzer/src/streaming.rs 新增
+  ParallelStreamProcessor（原生 Rayon / wasm32 WorkerPool 双路径）与
+  BatchStreamProcessor::computeAllIndicatorsParallel；复用
+  alpha_core::parallel::compute（native 真并行，wasm32 顺序退化，语义等价）；
+  新增 8 单测（wasm32 only）覆盖推送/批量/带报告/空缓冲区/列表清空；
+  alpha_core::parallel 9 测 + worker.rs 16 测 + streaming 2 测（native）全绿；
+  check-lint/check-cross-platform/cargo test 全仓 213 测全绿）
 - [ ] 实现实时数据同步协议（WebSocket 增量更新 + 版本控制）
 
 ## 🖥️ 桌面端应用（Tauri）

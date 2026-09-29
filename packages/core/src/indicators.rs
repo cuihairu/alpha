@@ -117,12 +117,23 @@ impl TechnicalIndicators {
         period: usize,
         std_dev: f64,
     ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        // 样本不足 period 时无有效窗口：三条线均返回 0.0 填充
+        // （缺此守卫会让下方 `period - 1` 在 usize 下溢 panic——
+        // 该路径此前只有单条长序列调用方，批量并行计算才暴露出来）
+        if period == 0 || prices.len() < period {
+            let zeros = vec![0.0; prices.len()];
+            return (zeros.clone(), zeros.clone(), zeros);
+        }
+
         let sma = self.calculate_sma(prices, period);
         let mut upper_band = vec![0.0; prices.len()];
         let mut lower_band = vec![0.0; prices.len()];
 
         for i in period - 1..prices.len() {
-            let slice = &prices[i - period + 1..=i];
+            // 窗口 = 最近 period 根：[i + 1 - period, i]
+            // 注意运算次序：写作 `i - period + 1` 在 i == period - 1（首轮）
+            // 会先发生 usize 下溢再 panic，必须先加后减。
+            let slice = &prices[i + 1 - period..=i];
             let mean = sma[i];
             let variance = slice
                 .iter()
@@ -246,6 +257,24 @@ mod tests {
 
         assert!(!rsi.is_empty());
         assert!(rsi[14] >= 0.0 && rsi[14] <= 100.0);
+    }
+
+    /// 样本不足 period 时布林带返回全 0（回归：`period - 1` 曾 usize 下溢 panic）
+    #[test]
+    fn test_bollinger_bands_insufficient_samples_do_not_panic() {
+        let indicators = TechnicalIndicators::new();
+        for len in 0..5usize {
+            let prices: Vec<f64> = (0..len).map(|i| 100.0 + i as f64).collect();
+            let (upper, middle, lower) = indicators.calculate_bollinger_bands(&prices, 20, 2.0);
+            assert_eq!(upper.len(), len);
+            assert_eq!(middle.len(), len);
+            assert_eq!(lower.len(), len);
+            assert!(upper.iter().all(|v| *v == 0.0), "len={len} 应全 0 填充");
+        }
+        // period=0 同样不应 panic（下溢守卫）
+        let prices = vec![1.0, 2.0, 3.0];
+        let (upper, _, _) = indicators.calculate_bollinger_bands(&prices, 0, 2.0);
+        assert!(upper.iter().all(|v| *v == 0.0));
     }
 
     #[test]

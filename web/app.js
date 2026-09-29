@@ -3,6 +3,7 @@
 // 全局变量
 let realtimeSocket = null;
 const realtimeQuotes = {}; // symbol → 最近一条实时报价（WebSocket 推送）
+const realtimeSyncSnapshots = {}; // symbol → 本地合并态快照（Sync Delta 帧增量合入）
 
 // ===== 后端接入配置 =====
 // 默认直连服务（data-engine 的 CORS 默认开启，浏览器跨源可直连）；
@@ -342,8 +343,12 @@ function startRealTime() {
 }
 
 // 连接 real-time-feed 的 /ws，接收 real_time_quotes 通道推送。
-// 消息协议（实测；serde tag，变体名 Data 未 rename 为小写）：
-//   {"type":"Data","channel":"real_time_quotes","data":{symbol,price,volume,change,change_percent,timestamp},"timestamp":ms}
+// 消息协议（实测；serde tag，变体名未 rename 为小写）：
+//   Sync 帧（版本化增量，服务端默认）：{"type":"Sync","channel":"real_time_quotes","seq":N,
+//     "op":"Full|Delta","data":{...},"timestamp":ms}
+//     - Full：全量快照（首帧 / Resync 恢复基线）；Delta：相对上一帧的变化字段
+//     - 前端把 Delta 合入 realtimeSyncSnapshots[symbol]，渲染以合并态为准
+//   Data 帧（旧版兼容保留）：{"type":"Data","channel":"real_time_quotes","data":{...},"timestamp":ms}
 // data-engine 会把 normalized 转发回 quotes.normalized，同一条行情可能推两帧，渲染按 symbol 覆盖去重。
 function connectRealtimeSocket(watchlist) {
     let socket;
@@ -371,6 +376,21 @@ function connectRealtimeSocket(watchlist) {
         } catch (error) {
             return; // 非JSON帧（如欢迎语）忽略
         }
+        // 版本化同步帧（{"type":"Sync","channel":..,"seq":N,"op":"Full|Delta","data":..}）：
+        // Full = 全量快照（首帧/Resync 恢复），Delta = 相对上一帧的变化字段（增量合入本地快照）。
+        // 服务端保证通道内 seq 单调递增；前端以本地合并态为准渲染，无需关心 seq。
+        if (String(message.type || '').toLowerCase() === 'sync') {
+            if (message.channel !== 'real_time_quotes') return;
+            const quote = message.data;
+            if (!quote || !quote.symbol) return;
+            const symbol = String(quote.symbol).toUpperCase();
+            if (!watchlist.includes(symbol)) return;
+            const prev = realtimeSyncSnapshots[symbol] || {};
+            realtimeSyncSnapshots[symbol] = { ...prev, ...quote };
+            realtimeQuotes[symbol] = realtimeSyncSnapshots[symbol];
+            renderRealtimeQuotes();
+            return;
+        }
         // 注意：服务端 serde 变体名未 rename，线上实际是 "Data"（PascalCase），大小写不敏感匹配
         if (String(message.type || '').toLowerCase() !== 'data') return;
         if (message.channel !== 'real_time_quotes') return;
@@ -378,6 +398,8 @@ function connectRealtimeSocket(watchlist) {
         if (!quote || !quote.symbol) return;
         const symbol = String(quote.symbol).toUpperCase();
         if (!watchlist.includes(symbol)) return;
+        // 旧版 Data 帧即全量，直接作为本地合并态基线
+        realtimeSyncSnapshots[symbol] = quote;
         realtimeQuotes[symbol] = quote;
         renderRealtimeQuotes();
     };
