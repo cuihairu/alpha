@@ -187,6 +187,102 @@ pub fn apply_delta(base: &Value, delta: &Value) -> Value {
     }
 }
 
+/// 版本表帧的操作类型（服务端发布侧记录；线上形态见
+/// `alpha_protocols::websocket::SyncOp`，一一对应）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryOp {
+    Full,
+    Delta,
+}
+
+/// 版本表中的一帧（seq + 操作 + 该帧载荷）
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryFrame {
+    pub seq: u64,
+    pub op: HistoryOp,
+    pub data: Value,
+}
+
+/// 客户端追平方案
+#[derive(Debug, Clone, PartialEq)]
+pub enum CatchUp {
+    /// 可增量拉齐：按序重放这些帧即从 `last_seq` 推进到最新（可能为空 = 已追平）
+    Frames(Vec<HistoryFrame>),
+    /// 无法增量拉齐（客户端落后超出保留窗口/通道无历史）：需全量重同步，
+    /// `latest_seq` 为服务端当前最新版本（通道未知时 `None`）
+    Resync { latest_seq: Option<u64> },
+}
+
+/// 内存态版本表（服务端发布侧）：逐通道环形保留最近 [`SyncHistory::retention`]
+/// 帧，支撑客户端「从上次版本拉齐到最新」——保留窗口内走增量重放
+/// （[`SyncHistory::catch_up`] 返回 [`CatchUp::Frames`]），落后超出窗口回落
+/// 全量重同步（[`CatchUp::Resync`]）。
+///
+/// 契约：[`SyncHistory::record`] 按 seq 单调递增调用（服务端发布路径在锁内
+/// 保证，见 real-time-feed `next_versioned_frame`）；本结构不做乱序防御——
+/// 追平的连续性校验按「保留帧是否覆盖 `last_seq+1..=最新`」判定。
+pub struct SyncHistory {
+    retention: usize,
+    channels: HashMap<String, Vec<HistoryFrame>>,
+}
+
+impl SyncHistory {
+    /// `retention` 为每通道保留的最大帧数（须 > 0）
+    pub fn new(retention: usize) -> Self {
+        assert!(retention > 0, "SyncHistory 保留帧数须大于 0");
+        Self {
+            retention,
+            channels: HashMap::new(),
+        }
+    }
+
+    /// 记录一帧发布；超保留窗口时淘汰最旧帧
+    pub fn record(&mut self, channel: &str, seq: u64, op: HistoryOp, data: Value) {
+        let history = self.channels.entry(channel.to_string()).or_default();
+        history.push(HistoryFrame { seq, op, data });
+        if history.len() > self.retention {
+            let excess = history.len() - self.retention;
+            history.drain(..excess);
+        }
+    }
+
+    /// 通道当前最新版本（无历史返回 None）
+    pub fn latest_seq(&self, channel: &str) -> Option<u64> {
+        self.channels
+            .get(channel)
+            .and_then(|h| h.last().map(|f| f.seq))
+    }
+
+    /// 客户端追平：从 `last_seq`（客户端已连续应用到的版本）拉齐到最新。
+    /// 保留帧完整覆盖 `last_seq+1..=latest` 时返回增量重放序列，否则要求全量重同步。
+    pub fn catch_up(&self, channel: &str, last_seq: u64) -> CatchUp {
+        let Some(history) = self.channels.get(channel) else {
+            return CatchUp::Resync { latest_seq: None };
+        };
+        let Some(latest) = history.last().map(|f| f.seq) else {
+            return CatchUp::Resync { latest_seq: None };
+        };
+        if latest <= last_seq {
+            return CatchUp::Frames(Vec::new());
+        }
+        // 连续性：保留的第一帧必须不晚于 last_seq+1，且帧间无空洞
+        let contiguous = history.first().is_some_and(|f| f.seq <= last_seq + 1)
+            && history.windows(2).all(|w| w[1].seq == w[0].seq + 1);
+        if !contiguous {
+            return CatchUp::Resync {
+                latest_seq: Some(latest),
+            };
+        }
+        CatchUp::Frames(
+            history
+                .iter()
+                .filter(|f| f.seq > last_seq)
+                .cloned()
+                .collect(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,5 +463,181 @@ mod tests {
             engine.apply_full("rtq", 100, json!({"price": 99.0})),
             SyncOutcome::Advanced { seq: 100 }
         );
+    }
+
+    /// 追平：保留窗口内返回连续增量重放（从 last_seq+1 到最新）；已追平返回空
+    #[test]
+    fn catch_up_replays_missed_frames_contiguously() {
+        let mut history = SyncHistory::new(8);
+        history.record("rtq", 1, HistoryOp::Full, json!({"price": 10.0}));
+        history.record("rtq", 2, HistoryOp::Delta, json!({"price": 10.5}));
+        history.record("rtq", 3, HistoryOp::Delta, json!({"volume": 100}));
+        history.record("rtq", 4, HistoryOp::Delta, json!({"bid": 10.4}));
+
+        let CatchUp::Frames(frames) = history.catch_up("rtq", 1) else {
+            panic!("窗口内应可增量追平");
+        };
+        assert_eq!(
+            frames.iter().map(|f| f.seq).collect::<Vec<_>>(),
+            vec![2, 3, 4],
+            "重放序列从 last_seq+1 连续到最新"
+        );
+        assert_eq!(frames[0].op, HistoryOp::Delta);
+        assert_eq!(frames[0].data, json!({"price": 10.5}));
+
+        // 已追平（last_seq == latest）：空重放
+        assert_eq!(history.catch_up("rtq", 4), CatchUp::Frames(Vec::new()));
+        // 落后 0 帧以上但未越窗：只返回缺失段
+        let CatchUp::Frames(tail) = history.catch_up("rtq", 3) else {
+            panic!("尾部追平应可行");
+        };
+        assert_eq!(tail.len(), 1);
+        assert_eq!(tail[0].seq, 4);
+    }
+
+    /// 追平：落后超出保留窗口 → 全量重同步（携带服务端最新版本）；
+    /// 恰好落在窗口边缘仍可增量
+    #[test]
+    fn catch_up_requires_resync_when_retention_exceeded() {
+        let mut history = SyncHistory::new(2);
+        for seq in 1..=4 {
+            history.record("rtq", seq, HistoryOp::Delta, json!({"seq": seq}));
+        }
+        // 只保留 3、4：last_seq=1 需要从 2 拉齐，但 2 已被淘汰
+        assert_eq!(
+            history.catch_up("rtq", 1),
+            CatchUp::Resync {
+                latest_seq: Some(4)
+            }
+        );
+        // last_seq=2 恰好接上窗口首帧：可增量
+        let CatchUp::Frames(frames) = history.catch_up("rtq", 2) else {
+            panic!("窗口边缘应可增量追平");
+        };
+        assert_eq!(frames.iter().map(|f| f.seq).collect::<Vec<_>>(), vec![3, 4]);
+    }
+
+    /// 追平：未知通道 → Resync 且无最新版本号（服务端应以建立基线的 Full 回复）
+    #[test]
+    fn catch_up_unknown_channel_resyncs_without_latest() {
+        let history = SyncHistory::new(4);
+        assert_eq!(
+            history.catch_up("ghost", 0),
+            CatchUp::Resync { latest_seq: None }
+        );
+        assert_eq!(SyncHistory::new(4).latest_seq("ghost"), None);
+    }
+
+    /// 回环集成（发布侧版本表 × 客户端状态机）：服务端以 build_delta 生成增量
+    /// 并记录版本表；「全程在线」客户端逐帧应用；「中途掉线」客户端经
+    /// catch_up 重放拉齐——两端快照收敛一致；超出保留窗口走 Resync 全量，
+    /// 亦收敛。覆盖 TODO 同步协议的完整闭环。
+    #[test]
+    fn publish_catch_up_round_trip_converges() {
+        // 服务端：状态推进 → Full@1，此后逐帧 Delta，记入版本表（保留 3 帧）
+        let states = [
+            json!({"symbol": "sz000001", "price": 10.0, "volume": 100}),
+            json!({"symbol": "sz000001", "price": 10.5, "volume": 100}),
+            json!({"symbol": "sz000001", "price": 10.5, "volume": 250}),
+            json!({"symbol": "sz000001", "price": 11.0, "volume": 250, "bid": 10.9}),
+            json!({"symbol": "sz000001", "price": 12.0, "volume": 250, "bid": 11.9}),
+        ];
+        let mut history = SyncHistory::new(3);
+        let mut prev: Option<Value> = None;
+        let mut publish = |state: &Value, seq: u64| {
+            let (op, payload) = match &prev {
+                Some(p) => (HistoryOp::Delta, build_delta(p, state)),
+                None => (HistoryOp::Full, state.clone()),
+            };
+            history.record("rtq", seq, op, payload);
+            prev = Some(state.clone());
+        };
+        for (i, state) in states.iter().enumerate() {
+            publish(state, (i + 1) as u64);
+        }
+        assert_eq!(history.latest_seq("rtq"), Some(5));
+
+        // 全程在线客户端：逐帧应用（Full 建基线，Delta 增量推进）
+        let mut live = SyncEngine::new();
+        live.apply_full("rtq", 1, states[0].clone());
+        for (i, state) in states.iter().enumerate().skip(1) {
+            let delta = build_delta(&states[i - 1], state);
+            live.apply_delta("rtq", (i + 1) as u64, delta).unwrap();
+        }
+        assert_eq!(live.snapshot("rtq").unwrap(), &states[4]);
+
+        // 掉线客户端：看到前两帧（Full@1 + Delta@2）后掉线，重连时窗口首帧=3
+        // （retention=3，seq 1..2 已淘汰）——恰好接上窗口边缘 → 增量重放 3..=5
+        let mut roaming = SyncEngine::new();
+        roaming.apply_full("rtq", 1, states[0].clone());
+        roaming
+            .apply_delta("rtq", 2, build_delta(&states[0], &states[1]))
+            .unwrap();
+
+        let CatchUp::Frames(frames) = history.catch_up("rtq", 2) else {
+            panic!("窗口边缘（last_seq=2，窗口首帧=3）应可增量追平");
+        };
+        assert_eq!(
+            frames.iter().map(|f| f.seq).collect::<Vec<_>>(),
+            vec![3, 4, 5],
+            "重放序列从 last_seq+1 连续到最新"
+        );
+        for frame in &frames {
+            match frame.op {
+                HistoryOp::Full => {
+                    roaming.apply_full("rtq", frame.seq, frame.data.clone());
+                }
+                HistoryOp::Delta => {
+                    roaming
+                        .apply_delta("rtq", frame.seq, frame.data.clone())
+                        .unwrap();
+                }
+            }
+        }
+        assert_eq!(
+            roaming.snapshot("rtq").unwrap(),
+            live.snapshot("rtq").unwrap(),
+            "增量重放路径收敛到与在线客户端一致"
+        );
+
+        // 更早掉线的客户端（停在 seq=1，窗口首帧=3 接不上）→ 服务端回 Full 重同步
+        let mut stale = SyncEngine::new();
+        stale.apply_full("rtq", 1, states[0].clone());
+        let CatchUp::Resync {
+            latest_seq: Some(latest),
+        } = history.catch_up("rtq", 1)
+        else {
+            panic!("超出保留窗口必须要求全量重同步");
+        };
+        assert_eq!(latest, 5);
+        stale.apply_full("rtq", latest, states[4].clone());
+        assert_eq!(
+            stale.snapshot("rtq").unwrap(),
+            live.snapshot("rtq").unwrap(),
+            "Resync 全量后与在线客户端收敛"
+        );
+
+        // 补齐后增量链路恢复：下一帧 Delta 两条客户端路径均正常推进
+        let mut next_state = states[4].clone();
+        next_state["price"] = json!(12.5);
+        let delta = build_delta(&states[4], &next_state);
+        history.record("rtq", 6, HistoryOp::Delta, delta.clone());
+        live.apply_delta("rtq", 6, delta.clone()).unwrap();
+        roaming.apply_delta("rtq", 6, delta.clone()).unwrap();
+        stale.apply_delta("rtq", 6, delta).unwrap();
+        assert_eq!(
+            roaming.snapshot("rtq").unwrap(),
+            live.snapshot("rtq").unwrap()
+        );
+        assert_eq!(
+            stale.snapshot("rtq").unwrap(),
+            live.snapshot("rtq").unwrap()
+        );
+    }
+
+    /// 追平契约护栏：retention=0 构造期拒绝
+    #[test]
+    fn sync_history_rejects_zero_retention() {
+        assert!(std::panic::catch_unwind(|| SyncHistory::new(0)).is_err());
     }
 }

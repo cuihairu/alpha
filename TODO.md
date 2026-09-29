@@ -94,7 +94,19 @@
   新增 8 单测（wasm32 only）覆盖推送/批量/带报告/空缓冲区/列表清空；
   alpha_core::parallel 9 测 + worker.rs 16 测 + streaming 2 测（native）全绿；
   check-lint/check-cross-platform/cargo test 全仓 213 测全绿）
-- [ ] 实现实时数据同步协议（WebSocket 增量更新 + 版本控制）
+- [x] 实现实时数据同步协议（WebSocket 增量更新 + 版本控制）
+  （2026-09-29 最小可用版本：协议核 + 内存态版本表，不动部署与前端接线。
+  alpha_core::sync——SyncEngine 状态机（Full 基线/Delta 连续推进/Gap 检测/
+  旧帧幂等/多通道隔离/Resync 恢复）+ build_delta/apply_delta 深度 1 差量 +
+  SyncHistory 环形版本表（retention 窗口内增量重放追平、超窗回落全量），
+  16 单测含发布×客户端回环收敛集成测试；线上帧 SyncMessage/ResyncRequest
+  落 alpha_protocols::websocket（4 测）；服务端 real-time-feed 锁内逐通道
+  seq 分配 + Resync 应答（未知通道显式回 Error 404 帧，11 测含服务端 Delta
+  × 客户端引擎闭环）；wasm 侧 buildSyncDelta/applySyncDelta/WasmSyncEngine
+  绑定 + wasm_bindgen_test；前端 app.js Sync 帧增量合入。设计要点落
+  docs/realtime-sync-protocol.md。注：sync.rs/websocket.rs/real-time-feed
+  主体由并行会话随 f930375 入库，本项补齐追平版本表/Resync Error 应答/
+  docs 并勾选；非交互假设：retention 窗口语义取「帧数环形保留、超窗全量」）
 
 ## 🖥️ 桌面端应用（Tauri）
 - [ ] 搭建 Tauri + Rust 桌面应用框架

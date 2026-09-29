@@ -156,6 +156,21 @@ fn resync_full_snapshot(
     ))
 }
 
+/// Resync 打到未知通道/尚无快照时的错误码（HTTP 语义沿用：not found）
+const RESYNC_UNKNOWN_CHANNEL_CODE: i32 = 404;
+
+/// Resync 应答：已知通道回当前版本 `Full` 快照；未知通道/尚无快照回 `Error` 帧——
+/// 客户端需要显式失败信号才能重订阅，静默丢弃只会让它空等重传。
+fn resync_reply(hub: &Mutex<HashMap<String, ChannelSyncState>>, channel: &str) -> WsMessage {
+    resync_full_snapshot(hub, channel).unwrap_or_else(|| {
+        WsMessage::error(
+            RESYNC_UNKNOWN_CHANNEL_CODE,
+            format!("resync 失败：通道 {channel} 无快照或不存在"),
+            None,
+        )
+    })
+}
+
 const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
 const QUOTES_STREAM: &str = "quotes.raw";
 const NORMALIZED_QUOTES_STREAM: &str = "quotes.normalized";
@@ -354,11 +369,10 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
                                     req.channel,
                                     req.from_seq
                                 );
-                                if let Some(full) =
-                                    resync_full_snapshot(&recv_sync_state, &req.channel)
-                                {
-                                    let _ = resync_tx.send(full);
-                                }
+                                // 无论通道是否存在都必须回帧（Full 或 Error）：
+                                // 静默丢弃会让客户端无从判断 Resync 结果
+                                let _ =
+                                    resync_tx.send(resync_reply(&recv_sync_state, &req.channel));
                             }
                             WsMessage::Subscribe(sub) => {
                                 tracing::info!(
@@ -850,6 +864,34 @@ mod tests {
                 assert_eq!(s.data["volume"], 100);
             }
             other => panic!("Resync 响应应为 Sync::Full，实际 {other:?}"),
+        }
+    }
+
+    /// Resync 应答：未知通道/尚无快照必须显式回 Error 帧（客户端据此重订阅
+    /// 而非空等）；已广播通道照常回 Full 快照
+    #[test]
+    fn test_resync_reply_errors_on_unknown_channel() {
+        let hub = Mutex::new(HashMap::new());
+        match resync_reply(&hub, "nope") {
+            WsMessage::Error(e) => {
+                assert_eq!(e.code, RESYNC_UNKNOWN_CHANNEL_CODE);
+                assert!(
+                    e.message.contains("nope"),
+                    "错误信息应包含通道名: {}",
+                    e.message
+                );
+            }
+            other => panic!("未知通道 Resync 应回 Error 帧，实际 {other:?}"),
+        }
+
+        // 已广播通道：回当前版本 Full 快照
+        next_versioned_frame(&hub, channels::REAL_TIME_QUOTES, &sample_data(9.0, 10));
+        match resync_reply(&hub, channels::REAL_TIME_QUOTES) {
+            WsMessage::Sync(s) => {
+                assert_eq!(s.op, SyncOp::Full);
+                assert_eq!(s.seq, 1);
+            }
+            other => panic!("已知通道 Resync 应回 Sync::Full，实际 {other:?}"),
         }
     }
 
