@@ -17,9 +17,10 @@
 //! 边界：L112 只落「框架」。L113 原生文件集成（用户自选路径导出
 //! [`export::export_to_file`]/[`export::export_symbol_request`] + `dialog.save`
 //! 链路）、L114 系统通知/托盘（[`notify`]：通知模型/有界队列/托盘状态/
-//! 告警触发文案 + 接线层平台 API 展示）、L115 窗口几何持久化（[`window`]）与
+//! 告警触发文案 + 接线层平台 API 展示）、L115 窗口几何持久化（[`window`]）、
 //! L116 本地数据库同步/离线模式（[`offline`]：kv 快照、连通探测、增量同步）
-//! 均已落地；平台 API 调用只在接线层。
+//! 与 L117 快捷键/右键菜单（[`shortcuts`]：组合键表、菜单模型 + 接线层
+//! 注册/壳层分发）均已落地；平台 API 调用只在接线层。
 
 #![warn(missing_docs)]
 
@@ -35,6 +36,7 @@ pub mod market;
 pub mod notify;
 pub mod offline;
 pub mod paths;
+pub mod shortcuts;
 pub mod state;
 pub mod window;
 
@@ -49,6 +51,10 @@ pub mod platform;
 /// 平台胶水（窗口几何恢复/持久化接线；`gui` 特性门控，口径同 [`platform`]）
 #[cfg(feature = "gui")]
 pub mod window_gui;
+
+/// 平台胶水（全局快捷键注册/事件转发；`gui` 特性门控，口径同 [`platform`]）
+#[cfg(feature = "gui")]
+pub mod shortcut_gui;
 
 pub use alerts::{upsert_request, Alert, AlertKind};
 pub use analysis::{analyze, analyze_request, quotes, quotes_request};
@@ -71,6 +77,10 @@ pub use offline::{
     QuoteView, QuotesPayload, SyncReport, SyntheticRemote,
 };
 pub use paths::AppPaths;
+pub use shortcuts::{
+    combo_of, context_menu, context_menu_for, display_label, resolve, valid_combo, ContextMenuItem,
+    ShortcutSpec, DEFAULT_SHORTCUTS,
+};
 pub use state::{bootstrap_app, AppState};
 pub use window::{
     load_window_state, resolve_placement, save_window_state, MonitorRect, WindowGeometry,

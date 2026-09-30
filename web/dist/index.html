@@ -66,6 +66,13 @@
       button { background: var(--chip); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 14px; font: inherit; cursor: pointer; }
       button:disabled { opacity: .45; cursor: default; }
       button:not(:disabled):hover { border-color: var(--muted); }
+      /* L117 右键菜单（内容层 DOM：Tauri 1.x 无原生 context menu API），
+         项数据来自 get_context_menu（框架层模型），可用性用 ctx-disabled 置灰 */
+      .ctx-menu { position: fixed; z-index: 20; min-width: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 8px 28px rgba(0,0,0,.28); }
+      .ctx-item { display: flex; justify-content: space-between; gap: 28px; padding: 6px 10px; border-radius: 5px; cursor: pointer; user-select: none; }
+      .ctx-item:not(.ctx-disabled):hover { background: var(--chip); }
+      .ctx-item.ctx-disabled { color: var(--muted); opacity: .5; cursor: default; }
+      .ctx-hint { color: var(--muted); font-size: 12px; }
     </style>
   </head>
   <body>

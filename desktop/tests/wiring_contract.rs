@@ -111,6 +111,7 @@ fn command_bodies_have_no_business_judgement() {
         "check_alerts",
         "get_offline_quotes",
         "sync_offline_data",
+        "get_context_menu",
     ] {
         let body = command_body(&gui, name);
         let code = strip_rust_comments(&body);
@@ -148,6 +149,7 @@ fn command_bodies_delegate_to_framework_entry_points() {
         ("check_alerts", "check_request"),
         ("get_offline_quotes", "quotes_request"),
         ("sync_offline_data", "sync_request"),
+        ("get_context_menu", "context_menu"),
     ] {
         let body = command_body(&gui, name);
         assert!(
@@ -158,7 +160,8 @@ fn command_bodies_delegate_to_framework_entry_points() {
 
     // 有失败可能的命令必须映射错误为前端可读串；
     // get_app_info 是纯读取（app_info 不返回 Result），故豁免；
-    // list_notifications 只读队列（锁中毒用 expect 兜底，无 Result 边界）
+    // list_notifications 只读队列（锁中毒用 expect 兜底，无 Result 边界）；
+    // get_context_menu 是纯模型构造（context_menu 不返回 Result），同豁免
     for name in [
         "initialize_app",
         "analyze_symbol",
@@ -217,7 +220,7 @@ fn registered_commands_match_fallback_shell_invocations() {
         .collect();
     assert_eq!(
         registered.len(),
-        13,
+        14,
         "注册命令数应与前端契约一致，实际: {registered:?}"
     );
     for cmd in &registered {
@@ -252,12 +255,14 @@ fn wiring_layer_stays_thin() {
     let gui = gui_source();
     let lines = gui.lines().count();
     assert!(
-        lines < 260,
+        lines < 280,
         "gui.rs 涨到 {lines} 行（接线层应保持薄，业务下沉框架层；L114 通知/托盘
         三命令后上限 160 → 200，check_alerts 闭环命令后 200 → 220，L116 离线
-        两命令后 220 → 260，每命令仍 ~20 行薄委派；托盘/通知平台胶水在
-        src/platform.rs，窗口胶水在 src/window_gui.rs，上限见
-        platform_glue_stays_mechanical / window_glue_stays_mechanical）"
+        两命令后 220 → 260，L117 右键菜单命令后 260 → 280，每命令仍 ~20 行
+        薄委派；托盘/通知平台胶水在 src/platform.rs，窗口胶水在
+        src/window_gui.rs，快捷键胶水在 src/shortcut_gui.rs，上限见
+        platform_glue_stays_mechanical / window_glue_stays_mechanical /
+        shortcut_glue_stays_mechanical）"
     );
     // 业务模块的函数体不应出现在接线层（抽查两个典型业务函数）
     assert!(!gui.contains("for symbol in"), "接线层不应出现批量循环");
@@ -287,6 +292,9 @@ fn framework_entry_points_are_exported() {
         "sync_request",
         "probe_health",
         "QuoteRemote",
+        "context_menu",
+        "DEFAULT_SHORTCUTS",
+        "display_label",
     ] {
         assert!(
             lib.contains(entry),
@@ -356,6 +364,7 @@ fn shell_commands_have_framework_entry_points() {
         "set_tray_status",
         "get_offline_quotes",
         "sync_offline_data",
+        "get_context_menu",
     ] {
         assert!(
             shell.contains(&format!("invoke(\"{cmd}\"")),
@@ -526,4 +535,78 @@ fn shell_offline_card_renders_source_and_missing() {
             "兜底壳页面应有离线卡片元素 {id}"
         );
     }
+}
+
+/// L117 快捷键接线（`src/shortcut_gui.rs`，gui 特性）：与 window_gui.rs 同纪律——
+/// 不得定义命令、不得自造错误文案，组合键表/动作映射一律从框架层 shortcuts.rs 取；
+/// 注册必须挂在 gui.rs 的 setup 上（漏挂 = 全局快捷键静默失效）
+#[test]
+fn shortcut_glue_stays_mechanical() {
+    let glue = std::fs::read_to_string(crate_dir().join("src/shortcut_gui.rs"))
+        .expect("读 shortcut_gui.rs");
+    let lines = glue.lines().count();
+    assert!(
+        lines < 120,
+        "shortcut_gui.rs 涨到 {lines} 行（平台胶水应保持机械注册，表在 shortcuts.rs）"
+    );
+    assert!(
+        !glue.contains("#[tauri::command]"),
+        "快捷键胶水不应定义命令（命令都在 gui.rs，受薄度契约约束）"
+    );
+    let code = strip_rust_comments(&glue);
+    assert!(
+        !code.contains("Err(\""),
+        "快捷键胶水不应自造错误串（注册失败降级为告警，映射归框架层/命令体）"
+    );
+    assert!(
+        code.contains("shortcuts::"),
+        "快捷键胶水应从框架层 shortcuts.rs 取组合键表/动作映射，而非自造"
+    );
+    assert!(
+        code.contains("global_shortcut_manager"),
+        "快捷键胶水应走 Tauri GlobalShortcutManager 注册"
+    );
+    let gui = gui_source();
+    assert!(
+        gui.contains("crate::shortcut_gui::register_global_shortcuts(&app.handle())"),
+        "setup 应注册全局快捷键（L117；漏挂即静默失效）"
+    );
+}
+
+/// L117 快捷键与右键菜单的前端接线：动作经 Rust 广播的 "shortcut" 事件触发、
+/// 菜单模型取自 get_context_menu（hasQuote/hasSymbols 必须 camelCase——v1 命令
+/// 参数默认 ArgumentCase::Camel，snake 键运行期静默失配，CI 不启动、源码断言
+/// 是唯一本地拦截点）、右键 preventDefault + Esc/点击收起、ACTIONS 表分发到
+/// 框架层定义的全部动作 id
+#[test]
+fn shell_keyboard_and_context_menu_wired() {
+    let dist = tauri_dist_dir();
+    let shell = std::fs::read_to_string(crate_dir().join(&dist).join("desktop-shell.js"))
+        .expect("读兜底壳");
+    for needle in [
+        "event.listen(\"shortcut\"",
+        "invoke(\"get_context_menu\"",
+        "hasQuote",
+        "hasSymbols",
+        "\"contextmenu\"",
+        "preventDefault",
+        "Escape",
+        "ACTIONS",
+        "refresh_quotes",
+        "copy_price",
+        "export_symbol",
+        "sync_offline",
+        "read_offline",
+    ] {
+        assert!(
+            shell.contains(needle),
+            "兜底壳快捷键/右键接线应含 {needle}（事件监听/模型拉取/动作分发）"
+        );
+    }
+    let index =
+        std::fs::read_to_string(crate_dir().join(&dist).join("index.html")).expect("读兜底壳页面");
+    assert!(
+        index.contains(".ctx-menu") && index.contains(".ctx-disabled"),
+        "兜底壳页面应有右键菜单样式（含置灰态）"
+    );
 }

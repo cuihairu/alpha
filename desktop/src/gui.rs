@@ -220,6 +220,17 @@ async fn sync_offline_data(
     .map_err(|e: DesktopError| e.to_string())
 }
 
+/// 右键菜单模型（L117）：菜单项/文案/可用性/加速器提示全在框架层
+/// `context_menu`（含 macOS 与其它平台的提示差异），接线层只透传壳层上报的
+/// 界面状态；纯模型构造无失败路径，与 `get_app_info` 同不映射错误
+#[tauri::command]
+async fn get_context_menu(
+    has_quote: bool,
+    has_symbols: bool,
+) -> Result<Vec<crate::shortcuts::ContextMenuItem>, String> {
+    Ok(crate::shortcuts::context_menu(has_quote, has_symbols))
+}
+
 /// 启动 Tauri 应用（进程入口，供 `main.rs` 调用）
 pub fn run() {
     tracing_subscriber::fmt::init();
@@ -229,6 +240,8 @@ pub fn run() {
             tracing::info!(?info, "桌面应用启动");
             // L115：恢复上次会话窗口几何（含显示器钳制），失败静默走 OS 默认
             crate::window_gui::restore_window(app);
+            // L117：注册全局快捷键（组合键被占用等失败在接线层降级为告警）
+            crate::shortcut_gui::register_global_shortcuts(&app.handle());
             Ok(())
         })
         .system_tray(crate::platform::system_tray())
@@ -247,7 +260,8 @@ pub fn run() {
             set_tray_status,
             check_alerts,
             get_offline_quotes,
-            sync_offline_data
+            sync_offline_data,
+            get_context_menu
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -227,7 +227,35 @@
   分布；③慢网（>500ms）探测超时表现；④真实 https 后端需 TLS 探测实现（当前保守判离线走缓存）。
   门禁：check-desktop.sh [1-5/5] ✅ / check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh
   四步 ✅；gui 两命令的链接与运行由 CI Desktop (macOS) 作业验证）
-- [ ] 开发键盘快捷键和右键菜单支持
+- [x] 开发键盘快捷键和右键菜单支持
+  （✅ 2026-09-30）口径同前六轮：表与模型全下沉框架层，接线层只注册与广播，
+  壳层只渲染与分发（动作不新增命令，复用既有命令流）。
+  框架层新增 shortcuts.rs（零 Tauri）：DEFAULT_SHORTCUTS 组合键表（CmdOrCtrl+R
+  刷新 / +E 导出 / +D 离线读 / +Shift+S 同步，u64 动作 id 即字符串常量）+
+  valid_combo 合法性（+ 分隔/无空段/键在末位/修饰键合法不重复/不收裸键）+
+  resolve↔combo_of 逆映射 + display_label 平台展示（mac ⌘⇧S vs 其它
+  Ctrl+Shift+S，CmdOrCtrl 非 mac 映射 Ctrl）+ 右键菜单模型 context_menu
+  （{id,label,hint,enabled}，可用性：无行情→复制置灰、无标的→导出置灰）。
+  接线层新增 shortcut_gui.rs（行数上限 120，同 platform/window_gui 纪律）：
+  GlobalShortcutManager 逐键注册，触发广播 "shortcut" 事件（载荷=动作 id），
+  单键注册失败（被系统/其它应用占用）只告警降级不阻断启动；gui.rs setup 挂
+  注册、新薄命令 get_context_menu（注册 13 → 14，薄度上限 260 → 280，纯模型
+  构造与 get_app_info 同豁免 map_err）。壳层：行情/导出/离线/同步四段流程抽
+  成可复用函数 + ACTIONS 表（快捷键事件与右键菜单共用分发）；右键菜单为内容
+  层 DOM（Tauri 1.x 无原生 context menu API），数据来自 Rust（hasQuote/
+  hasSymbols camelCase 上报界面状态），Esc/点击任意处收起。
+  契约 wiring_contract 15 → 17 例（shortcut_glue_stays_mechanical：胶水行数/
+  无命令/无自造错误串/取表于框架层/setup 必挂；shell_keyboard_and_context_
+  menu_wired：事件监听/模型拉取/camelCase/ACTIONS 全动作 id/菜单样式；另
+  get_context_menu 入无判断/委派清单、注册数 14、薄度 280、框架入口补
+  context_menu/DEFAULT_SHORTCUTS/display_label）。框架层单测 192（shortcuts
+  +11）。
+  真机验收边界（本地单测覆盖不了平台注册与真实事件）：三平台 ⌘R/Ctrl+R 实际
+  触发与系统快捷键冲突时的降级告警；右键菜单深浅色观感与置灰态；多显示器下
+  菜单落点；Esc/点击收起时序；窗口失焦时全局快捷键仍触发（设计上会，未实测）。
+  门禁：check-desktop.sh [1-5/5] ✅ / check-lint.sh ✅ / 全仓测试 ✅ /
+  check-cross-platform.sh 四步 ✅；快捷键注册与事件链路由 CI Desktop (macOS)
+  作业编译验证，运行期行为需真机）
 
 ## 🔧 Rust 微服务架构
 - [x] 基于 Axum + Tokio 构建高性能 HTTP/gRPC 服务

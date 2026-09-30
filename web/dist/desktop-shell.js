@@ -19,6 +19,11 @@
  * （live=远端实拉并落库 / cache=本地降级，缺失标的进 missing 如实上报）；
  * sync_offline_data 按内容指纹增量落库（Rust 侧探测 api_url 的 /health 判
  * 连通，离线时返回空报告——降级不是错误）。本地库 = kv 目录文件存储。
+ * 快捷键与右键菜单（TODO L117）：Rust 侧注册全局快捷键（GlobalShortcutManager）
+ * 并广播 "shortcut" 事件（载荷 = 动作 id）；右键菜单项数据来自 get_context_menu
+ * （框架层模型：文案/可用性/加速器提示）。两者都经壳层 ACTIONS 表分发到
+ * **既有**命令流——不新增动作命令。菜单为内容层 DOM（Tauri 1.x 无原生
+ * context menu API，v2 才有 Menu::popup），右键失败静默降级。
  *
  * 非 Tauri 环境（普通浏览器直接打开 web/dist/index.html）不报错，改为提示先构建前端。
  */
@@ -65,6 +70,27 @@
 
   var symbols = [];
   var firstQuote = null;
+
+  // 快照行情拉取+渲染（启动链与 L117 快捷键/右键「刷新行情」共用）
+  function loadQuotes() {
+    return invoke("get_real_time_quotes", { symbols: symbols }).then(function (quotes) {
+      firstQuote = quotes && quotes.length ? quotes[0] : null;
+      var rows = quotes
+        .map(function (q) {
+          var cls = q.price >= q.open ? "up" : "down";
+          return (
+            "<tr><td>" + esc(q.symbol) + '</td><td><span class="' + cls + '">' +
+            num(q.price, 2) + "</span></td><td>" + esc(q.volume) + "</td></tr>"
+          );
+        })
+        .join("");
+      document.getElementById("quotes").innerHTML =
+        "<table><thead><tr><th>标的</th><th>最新价</th><th>成交量</th></tr></thead><tbody>" +
+        rows +
+        "</tbody></table>";
+      return quotes;
+    });
+  }
 
   // L115 主题适配：system（或缺省/未知）跟随系统且实时切换；light/dark 强制覆盖。
   // matchMedia 兼容旧 WebKit 的 addListener 回退；无 matchMedia 时按浅色渲染。
@@ -118,29 +144,13 @@
         kv("平台", esc(info.os) + " / " + esc(info.arch));
       return symbols;
     })
-    .then(function (list) {
-      return invoke("get_real_time_quotes", { symbols: list }).then(function (quotes) {
-        firstQuote = quotes && quotes.length ? quotes[0] : null;
-        var rows = quotes
-          .map(function (q) {
-            var cls = q.price >= q.open ? "up" : "down";
-            return (
-              "<tr><td>" + esc(q.symbol) + '</td><td><span class="' + cls + '">' +
-              num(q.price, 2) + "</span></td><td>" + esc(q.volume) + "</td></tr>"
-            );
-          })
-          .join("");
-        document.getElementById("quotes").innerHTML =
-          "<table><thead><tr><th>标的</th><th>最新价</th><th>成交量</th></tr></thead><tbody>" +
-          rows +
-          "</tbody></table>";
-        return list[0];
-      });
+    .then(function () {
+      return loadQuotes();
     })
-    .then(function (symbol) {
-      if (!symbol) throw new Error("配置未给出任何标的");
+    .then(function () {
+      if (!firstQuote) throw new Error("配置未给出任何标的");
       return invoke("analyze_symbol", {
-        request: { symbol: symbol, timeframe: "1m", indicators: ["RSI", "SMA20"] },
+        request: { symbol: firstQuote.symbol, timeframe: "1m", indicators: ["RSI", "SMA20"] },
       }).then(function (result) {
         var indicators = result.indicators
           .map(function (ind) {
@@ -164,51 +174,56 @@
   // L113 原生文件集成：经系统「另存为」对话框拿路径，再调 Rust 命令落盘。
   // dialog.save 是 v1 全局 API（window.__TAURI__.dialog），解析为用户选的路径，
   // 取消时为 null；后缀决定格式（.json 走 JSON，其余走 CSV，与 Rust 侧校验一致）。
+  // 导出流程抽成 exportFirst()：导出卡片按钮与 L117 快捷键/右键共用。
   var exportBtn = document.getElementById("export-btn");
   var exportResult = document.getElementById("export-result");
+  var exportSupported = invoke && api.dialog && typeof api.dialog.save === "function";
+
+  function exportFirst() {
+    var symbol = symbols[0];
+    if (!symbol) {
+      exportResult.textContent = "无可导出标的（配置 symbols 为空）";
+      return Promise.resolve();
+    }
+    exportResult.textContent = "等待选择保存位置…";
+    return api.dialog
+      .save({
+        defaultPath: symbol + ".csv",
+        filters: [
+          { name: "CSV", extensions: ["csv"] },
+          { name: "JSON", extensions: ["json"] },
+        ],
+      })
+      .then(function (path) {
+        if (!path) {
+          exportResult.textContent = "已取消";
+          return null;
+        }
+        var fmt = /\.json$/i.test(path) ? "json" : "csv";
+        return invoke("export_symbol_to_file", {
+          symbol: symbol,
+          format: fmt,
+          filePath: path,
+        });
+      })
+      .then(function (outcome) {
+        if (outcome) {
+          exportResult.textContent =
+            "已导出 " + outcome.rows + " 行 → " + outcome.filename;
+        }
+      })
+      .catch(function (error) {
+        exportResult.textContent =
+          "导出失败：" + (error && error.message ? error.message : String(error));
+      });
+  }
+
   if (exportBtn && exportResult) {
-    if (!invoke || !api.dialog || typeof api.dialog.save !== "function") {
+    if (!exportSupported) {
       exportBtn.disabled = true;
       exportResult.textContent = "当前环境不支持原生对话框（需在 Tauri 窗口中打开）";
     } else {
-      exportBtn.addEventListener("click", function () {
-        var symbol = symbols[0];
-        if (!symbol) {
-          exportResult.textContent = "无可导出标的（配置 symbols 为空）";
-          return;
-        }
-        exportResult.textContent = "等待选择保存位置…";
-        api.dialog
-          .save({
-            defaultPath: symbol + ".csv",
-            filters: [
-              { name: "CSV", extensions: ["csv"] },
-              { name: "JSON", extensions: ["json"] },
-            ],
-          })
-          .then(function (path) {
-            if (!path) {
-              exportResult.textContent = "已取消";
-              return null;
-            }
-            var fmt = /\.json$/i.test(path) ? "json" : "csv";
-            return invoke("export_symbol_to_file", {
-              symbol: symbol,
-              format: fmt,
-              filePath: path,
-            });
-          })
-          .then(function (outcome) {
-            if (outcome) {
-              exportResult.textContent =
-                "已导出 " + outcome.rows + " 行 → " + outcome.filename;
-            }
-          })
-          .catch(function (error) {
-            exportResult.textContent =
-              "导出失败：" + (error && error.message ? error.message : String(error));
-          });
-      });
+      exportBtn.addEventListener("click", exportFirst);
     }
   }
 
@@ -313,41 +328,142 @@
       kv("拉取失败", '<span class="err">' + esc((report.failed || []).join("，") || "—") + "</span>");
   }
 
+  // 离线读取与增量同步抽成 runOffline()/runSync()：离线卡片按钮与 L117
+  // 快捷键/右键动作共用（分发只复用既有命令流，不新增动作命令）。
+  function runOffline() {
+    if (!symbols.length) {
+      setText("offline-result", "无可读取标的（配置 symbols 为空）", "err");
+      return Promise.resolve();
+    }
+    return invoke("get_offline_quotes", { symbols: symbols })
+      .then(renderOffline)
+      .catch(function (error) {
+        setText(
+          "offline-result",
+          "离线读取失败：" + (error && error.message ? error.message : String(error)),
+          "err"
+        );
+      });
+  }
+
   var offlineBtn = document.getElementById("offline-btn");
   if (offlineBtn) {
-    offlineBtn.addEventListener("click", function () {
-      if (!symbols.length) {
-        setText("offline-result", "无可读取标的（配置 symbols 为空）", "err");
-        return;
-      }
-      invoke("get_offline_quotes", { symbols: symbols })
-        .then(renderOffline)
-        .catch(function (error) {
-          setText(
-            "offline-result",
-            "离线读取失败：" + (error && error.message ? error.message : String(error)),
-            "err"
-          );
-        });
-    });
+    offlineBtn.addEventListener("click", runOffline);
+  }
+
+  function runSync() {
+    if (!symbols.length) {
+      setText("sync-result", "无可同步标的（配置 symbols 为空）", "err");
+      return Promise.resolve();
+    }
+    return invoke("sync_offline_data", { symbols: symbols })
+      .then(renderSync)
+      .catch(function (error) {
+        setText(
+          "sync-result",
+          "同步失败：" + (error && error.message ? error.message : String(error)),
+          "err"
+        );
+      });
   }
 
   var syncBtn = document.getElementById("sync-btn");
   if (syncBtn) {
-    syncBtn.addEventListener("click", function () {
-      if (!symbols.length) {
-        setText("sync-result", "无可同步标的（配置 symbols 为空）", "err");
-        return;
-      }
-      invoke("sync_offline_data", { symbols: symbols })
-        .then(renderSync)
-        .catch(function (error) {
-          setText(
-            "sync-result",
-            "同步失败：" + (error && error.message ? error.message : String(error)),
-            "err"
-          );
+    syncBtn.addEventListener("click", runSync);
+  }
+
+  // L117 快捷键与右键菜单：动作 id（框架层 shortcuts.rs 的 ACTION_*）→
+  // 既有命令流的分发表。快捷键经 Rust 广播的 "shortcut" 事件触发；
+  // 右键菜单项数据来自 get_context_menu（可用性/加速器提示在框架层判定）。
+  var ACTIONS = {
+    refresh_quotes: function () {
+      return loadQuotes();
+    },
+    copy_price: function () {
+      if (firstQuote && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(String(firstQuote.price)).catch(function () {
+          /* 剪贴板被拒绝时静默（右键是辅助入口） */
         });
+      }
+    },
+    export_symbol: function () {
+      return exportFirst();
+    },
+    sync_offline: function () {
+      return runSync();
+    },
+    read_offline: function () {
+      return runOffline();
+    },
+  };
+
+  // Rust 侧注册的全局快捷键（GlobalShortcutManager）触发时广播 "shortcut"
+  // 事件，载荷 = 动作 id；未知名动作忽略（表向后兼容）
+  if (api.event && typeof api.event.listen === "function") {
+    api.event.listen("shortcut", function (event) {
+      var run = ACTIONS[event && event.payload];
+      if (run) run();
     });
   }
+
+  var ctxMenu = null;
+
+  function closeContextMenu() {
+    if (ctxMenu) {
+      ctxMenu.remove();
+      ctxMenu = null;
+    }
+  }
+
+  function openContextMenu(items, x, y) {
+    closeContextMenu();
+    ctxMenu = document.createElement("div");
+    ctxMenu.className = "ctx-menu";
+    items.forEach(function (item) {
+      var row = document.createElement("div");
+      row.className = "ctx-item" + (item.enabled ? "" : " ctx-disabled");
+      var name = document.createElement("span");
+      name.textContent = item.label;
+      row.appendChild(name);
+      if (item.hint) {
+        var hint = document.createElement("span");
+        hint.className = "ctx-hint";
+        hint.textContent = item.hint;
+        row.appendChild(hint);
+      }
+      if (item.enabled) {
+        row.addEventListener("click", function () {
+          closeContextMenu();
+          var run = ACTIONS[item.id];
+          if (run) run();
+        });
+      }
+      ctxMenu.appendChild(row);
+    });
+    ctxMenu.style.left = x + "px";
+    ctxMenu.style.top = y + "px";
+    document.body.appendChild(ctxMenu);
+  }
+
+  // 右键弹菜单：模型取自 Rust（界面状态经 hasQuote/hasSymbols 上报，
+  // v1 参数 camelCase）；取模型失败静默降级（辅助入口不打断主流程）
+  document.addEventListener("contextmenu", function (event) {
+    event.preventDefault();
+    invoke("get_context_menu", {
+      hasQuote: !!firstQuote,
+      hasSymbols: symbols.length > 0,
+    })
+      .then(function (items) {
+        openContextMenu(items, event.clientX, event.clientY);
+      })
+      .catch(function () {
+        closeContextMenu();
+      });
+  });
+
+  // 菜单收起：点击任意处 / Esc（键盘路径与右键菜单共用同一收起逻辑）
+  document.addEventListener("click", closeContextMenu);
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeContextMenu();
+  });
 })();

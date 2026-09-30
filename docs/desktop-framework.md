@@ -205,7 +205,7 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 | L114 系统通知与托盘 | ✅ 已闭环（见 §7）：通知模型/队列/托盘菜单状态机 + 告警检查链（check_alerts）+ 托盘接线（platform.rs） | 通知点击唤起主窗；托盘图标随状态换图（需多套图标资产）；定时轮询取数 |
 | L115 窗口管理与主题适配 | ✅ 已落地（见 §8）：窗口几何持久化 + 多显示器放置 + 深浅色跟随/覆盖 | 记忆「上次所用显示器」（现按可见性判定）；托盘图标随主题换图 |
 | L116 本地数据库同步与离线模式 | ✅ 已落地（见 §9）：kv 快照 + 连通探测 + 指纹增量同步 + 离线降级读 | 换 SQLite（出现范围查询需求时）；真实 HTTP 远端实现（QuoteRemote 缝已留） |
-| L117 快捷键与右键菜单 | `global-shortcut-all` 特性已在 allowlist | 注册快捷键与菜单事件 |
+| L117 快捷键与右键菜单 | ✅ 已落地（见 §10）：框架层组合键表/菜单模型 + 全局注册 + 壳层分发 | 通知点击唤起主窗后的菜单焦点处理；「记忆上次所用显示器」后再校菜单落点 |
 
 另：演示行情是确定性生成的占位数据，接真实后端（api-gateway）时只需替换
 `market` 模块的取数实现，分析/导出链路不动。
@@ -468,3 +468,56 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
 杀掉 api-gateway 后壳层离线卡片显示「离线（读本地缓存）」且行情来自 cache
 标记；重启网关后「联网增量同步」报告 applied/unchanged 分布；慢网（>500ms）
 下的探测超时表现；真实 https 后端的探测策略（需 TLS 探测实现，当前保守判离线）。
+
+## 10. L117 键盘快捷键和右键菜单支持（2026-09-30）
+
+口径：**组合键表与菜单模型全在框架层，接线层只注册与广播，壳层只渲染与
+分发**——动作不新增 Rust 命令，分发到既有命令流（复用 L113/L116 的命令与
+按钮流程）。`global-shortcut-all` 特性在 L112 就已进 allowlist，本节把它用起来。
+
+```
+快捷键  shortcuts::DEFAULT_SHORTCUTS ──▶ shortcut_gui::register_global_shortcuts
+        （组合键 → 动作 id；合法性质校在框架层）      │ GlobalShortcutManager 注册
+                                                      ▼（触发）广播 "shortcut" 事件（载荷 = 动作 id）
+                                              壳层 ACTIONS 表 ──▶ 既有命令流
+                                                （loadQuotes/exportFirst/runSync/runOffline/剪贴板）
+
+右键    界面状态 hasQuote/hasSymbols ──▶ get_context_menu（薄命令，14 个）
+        ▼ shortcuts::context_menu（可用性/加速器提示判定）
+        项模型 {id,label,hint,enabled} ──▶ 壳层渲染 .ctx-menu（内容层 DOM）
+                                           点击项 → 同一 ACTIONS 表分发；Esc/点击任意处收起
+```
+
+框架层断言（`desktop/src/shortcuts.rs`，11 例，Linux 门禁可跑）：默认表
+自洽（组合键全合法、键与动作均不重复）；`valid_combo` 拒空/裸键/重复修饰键/
+越界 F 键；`resolve` ↔ `combo_of` 互为逆映射；`display_label` 平台差异
+（mac ⌘⇧S vs 其它 Ctrl+Shift+S，`CmdOrCtrl` 非 mac 映射为 Ctrl）；菜单项
+id 唯一/文案非空/提示与默认表一致；可用性规则（无行情→复制置灰、无标的→
+导出置灰、刷新/同步/离线读恒可用）；serde 字段契约 `{id,label,hint,enabled}`。
+
+接线：`gui.rs` 注册 13 → 14（`get_context_menu` 纯模型构造，与 `get_app_info`
+同不映射错误；薄度上限 260 → 280），setup 挂 `shortcut_gui::register_global_shortcuts`
+（新胶水文件，行数上限 120，同 platform/window_gui 纪律）；注册失败（组合键被
+系统/其它应用占用）只告警降级为无此快捷键，不阻断启动。壳层（desktop-shell.js）
+把行情/导出/离线/同步四段流程抽成可复用函数，`ACTIONS` 表同时服务快捷键事件
+与右键菜单；右键菜单是内容层 DOM（Tauri 1.x 无原生 context menu API，v2 才有
+`Menu::popup`），菜单**数据**来自 Rust——可用性判定留在框架层单测可覆盖的边界内。
+
+非交互假设（自行判定，已注明）：全局快捷键系统级生效，故默认表只收带修饰键
+的组合（裸键如 F5 不收，避免劫持系统键）；动作分发在壳层（Rust 侧只有事件
+广播，动作 id 与壳层 `ACTIONS` 表一致即通）；「复制最新价」是纯前端剪贴板
+操作无 Rust 命令；「导出首个标的」指与导出卡片同流的另存为对话框路径；多键
+同时按下/IME 输入态下的触发行为未验证（真机边界）。
+
+契约（`wiring_contract.rs`，15 → 17 例）：`get_context_menu` 入无判断/委派
+清单；注册数 13 → 14；薄度上限 260 → 280；框架入口补 `context_menu`/
+`DEFAULT_SHORTCUTS`/`display_label`；新 `shortcut_glue_stays_mechanical`
+（胶水行数/无命令/无自造错误串/取表于框架层/挂 setup）与
+`shell_keyboard_and_context_menu_wired`（事件监听/模型拉取/camelCase 参数/
+ACTIONS 全动作 id/菜单样式）。
+
+真机验收边界（本地单测用不了平台注册与真实事件，以下需环境人工观察）：
+macOS/Windows/Linux 上 ⌘R/Ctrl+R 实际触发与系统快捷键冲突时的降级告警；
+右键菜单在深浅色主题下的观感与置灰态；多显示器下菜单落点（是否越出屏幕
+边缘）；Esc 与点击收起的时序；全局快捷键在窗口失焦时是否仍触发（设计上
+会，未实测）。
