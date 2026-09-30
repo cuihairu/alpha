@@ -140,9 +140,43 @@
   tray_handle_by_id("main").set_tooltip() 由 check-desktop.sh [5/5] 假
   pkg-config 在 Linux 门禁类型检查；allowlist 的 notification-all 与
   systemTray 配置 L112 已对齐，本轮无需改配置。非交互假设：队列容量 50
-  （会话内历史非持久化）；托盘 tooltip 只反映告警状态；告警触发自动通知
-  接线（alert_notification 已备未接）留待后续。门禁：check-desktop.sh ✅ /
-  check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅）
+  （会话内历史非持久化）；托盘 tooltip 只反映告警状态。
+  同日第二轮闭环补全（6e17247 留了两条缝：托盘从未被创建——tauri.conf 的
+  systemTray 段只注入图标，Builder 不调 .system_tray() 就没有托盘，
+  tray_handle_by_id 永远拿不到句柄；alert_notification 备而未接）：新增
+  src/platform.rs（gui 门控的平台胶水，与 gui.rs 同纪律、行数上限由
+  wiring_contract 专项测试 platform_glue_stays_mechanical 锁定——不得定义
+  命令/不得自造错误串，只做「框架层模型→Tauri 类型」机械翻译）：
+  Builder.system_tray(platform::system_tray()) 显式 with_id("main")（默认
+  id 是随机串）+ 菜单；on_system_tray_event 把菜单点击经框架层 tray_action
+  映射为 show+focus / hide / exit(0)，动作后按真实可见性回写菜单。菜单状态
+  机与文案在框架层：tray_menu_model(visible)（显示/隐藏随主窗可见性互斥
+  可用，分隔线隔开退出）+ tray_action(id→动作，未知 id 忽略不 panic)，均
+  有单测。告警检查链：框架层 check_request(告警文件, 队列, 时刻)＝读告警→
+  生效者按 market::synthetic_quote（与 quotes_request 同口径）判定→触发即
+  入队（NotificationQueue 同文去重→重复触发不重复弹窗）+ alerts::deactivate
+  停用落盘（沿用既有持久化语义：停用保留记录，一次性告警避免确定性恒价
+  行情下反复触发）；check_alerts 命令薄委派 + platform 批量 Notification::show
+  （注册命令 10→11，gui.rs 薄度上限 200→220 行）。前端告警卡片闭环：
+  set_price_alert→check_alerts→set_tray_status（desktop-shell.js + index.html，
+  演示布防目标价＝现价−1%，确定性行情即刻满足）。顺手修两个真缺陷：
+  ①Tauri 1.x 命令参数键默认 camelCase（tauri-macros wrapper.rs
+  ArgumentCase::Camel），兜底壳原来把 file_path 写成 snake——运行期静默
+  失配（L113 的导出按钮真机会失败；CI 只编译不启动从未暴露），改 filePath
+  并新增源码断言拦截 targetPrice/alertType/filePath；②send_notification
+  误把通知 id 当应用 identifier 传 Notification::new（notify-rust 会拿错误
+  应用名），改回 bundle identifier。非交互假设：触发即停用；演示布防目标价
+  取现价−1%；检查取数仍用确定性演示行情（换真实行情只动 market 模块）。
+  真机验收边界（CI Desktop 只编译+链接，以下需真实桌面环境人工观察）：
+  ①系统通知真实弹出且需系统通知权限（macOS 通知中心/Windows toast/Linux
+  libappindicator→notify-rust）；②托盘图标出现、iconAsTemplate 深浅色适配；
+  ③托盘菜单「显示/隐藏主窗口/退出」真实生效（macOS 配置 menuOnLeftClick=
+  false → 右键/ctrl+左键出菜单，Linux 行为另有差异）；④tooltip 悬停显示
+  「N 个告警生效中/无告警」且随 set_tray_status 变化；⑤菜单可用态随窗口
+  可见性翻转（set_menu 回写）；⑥通知点击唤起主窗未做（v1 点击事件接
+  Notification 的 on_action 属后续）。门禁：check-desktop.sh [1-5/5] ✅ /
+  check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅；
+  gui/platform 的链接与运行由 CI Desktop (macOS) 作业验证）
 - [ ] 构建跨平台窗口管理和主题适配
 - [ ] 实现本地数据库同步和离线模式
 - [ ] 开发键盘快捷键和右键菜单支持

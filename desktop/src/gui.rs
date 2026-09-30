@@ -126,6 +126,7 @@ async fn get_app_info(app_handle: tauri::AppHandle) -> Result<app::AppInfo, Stri
 /// 发送系统通知（L114）：框架层校验+入队，接线层只负责平台 API 展示
 #[tauri::command]
 async fn send_notification(
+    app_handle: tauri::AppHandle,
     request: NotificationRequest,
     state: State<'_, AppState>,
 ) -> Result<Notification, String> {
@@ -134,11 +135,8 @@ async fn send_notification(
         notify::notify_request(&request, &mut queue, Utc::now())
             .map_err(|e: DesktopError| e.to_string())?
     };
-    tauri::api::notification::Notification::new(&notification.id)
-        .title(&notification.title)
-        .body(&notification.body)
-        .show()
-        .map_err(|e| e.to_string())?;
+    // identifier 是应用标识（bundle id）；平台胶水收拢在 platform.rs
+    crate::platform::show_notification(&identifier_from(&app_handle), &notification)?;
     Ok(notification)
 }
 
@@ -169,6 +167,22 @@ async fn set_tray_status(
     Ok(status)
 }
 
+/// 检查告警并弹出触发通知（L114 闭环）：框架层判定/入队/停用落盘
+/// （`check_request`），接线层只负责平台通知展示；返回本次触发的通知
+#[tauri::command]
+async fn check_alerts(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<Notification>, String> {
+    let fired = {
+        let mut queue = state.notification_queue().lock().expect("通知队列锁中毒");
+        notify::check_request(&state.paths().alerts_file(), &mut queue, Utc::now())
+            .map_err(|e: DesktopError| e.to_string())?
+    };
+    crate::platform::show_notifications(&identifier_from(&app_handle), &fired);
+    Ok(fired)
+}
+
 /// 启动 Tauri 应用（进程入口，供 `main.rs` 调用）
 pub fn run() {
     tracing_subscriber::fmt::init();
@@ -178,6 +192,8 @@ pub fn run() {
             tracing::info!(?info, "桌面应用启动");
             Ok(())
         })
+        .system_tray(crate::platform::system_tray())
+        .on_system_tray_event(crate::platform::on_tray_event)
         .invoke_handler(tauri::generate_handler![
             initialize_app,
             analyze_symbol,
@@ -188,7 +204,8 @@ pub fn run() {
             get_app_info,
             send_notification,
             list_notifications,
-            set_tray_status
+            set_tray_status,
+            check_alerts
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

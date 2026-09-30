@@ -15,8 +15,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::Path;
 
-/// 托盘 id（tauri.conf.json 的 systemTray 未显式指定 id，默认 "main"）
+/// 托盘 id（`Builder::system_tray` 需显式 `with_id`，否则句柄 id 是随机串——
+/// `tray_handle_by_id(TRAY_ID)` 才能找得到）
 pub const TRAY_ID: &str = "main";
+
+/// 托盘菜单项 id：显示主窗口
+pub const TRAY_ITEM_SHOW: &str = "tray-show";
+/// 托盘菜单项 id：隐藏主窗口
+pub const TRAY_ITEM_HIDE: &str = "tray-hide";
+/// 托盘菜单项 id：退出
+pub const TRAY_ITEM_QUIT: &str = "tray-quit";
+
+/// 主窗口标签（tauri.conf.json 的 windows[0] 未指定 label，Tauri 1.x 默认 "main"）
+pub const MAIN_WINDOW_LABEL: &str = "main";
 
 /// 通知队列默认容量（AppState 内嵌）
 pub const DEFAULT_QUEUE_CAPACITY: usize = 50;
@@ -218,6 +229,98 @@ pub fn alert_notification(alert: &Alert, price: f64, at: DateTime<Utc>) -> Optio
         level: NotificationLevel::Critical,
         created_at: at,
     })
+}
+
+/// 托盘菜单项（框架层模型；接线层机械翻译为 `SystemTrayMenu`，不掺判断）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayEntry {
+    /// 可点击项
+    Item {
+        /// 稳定 id（`tray_action` 的键）
+        id: &'static str,
+        /// 菜单文案
+        label: &'static str,
+        /// 是否可点（状态机：与主窗可见性互补）
+        enabled: bool,
+    },
+    /// 分隔线
+    Separator,
+}
+
+/// 托盘菜单动作（id → 动作的映射在框架层，接线层只执行平台调用）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayAction {
+    /// 显示主窗口并聚焦
+    ShowWindow,
+    /// 隐藏主窗口
+    HideWindow,
+    /// 退出进程
+    Quit,
+}
+
+/// 按主窗可见性生成托盘菜单（状态机：显示/隐藏随可见性互斥可用，分隔线隔开退出）
+///
+/// 常用菜单三件套即 TODO L114 的口径：显示/隐藏主窗、退出。
+pub fn tray_menu_model(window_visible: bool) -> Vec<TrayEntry> {
+    vec![
+        TrayEntry::Item {
+            id: TRAY_ITEM_SHOW,
+            label: "显示主窗口",
+            enabled: !window_visible,
+        },
+        TrayEntry::Item {
+            id: TRAY_ITEM_HIDE,
+            label: "隐藏主窗口",
+            enabled: window_visible,
+        },
+        TrayEntry::Separator,
+        TrayEntry::Item {
+            id: TRAY_ITEM_QUIT,
+            label: "退出",
+            enabled: true,
+        },
+    ]
+}
+
+/// 菜单项 id → 动作（未知 id 返回 None，接线层忽略而非 panic）
+pub fn tray_action(id: &str) -> Option<TrayAction> {
+    match id {
+        TRAY_ITEM_SHOW => Some(TrayAction::ShowWindow),
+        TRAY_ITEM_HIDE => Some(TrayAction::HideWindow),
+        TRAY_ITEM_QUIT => Some(TrayAction::Quit),
+        _ => None,
+    }
+}
+
+/// 告警检查（`check_alerts` 命令的实现体）：告警集合 → 触发判定 → 通知入队 +
+/// 触发者停用落盘。返回「本次真正新入队」的通知——平台只弹这些，重复内容由
+/// [`NotificationQueue`] 的同文去重抑制，不再打扰用户。
+///
+/// 持久化沿用 `alerts` 既有语义：触发即 `deactivate`（停用保留记录），
+/// 避免确定性行情下同一告警每次检查都重复触发。
+pub fn check_request(
+    path: &Path,
+    queue: &mut NotificationQueue,
+    at: DateTime<Utc>,
+) -> DesktopResult<Vec<Notification>> {
+    let mut fired = Vec::new();
+    for (id, alert) in crate::alerts::load(path) {
+        if !alert.active {
+            continue;
+        }
+        // 取数与 `quotes_request` 同一口径（`market::synthetic_quote`，确定性演示行情）
+        let price = crate::market::synthetic_quote(&alert.symbol).price;
+        if let Some(notification) = alert_notification(&alert, price, at) {
+            let fresh = queue.push(notification.clone());
+            // 先入队再落盘：落盘失败则保留 active，下次检查可重试停用
+            //（已入队内容会被去重，不产生重复弹窗）
+            crate::alerts::deactivate(path, &id)?;
+            if fresh {
+                fired.push(notification);
+            }
+        }
+    }
+    Ok(fired)
 }
 
 #[cfg(test)]
@@ -429,5 +532,116 @@ mod tests {
         for key in ["status_text", "active_alerts", "last_trigger"] {
             assert!(json.get(key).is_some(), "托盘状态应含字段 {key}: {json}");
         }
+    }
+
+    #[test]
+    fn tray_menu_enables_only_the_available_side() {
+        for (visible, show_enabled, hide_enabled) in [(true, false, true), (false, true, false)] {
+            let model = tray_menu_model(visible);
+            assert_eq!(
+                model,
+                vec![
+                    TrayEntry::Item {
+                        id: TRAY_ITEM_SHOW,
+                        label: "显示主窗口",
+                        enabled: show_enabled,
+                    },
+                    TrayEntry::Item {
+                        id: TRAY_ITEM_HIDE,
+                        label: "隐藏主窗口",
+                        enabled: hide_enabled,
+                    },
+                    TrayEntry::Separator,
+                    TrayEntry::Item {
+                        id: TRAY_ITEM_QUIT,
+                        label: "退出",
+                        enabled: true,
+                    },
+                ],
+                "可见性 {visible} 的菜单结构/可用态"
+            );
+        }
+    }
+
+    #[test]
+    fn tray_action_maps_known_ids_and_ignores_unknown() {
+        assert_eq!(tray_action(TRAY_ITEM_SHOW), Some(TrayAction::ShowWindow));
+        assert_eq!(tray_action(TRAY_ITEM_HIDE), Some(TrayAction::HideWindow));
+        assert_eq!(tray_action(TRAY_ITEM_QUIT), Some(TrayAction::Quit));
+        assert_eq!(tray_action("tray-nope"), None, "未知 id 不 panic");
+        assert_eq!(tray_action(TRAY_ID), None, "托盘 id 不是菜单项 id");
+    }
+
+    #[test]
+    fn check_request_fires_deactivates_and_stays_quiet_afterwards() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let path = tmp.path().join("alerts.json");
+        let price = crate::market::synthetic_quote("600519").price;
+        crate::alerts::upsert(&path, "600519", price - 1.0, AlertKind::Above, at())
+            .expect("布防上穿告警");
+
+        let mut queue = NotificationQueue::new(10);
+        let fired = check_request(&path, &mut queue, at()).expect("首查应触发");
+        assert_eq!(fired.len(), 1, "现价已上穿（确定性行情），应触发");
+        assert_eq!(fired[0].level, NotificationLevel::Critical);
+        assert_eq!(queue.len(), 1, "触发内容应入队");
+        let book = crate::alerts::load(&path);
+        let id = crate::alerts::alert_id("600519", at());
+        assert!(!book[&id].active, "触发即停用（保留记录）");
+
+        // 二次检查：已停用不再触发，队列也不重复入队
+        let fired = check_request(&path, &mut queue, at()).expect("二查应空手而归");
+        assert!(fired.is_empty(), "停用告警不应再触发: {fired:?}");
+        assert_eq!(queue.len(), 1, "队列不因空查变化");
+    }
+
+    #[test]
+    fn check_request_leaves_unmatched_alerts_active() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let path = tmp.path().join("alerts.json");
+        let price = crate::market::synthetic_quote("000001").price;
+        crate::alerts::upsert(&path, "000001", price + 1000.0, AlertKind::Above, at())
+            .expect("布防远离目标的上穿告警");
+
+        let mut queue = NotificationQueue::new(10);
+        let fired = check_request(&path, &mut queue, at()).expect("检查成功");
+        assert!(fired.is_empty(), "未上穿不应触发: {fired:?}");
+        assert!(queue.is_empty());
+        let book = crate::alerts::load(&path);
+        let id = crate::alerts::alert_id("000001", at());
+        assert!(book[&id].active, "未触发告警保持生效");
+    }
+
+    #[test]
+    fn check_request_dedup_suppresses_popup_but_not_state_change() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let path = tmp.path().join("alerts.json");
+        let price = crate::market::synthetic_quote("600519").price;
+        let mut queue = NotificationQueue::new(10);
+        crate::alerts::upsert(&path, "600519", price - 1.0, AlertKind::Above, at()).expect("首布");
+        assert_eq!(
+            check_request(&path, &mut queue, at()).expect("首查").len(),
+            1
+        );
+
+        // 同目标价重新布防再触发：状态机照常（停用落盘），但同文通知被去重，
+        // 不再计入「新入队」→ 平台不重复弹窗
+        crate::alerts::upsert(&path, "600519", price - 1.0, AlertKind::Above, at())
+            .expect("同目标价重新布防");
+        let fired = check_request(&path, &mut queue, at()).expect("复查");
+        assert!(fired.is_empty(), "同文重复触发应被队列去重: {fired:?}");
+        assert_eq!(queue.len(), 1);
+        let book = crate::alerts::load(&path);
+        let id = crate::alerts::alert_id("600519", at());
+        assert!(!book[&id].active, "去重不影响触发后的停用落盘");
+    }
+
+    #[test]
+    fn check_request_missing_file_is_empty_not_error() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let mut queue = NotificationQueue::new(10);
+        let fired = check_request(&tmp.path().join("alerts.json"), &mut queue, at())
+            .expect("缺失告警文件按空表处理");
+        assert!(fired.is_empty());
     }
 }

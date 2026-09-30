@@ -108,6 +108,7 @@ fn command_bodies_have_no_business_judgement() {
         "send_notification",
         "list_notifications",
         "set_tray_status",
+        "check_alerts",
     ] {
         let body = command_body(&gui, name);
         let code = strip_rust_comments(&body);
@@ -142,6 +143,7 @@ fn command_bodies_delegate_to_framework_entry_points() {
         ("send_notification", "notify_request"),
         ("list_notifications", "recent"),
         ("set_tray_status", "tray_status_request"),
+        ("check_alerts", "check_request"),
     ] {
         let body = command_body(&gui, name);
         assert!(
@@ -162,6 +164,7 @@ fn command_bodies_delegate_to_framework_entry_points() {
         "export_symbol_to_file",
         "send_notification",
         "set_tray_status",
+        "check_alerts",
     ] {
         let body = command_body(&gui, name);
         assert!(
@@ -208,7 +211,7 @@ fn registered_commands_match_fallback_shell_invocations() {
         .collect();
     assert_eq!(
         registered.len(),
-        10,
+        11,
         "注册命令数应与前端契约一致，实际: {registered:?}"
     );
     for cmd in &registered {
@@ -243,9 +246,11 @@ fn wiring_layer_stays_thin() {
     let gui = gui_source();
     let lines = gui.lines().count();
     assert!(
-        lines < 200,
+        lines < 220,
         "gui.rs 涨到 {lines} 行（接线层应保持薄，业务下沉框架层；L114 通知/托盘
-        三命令后上限 160 → 200，每命令仍 ~20 行薄委派）"
+        三命令后上限 160 → 200，check_alerts 闭环命令后 200 → 220，每命令仍
+        ~20 行薄委派；托盘/通知平台胶水在 src/platform.rs，上限见
+        platform_glue_stays_mechanical）"
     );
     // 业务模块的函数体不应出现在接线层（抽查两个典型业务函数）
     assert!(!gui.contains("for symbol in"), "接线层不应出现批量循环");
@@ -264,6 +269,9 @@ fn framework_entry_points_are_exported() {
         "export_symbol_request",
         "notify_request",
         "tray_status_request",
+        "check_request",
+        "tray_menu_model",
+        "tray_action",
     ] {
         assert!(
             lib.contains(entry),
@@ -329,6 +337,8 @@ fn shell_commands_have_framework_entry_points() {
         "get_real_time_quotes",
         "analyze_symbol",
         "export_symbol_to_file",
+        "check_alerts",
+        "set_tray_status",
     ] {
         assert!(
             shell.contains(&format!("invoke(\"{cmd}\"")),
@@ -350,7 +360,52 @@ fn shell_export_uses_native_save_dialog() {
         "兜底壳导出应经原生另存为对话框拿路径"
     );
     assert!(
-        shell.contains("file_path"),
-        "兜底壳应把对话框返回的路径按 file_path 传给 Rust 命令"
+        shell.contains("filePath"),
+        "兜底壳应把对话框返回的路径按 filePath 传给 Rust 命令——Tauri 1.x 命令
+        参数默认 camelCase（tauri-macros wrapper.rs 的 ArgumentCase::Camel），
+        写 file_path 会在运行期静默失配（CI 只编译不启动，此断言是唯一本地拦截点）"
     );
+}
+
+/// L114 托盘/通知平台胶水（`src/platform.rs`，gui 特性）：与 gui.rs 同纪律——
+/// 不得定义命令、不得自造错误文案，只做「框架层模型 → Tauri 类型」的机械翻译
+#[test]
+fn platform_glue_stays_mechanical() {
+    let platform =
+        std::fs::read_to_string(crate_dir().join("src/platform.rs")).expect("读 platform.rs");
+    let lines = platform.lines().count();
+    assert!(
+        lines < 120,
+        "platform.rs 涨到 {lines} 行（平台胶水应保持机械翻译，判断下沉 notify.rs）"
+    );
+    assert!(
+        !platform.contains("#[tauri::command]"),
+        "平台胶水不应定义命令（命令都在 gui.rs，受薄度契约约束）"
+    );
+    let code = strip_rust_comments(&platform);
+    assert!(
+        !code.contains("Err(\""),
+        "平台胶水不应自造错误串（错误映射归命令体/框架层）"
+    );
+    assert!(
+        code.contains("notify::"),
+        "平台胶水应从框架层 notify.rs 取菜单模型/动作映射，而非自造"
+    );
+}
+
+/// L114 告警闭环的前端接线：布防命令的多词参数必须是 camelCase
+/// （targetPrice/alertType）。Tauri 1.x 命令参数默认 camelCase
+/// （tauri-macros wrapper.rs `ArgumentCase::Camel`），snake 键会在运行期
+/// 静默失配——CI 只编译不启动，唯有源码断言能在本地拦截。
+#[test]
+fn shell_alert_loop_uses_v1_camel_case_arguments() {
+    let shell =
+        std::fs::read_to_string(crate_dir().join(tauri_dist_dir()).join("desktop-shell.js"))
+            .expect("读兜底壳");
+    for needle in ["invoke(\"set_price_alert\"", "targetPrice", "alertType"] {
+        assert!(
+            shell.contains(needle),
+            "兜底壳布防告警应含 {needle}（v1 参数默认 camelCase）"
+        );
+    }
 }

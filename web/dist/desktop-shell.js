@@ -3,11 +3,14 @@
  *
  * 只用 Tauri v1 全局 API（window.__TAURI__，由 tauri.conf.json 的 build.withGlobalTauri
  * 注入；v1 全局 API 是 window.__TAURI__.invoke(cmd, args)，没有 v2 的 ipcRenderer），
- * 不引入 npm 依赖 —— 保证 distDir 只有这两个文件时窗口依然可用。五条命令对应
- * desktop/src/gui.rs 的 #[tauri::command]：
+ * 不引入 npm 依赖 —— 保证 distDir 只有这两个文件时窗口依然可用。命令对应
+ * desktop/src/gui.rs 的 #[tauri::command]（Tauri 1.x 参数键默认 camelCase，
+ * 多词参数必须写 targetPrice/alertType/filePath，写 snake 会在运行期静默失配）：
  *   initialize_app → get_app_info → get_real_time_quotes → analyze_symbol
  * 链路终点是 alpha-core 的 AnalysisEngine（真实计算，非桩数据）；另有导出卡片经
- * 原生另存为对话框调 export_symbol_to_file（TODO L113），保存位置由用户自选。
+ * 原生另存为对话框调 export_symbol_to_file（TODO L113），保存位置由用户自选；
+ * 告警卡片（TODO L114）走 set_price_alert → check_alerts → set_tray_status：
+ * 触发告警由 Rust 侧弹系统通知并入队，托盘 tooltip 反映告警状态。
  *
  * 非 Tauri 环境（普通浏览器直接打开 web/dist/index.html）不报错，改为提示先构建前端。
  */
@@ -53,6 +56,7 @@
     "完整 Web 前端构建后（<code>cd web && npm run build</code>）会替换本壳。";
 
   var symbols = [];
+  var firstQuote = null;
 
   invoke("initialize_app")
     .then(function (payload) {
@@ -69,6 +73,7 @@
         kv("主题", esc(cfg.theme)) +
         kv("自动刷新", cfg.auto_update ? "开" : "关") +
         problems;
+      refreshAlerts();
       return invoke("get_app_info");
     })
     .then(function (info) {
@@ -80,6 +85,7 @@
     })
     .then(function (list) {
       return invoke("get_real_time_quotes", { symbols: list }).then(function (quotes) {
+        firstQuote = quotes && quotes.length ? quotes[0] : null;
         var rows = quotes
           .map(function (q) {
             var cls = q.price >= q.open ? "up" : "down";
@@ -154,7 +160,7 @@
             return invoke("export_symbol_to_file", {
               symbol: symbol,
               format: fmt,
-              file_path: path,
+              filePath: path,
             });
           })
           .then(function (outcome) {
@@ -169,5 +175,78 @@
           });
       });
     }
+  }
+
+  // L114 告警/托盘链路：状态由 initialize_app 自举（State 注入）后才可调用。
+  // 启动即检查一次——上次会话遗留的生效告警若已满足条件会立即触发（Rust 侧
+  // 弹系统通知 + 入队 + 停用落盘）；随后把托盘 tooltip 同步为告警状态文本。
+  function renderAlerts(fired) {
+    document.getElementById("alert-result").innerHTML =
+      fired && fired.length
+        ? fired
+            .map(function (n) {
+              return kv("🔔 " + esc(n.title), esc(n.body));
+            })
+            .join("")
+        : kv("本次触发", "无（布防后点按钮重查）");
+  }
+
+  function renderTrayStatus(status) {
+    document.getElementById("tray-status").innerHTML =
+      kv("托盘状态", esc(status.status_text)) +
+      kv("生效告警", String(status.active_alerts)) +
+      kv("最近触发", esc(status.last_trigger || "—"));
+  }
+
+  function refreshAlerts() {
+    invoke("check_alerts")
+      .then(renderAlerts)
+      .then(function () {
+        return invoke("set_tray_status");
+      })
+      .then(renderTrayStatus)
+      .catch(function (error) {
+        setText(
+          "alert-result",
+          "告警检查失败：" + (error && error.message ? error.message : String(error)),
+          "err"
+        );
+      });
+  }
+
+  var alertBtn = document.getElementById("alert-btn");
+  if (alertBtn) {
+    alertBtn.addEventListener("click", function () {
+      if (!firstQuote) {
+        setText("alert-result", "无可布防标的（配置 symbols 为空）", "err");
+        return;
+      }
+      alertBtn.disabled = true;
+      // 演示口径：目标价取现价 −1%（确定性行情即刻满足上穿，触发即停用；
+      // 同文重复触发由通知队列去重，不重复弹窗）
+      invoke("set_price_alert", {
+        symbol: firstQuote.symbol,
+        targetPrice: firstQuote.price * 0.99,
+        alertType: "above",
+      })
+        .then(function () {
+          return invoke("check_alerts");
+        })
+        .then(renderAlerts)
+        .then(function () {
+          return invoke("set_tray_status");
+        })
+        .then(renderTrayStatus)
+        .catch(function (error) {
+          setText(
+            "alert-result",
+            "布防/检查失败：" + (error && error.message ? error.message : String(error)),
+            "err"
+          );
+        })
+        .then(function () {
+          alertBtn.disabled = false;
+        });
+    });
   }
 })();

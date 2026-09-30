@@ -202,7 +202,7 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 | TODO | 现状 | 下一步 |
 | --- | --- | --- |
 | L113 文件系统集成与本地导出 | ✅ 已落地（见 §6）：用户自选路径导出闭环 | 覆盖已存在文件直接替换（写前确认未做，留待后续） |
-| L114 系统通知与托盘 | ✅ 已落地（见 §7）：通知模型/队列/托盘状态 + 接线层平台 API | 告警触发自动通知（`alert_notification` 已备，接线留后续） |
+| L114 系统通知与托盘 | ✅ 已闭环（见 §7）：通知模型/队列/托盘菜单状态机 + 告警检查链（check_alerts）+ 托盘接线（platform.rs） | 通知点击唤起主窗；托盘图标随状态换图（需多套图标资产）；定时轮询取数 |
 | L115 本地数据库同步与离线模式 | `FileKeyValueStore` 是雏形（KV 语义够用，非查询型） | 换 SQLite/本地缓存并做同步冲突策略 |
 | L116 快捷键与右键菜单 | `global-shortcut-all` 特性已在 allowlist | 注册快捷键与菜单事件 |
 
@@ -291,5 +291,54 @@ serde 往返）。`tauri::api::notification::Notification` 与
 （假 pkg-config）在 Linux 门禁检查；链接与运行仍由 macOS 作业验证。
 
 非交互假设（自行判定，已注明）：通知队列容量 50（会话内历史，非持久化）；
-托盘 tooltip 只反映告警状态（不显示行情）；告警触发自动通知的接线
-（`alert_notification` 已备未接）留待后续轮次。
+托盘 tooltip 只反映告警状态（不显示行情）。
+
+### 7.1 闭环补全（同日第二轮）：托盘接线 + 告警检查链
+
+首轮留了两条缝：**托盘从未被创建**（tauri.conf 的 `systemTray` 段只负责
+把图标嵌进 Context，`Builder` 不调 `.system_tray()` 就没有托盘，
+`tray_handle_by_id` 永远拿不到句柄）与 **`alert_notification` 备而未接**
+（无生产调用方）。本轮补上，分层不变：
+
+```
+托盘点击 ──▶ platform::on_tray_event（机械翻译）
+                 │ notify::tray_action(id)（框架层映射，未知 id 忽略）
+                 ▼
+      ShowWindow: show+focus │ HideWindow: hide │ Quit: exit(0)
+      动作后按真实可见性 tray.set_menu(tray_menu(visible)) 回写菜单
+
+check_alerts ──▶ notify::check_request（框架层判定/入队/停用落盘）
+                 │ 生效告警 × market::synthetic_quote（与 quotes_request 同口径）
+                 ▼
+      触发 → 入队（同文去重→不重复弹窗）→ alerts::deactivate（停用保留记录）
+      返回「新入队」的通知 → platform::show_notifications（平台弹窗）
+```
+
+* **`src/platform.rs`**（gui 门控）：`Builder.system_tray(platform::system_tray())`
+  显式 `with_id("main")`（默认 id 是随机串，`tray_handle_by_id` 会找不到）；
+  菜单模型 `tray_menu_model(visible)`（显示/隐藏随主窗可见性互斥可用，
+  分隔线隔开退出）与 `tray_action(id→动作)` 全在框架层 `notify.rs`（单测
+  锁定状态机），platform.rs 只做 `TrayEntry → SystemTrayMenu` 的机械翻译，
+  行数上限与「无命令/无自造错误串」由 wiring_contract
+  `platform_glue_stays_mechanical` 锁定。
+* **`check_request`**（框架层）：生效告警 → 确定性行情判定 → 触发即入队 +
+  `alerts::deactivate` 停用落盘（沿用既有持久化语义：停用保留记录；一次性
+  告警避免确定性恒价行情下反复触发）。单测覆盖：触发即停用且二次检查空手、
+  未触发保持生效、同文重复布防被队列去重但状态机照常停用、缺文件按空表。
+* **前端闭环**（`desktop-shell.js` + `index.html` 告警卡片）：布防
+  （`set_price_alert`，演示目标价＝现价−1%）→ `check_alerts`（Rust 弹系统
+  通知 + 入队 + 停用）→ `set_tray_status`（tooltip 同步）。注册命令 10 → 11，
+  gui.rs 薄度上限 200 → 220 行。
+* **两个真缺陷修复**：①Tauri 1.x 命令参数键默认 **camelCase**
+  （tauri-macros `wrapper.rs` 的 `ArgumentCase::Camel`），兜底壳原来把
+  `file_path` 写成 snake——运行期静默失配（L113 导出按钮真机会失败；CI 只
+  编译不启动，从未暴露），改 `filePath` 并由 wiring_contract 新增源码断言
+  拦截 `targetPrice`/`alertType`/`filePath`；②`send_notification` 误把通知
+  id 当应用 identifier 传 `Notification::new`（notify-rust 会拿错误应用名），
+  改回 bundle identifier。
+
+真机验收边界（CI Desktop 只编译+链接，需真实桌面人工观察）：系统通知真实
+弹出与权限授予；托盘图标出现与 `iconAsTemplate` 深浅色适配；菜单点击
+显示/隐藏/退出真实生效（macOS `menuOnLeftClick=false` → 右键出菜单，Linux
+行为另有差异）；tooltip 随 `set_tray_status` 变化；菜单可用态随窗口可见性
+翻转；通知点击唤起主窗未做（v1 通知点击事件属后续）。

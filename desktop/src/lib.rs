@@ -37,6 +37,11 @@ pub mod state;
 #[cfg(feature = "gui")]
 pub mod gui;
 
+/// 平台胶水（托盘接线/通知展示；`gui` 特性门控——单测覆盖不了平台调用，
+/// 由 check-desktop [5/5] 类型检查 + CI Desktop (macOS) 链接验证）
+#[cfg(feature = "gui")]
+pub mod platform;
+
 pub use alerts::{upsert_request, Alert, AlertKind};
 pub use analysis::{analyze, analyze_request, quotes, quotes_request};
 pub use app::{app_info, AppInfo, APP_NAME};
@@ -49,8 +54,9 @@ pub use ipc::{AnalyzeRequest, ExportRequest, InitPayload};
 pub use kv::FileKeyValueStore;
 pub use market::{synthetic_quote, synthetic_series, DEFAULT_BARS};
 pub use notify::{
-    alert_notification, notification_id, notify_request, tray_status_request, Notification,
-    NotificationLevel, NotificationQueue, TrayState, DEFAULT_QUEUE_CAPACITY,
+    alert_notification, check_request, notification_id, notify_request, tray_action,
+    tray_menu_model, tray_status_request, Notification, NotificationLevel, NotificationQueue,
+    TrayAction, TrayEntry, TrayState, DEFAULT_QUEUE_CAPACITY,
 };
 pub use paths::AppPaths;
 pub use state::{bootstrap_app, AppState};
