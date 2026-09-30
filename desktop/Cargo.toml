@@ -21,6 +21,14 @@ tauri-build = { version = "1.5", features = [] }
 # GUI 接线由 CI Desktop 作业（macOS）验证
 tauri = { version = "1.5", optional = true, features = ["dialog-open", "dialog-save", "fs-copy-file", "fs-create-dir", "fs-read-dir", "fs-read-file", "fs-remove-dir", "fs-remove-file", "fs-rename-file", "fs-write-file", "shell-open", "system-tray", "notification-all", "path-all", "global-shortcut-all"] }
 
+# 仅用于**固定解析版本**，代码里不引用它（上游 semver 破坏：zbus 5.11 的依赖声明是
+# `zbus_macros = "5.11.0"`（caret），会解析到 5.19，而 5.19 的宏生成的代码引用
+# zbus 5.11 里不存在的 DispatchResult2 → Linux 上编 gui 特性直接失败。zbus 是 tauri
+# 仅 Linux/BSD 的依赖，macOS 作业不编译它，故这个坑对 macOS CI 不可见。
+# 写 `=` 精确约束而不是提交 Cargo.lock（本仓按库惯例忽略锁文件），这样 CI 全新解析
+# 时也会得到可用版本。见 docs/desktop-framework.md §4.2。
+zbus-macros-pin = { package = "zbus_macros", version = "=5.11.0", optional = true }
+
 # 异步运行时
 tokio = { workspace = true }
 # alpha-core 平台适配层 trait（KeyValueStore 等）为 async-trait 定义
