@@ -333,7 +333,7 @@
   并发压测、R8/签名发布流水线（TODO 351 行附近）。
   门禁：check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅ /
   check-desktop.sh [1-5/5] ✅（Android 工具链不进 CI 门禁，靠契约测试守结构）
-- [ ] 实现 iOS Swift + Rust 集成（SwiftUI + UniFFI）
+- [x] 实现 iOS Swift + Rust 集成（SwiftUI + UniFFI）
 - [ ] 开发移动端特有的推送通知和后台同步
 - [ ] 实现触屏手势和移动端 UI 交互优化
 - [ ] 构建移动端离线数据存储和同步机制
