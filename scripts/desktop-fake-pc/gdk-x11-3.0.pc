@@ -1,6 +1,6 @@
-Name: gtk+-x11-2.0
+Name: gdk-x11-3.0
 Description: fake for type-check only
 Version: 99.99.99
-Requires: gtk+-3.0, gdk-x11-3.0
+Requires: gdk-3.0, x11
 Libs:
 Cflags:

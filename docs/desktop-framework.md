@@ -150,9 +150,21 @@ WebKitGTK，跑不了）——于是只能等 CI 的 `Desktop (macOS)` 作业变
 runner 上完整编译：
 
 ```
-PKG_CONFIG_PATH="$PWD/scripts/desktop-fake-pc" PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
+PKG_CONFIG_PATH="$PWD/scripts/desktop-fake-pc" \
+    PKG_CONFIG_LIBDIR="$PWD/target/desktop-fake-pc-system" \
+    PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
     cargo clippy -p alpha-desktop --features gui --all-targets -- -D warnings
 ```
+
+`PKG_CONFIG_LIBDIR` 那一行是必需的，不是保险：pkg-config **同时**搜 `PKG_CONFIG_PATH`
+和 `PKG_CONFIG_LIBDIR`（后者默认是系统 `.pc` 目录），所以目录里缺的包会被本机装着的
+真件悄悄兜住——最初的 8 个 `.pc` 在本机（装了 GTK3）怎么都绿，推到 CI 的
+`ubuntu-latest` 就红在 `The system library gobject-2.0 required by crate glib-sys was
+not found`。指到空目录后 `.pc` 集合必须**自包含**（现 18 个，含
+`gobject-2.0`/`gio-2.0`/`gmodule-2.0`/`gdk-3.0`/`atk`/`pango`/`cairo-gobject`/
+`gdk-x11-3.0`/`x11`），`Requires` 也要照抄真实依赖关系，于是任何 Linux 机器结果
+一致。反向验证过：删掉 `gobject-2.0.pc` 并 `cargo clean -p glib-sys -p gobject-sys
+-p gdk-sys -p atk-sys`（不 clean 就命中 clippy 缓存，看不出变化）→ [5/5] 转红。
 
 这一步（门禁 [5/5]）把 `#[tauri::command]` 宏展开、`AppHandle`/`State` 用法、
 `generate_context!`、以及接线层对框架层的全部调用签名都纳入 Linux 门禁。首轮的

@@ -1,0 +1,6 @@
+Name: gdk-3.0
+Description: fake for type-check only
+Version: 99.99.99
+Requires: cairo, pango, gdk-pixbuf-2.0, atk, gobject-2.0
+Libs:
+Cflags:

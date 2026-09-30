@@ -1,6 +1,6 @@
-Name: gtk+-x11-2.0
+Name: cairo-gobject
 Description: fake for type-check only
 Version: 99.99.99
-Requires: gtk+-3.0, gdk-x11-3.0
+Requires: cairo, gobject-2.0
 Libs:
 Cflags:

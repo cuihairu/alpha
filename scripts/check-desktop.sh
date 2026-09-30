@@ -207,10 +207,19 @@ ok "框架层单测通过（含 tests/tauri_config.rs 配置契约、tests/wirin
 # （withGlobalTauri 段位错、validate() 误当 Vec<String>）漏网的那一类。
 #
 # 不能覆盖的：链接与运行（仍需真实 WebKitGTK 或 CI 的 macOS 作业）。
+#
+# 可复现性：pkg-config 会**同时**搜 PKG_CONFIG_PATH 与 PKG_CONFIG_LIBDIR（后者默认
+# 是系统 .pc 目录）。只设 PATH 时，本机装了真 GTK3 → 缺失的 .pc 被系统真件悄悄兜住；
+# 而 CI 的 ubuntu-latest 没有 GTK，就没有兜底 → 门禁在本地绿、在 CI 红（真踩过：
+# glib-sys 要的 gobject-2.0 只在系统里有）。把 LIBDIR 指到空目录，「依赖图能否完整
+# 编译」就不再随机器上装了什么而变。
 echo "--- [5/5] GUI 接线层类型检查 + clippy（gui 特性，假 pkg-config，不链接）"
-PKG_CONFIG_PATH="$PWD/scripts/desktop-fake-pc" PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
+mkdir -p target/desktop-fake-pc-system
+PKG_CONFIG_PATH="$PWD/scripts/desktop-fake-pc" \
+    PKG_CONFIG_LIBDIR="$PWD/target/desktop-fake-pc-system" \
+    PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
     cargo clippy -p alpha-desktop --features gui --all-targets -- -D warnings \
-    || fail "GUI 接线层类型检查/lint 失败（见上）"
+    || fail "GUI 接线层类型检查/lint 失败（见上；缺 .pc 就往 scripts/desktop-fake-pc 补）"
 ok "GUI 接线层 clippy 零警告（类型已检查；链接/运行由 macOS 作业验证）"
 
 echo "=== 桌面端门禁全部通过 ==="

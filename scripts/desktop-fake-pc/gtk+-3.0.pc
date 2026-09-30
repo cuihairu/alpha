@@ -1,5 +1,6 @@
 Name: gtk+-3.0
 Description: fake for type-check only
 Version: 99.99.99
+Requires: gdk-3.0, cairo, pango, atk, gdk-pixbuf-2.0, gobject-2.0
 Libs:
 Cflags:
