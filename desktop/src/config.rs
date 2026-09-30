@@ -141,6 +141,49 @@ pub fn save(path: &Path, config: &AppConfig) -> DesktopResult<()> {
     Ok(())
 }
 
+/// 主题偏好（L115：深浅色适配的规范型；壳层据此落 `data-theme`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemePref {
+    /// 强制浅色（内容层覆盖系统深色）
+    Light,
+    /// 强制深色
+    Dark,
+    /// 跟随系统（`prefers-color-scheme` 变化实时跟随）
+    System,
+}
+
+/// 解析配置里的主题字符串为规范型
+///
+/// 宽容口径：trim + 忽略大小写；未知取值按 [`ThemePref::System`] 处理——
+/// 非法值已由 `AppConfig::validate` 单独上报，这里不再二次报错，保证壳层
+/// 拿到的永远是可渲染的偏好。
+pub fn theme_pref(raw: &str) -> ThemePref {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "light" => ThemePref::Light,
+        "dark" => ThemePref::Dark,
+        _ => ThemePref::System,
+    }
+}
+
+/// 规范映射：偏好 × 系统是否深色 → 内容层主题（`"light"` / `"dark"`）
+///
+/// `System` 跟随 `system_prefers_dark`；Light/Dark 强制覆盖——这是
+/// 「主题跟随系统**并覆盖既有组件**」的判断点（Tauri 1.x 原生装饰无运行期
+/// `set_theme`，覆盖落在内容层 CSS 变量上）。
+pub fn resolve_theme(pref: ThemePref, system_prefers_dark: bool) -> &'static str {
+    match pref {
+        ThemePref::Light => "light",
+        ThemePref::Dark => "dark",
+        ThemePref::System => {
+            if system_prefers_dark {
+                "dark"
+            } else {
+                "light"
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +402,37 @@ mod tests {
             matches!(err, DesktopError::Io(_)),
             "错误类别应为 io，实际 {:?}",
             err.kind()
+        );
+    }
+
+    #[test]
+    fn theme_pref_parses_all_legal_values() {
+        assert_eq!(theme_pref("light"), ThemePref::Light);
+        assert_eq!(theme_pref("dark"), ThemePref::Dark);
+        assert_eq!(theme_pref("system"), ThemePref::System);
+        assert_eq!(theme_pref(" Dark "), ThemePref::Dark, "容忍空白与大小写");
+    }
+
+    #[test]
+    fn theme_pref_defaults_unknown_to_system() {
+        // 非法值由 validate 上报；解析层宽容回退，壳层永远拿到可渲染偏好
+        assert_eq!(theme_pref("solarized"), ThemePref::System);
+        assert_eq!(theme_pref(""), ThemePref::System);
+    }
+
+    #[test]
+    fn resolve_theme_follows_system_only_for_system_pref() {
+        assert_eq!(resolve_theme(ThemePref::System, true), "dark");
+        assert_eq!(resolve_theme(ThemePref::System, false), "light");
+        assert_eq!(
+            resolve_theme(ThemePref::Dark, false),
+            "dark",
+            "强制深色覆盖系统浅色"
+        );
+        assert_eq!(
+            resolve_theme(ThemePref::Light, true),
+            "light",
+            "强制浅色覆盖系统深色"
         );
     }
 }

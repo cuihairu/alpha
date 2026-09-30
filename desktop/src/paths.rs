@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 pub const CONFIG_FILE_NAME: &str = "config.json";
 /// 告警文件名（落在配置目录）
 pub const ALERTS_FILE_NAME: &str = "alerts.json";
+/// 窗口几何状态文件名（落在配置目录，L115）
+pub const WINDOW_STATE_FILE_NAME: &str = "window-state.json";
 /// 导出子目录（相对数据目录）
 pub const EXPORTS_DIR_NAME: &str = "exports";
 /// 键值存储子目录（相对数据目录）
@@ -48,6 +50,11 @@ impl AppPaths {
     /// 告警文件路径
     pub fn alerts_file(&self) -> PathBuf {
         self.config_dir.join(ALERTS_FILE_NAME)
+    }
+
+    /// 窗口几何状态文件路径（L115）
+    pub fn window_state_file(&self) -> PathBuf {
+        self.config_dir.join(WINDOW_STATE_FILE_NAME)
     }
 
     /// 导出目录路径
@@ -92,6 +99,10 @@ mod tests {
         let p = paths(Path::new("/tmp/app"));
         assert_eq!(p.config_file(), Path::new("/tmp/app/config/config.json"));
         assert_eq!(p.alerts_file(), Path::new("/tmp/app/config/alerts.json"));
+        assert_eq!(
+            p.window_state_file(),
+            Path::new("/tmp/app/config/window-state.json")
+        );
         assert_eq!(p.exports_dir(), Path::new("/tmp/app/data/exports"));
         assert_eq!(p.kv_dir(), Path::new("/tmp/app/data/kv"));
     }

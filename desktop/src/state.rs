@@ -15,6 +15,9 @@ pub struct AppState {
     /// 通知队列（L114）：会话内通知历史，`send_notification` 入队、
     /// `list_notifications` 读取；互斥锁只保护入队/读取的短临界区
     notifications: std::sync::Mutex<notify::NotificationQueue>,
+    /// 窗口几何节流器（L115）：接线层移动/缩放事件高频触发，经此判定
+    /// 是否值得落盘；返回 `&Mutex` 而非守卫，调用方自行控制临界区
+    window_tracker: std::sync::Mutex<crate::window::WindowStateTracker>,
 }
 
 impl AppState {
@@ -31,6 +34,7 @@ impl AppState {
             notifications: std::sync::Mutex::new(notify::NotificationQueue::new(
                 notify::DEFAULT_QUEUE_CAPACITY,
             )),
+            window_tracker: std::sync::Mutex::new(crate::window::WindowStateTracker::default()),
         })
     }
 
@@ -42,6 +46,7 @@ impl AppState {
             notifications: std::sync::Mutex::new(notify::NotificationQueue::new(
                 notify::DEFAULT_QUEUE_CAPACITY,
             )),
+            window_tracker: std::sync::Mutex::new(crate::window::WindowStateTracker::default()),
         }
     }
 
@@ -59,6 +64,12 @@ impl AppState {
     /// 取锁；返回 `&Mutex` 而非守卫，使调用方自行控制临界区范围
     pub fn notification_queue(&self) -> &std::sync::Mutex<notify::NotificationQueue> {
         &self.notifications
+    }
+
+    /// 窗口几何节流器（L115）：接线层 `on_window_event` 的移动/缩放/关闭路径
+    /// 经此取锁判定是否落盘
+    pub fn window_tracker(&self) -> &std::sync::Mutex<crate::window::WindowStateTracker> {
+        &self.window_tracker
     }
 }
 
@@ -85,6 +96,7 @@ pub fn bootstrap_app(
         notifications: std::sync::Mutex::new(notify::NotificationQueue::new(
             notify::DEFAULT_QUEUE_CAPACITY,
         )),
+        window_tracker: std::sync::Mutex::new(crate::window::WindowStateTracker::default()),
     };
     let payload = crate::ipc::InitPayload::new(config, source);
     // 降级提示的判定也在此：接线层只回传载荷，不再复述一遍分支
@@ -195,5 +207,25 @@ mod tests {
         let queue = state.notifications.lock().expect("通知队列锁中毒");
         assert!(queue.is_empty());
         assert_eq!(queue.capacity(), notify::DEFAULT_QUEUE_CAPACITY);
+    }
+
+    #[test]
+    fn window_tracker_is_usable_right_after_bootstrap() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let state = AppState::bootstrap(tmp.path().join("config"), tmp.path().join("data"))
+            .expect("启动应成功");
+        let geometry = crate::window::WindowGeometry {
+            x: 10,
+            y: 20,
+            width: 1400,
+            height: 900,
+            maximized: false,
+        };
+        let mut tracker = state.window_tracker().lock().expect("窗口节流锁中毒");
+        assert_eq!(
+            tracker.observe(chrono::Utc::now(), geometry),
+            Some(geometry),
+            "首次事件应判定落盘"
+        );
     }
 }

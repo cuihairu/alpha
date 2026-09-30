@@ -190,10 +190,13 @@ pub fn run() {
         .setup(|app| {
             let info = app::app_info(identifier_from(&app.handle()));
             tracing::info!(?info, "桌面应用启动");
+            // L115：恢复上次会话窗口几何（含显示器钳制），失败静默走 OS 默认
+            crate::window_gui::restore_window(app);
             Ok(())
         })
         .system_tray(crate::platform::system_tray())
         .on_system_tray_event(crate::platform::on_tray_event)
+        .on_window_event(crate::window_gui::on_window_event)
         .invoke_handler(tauri::generate_handler![
             initialize_app,
             analyze_symbol,

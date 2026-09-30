@@ -203,8 +203,9 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 | --- | --- | --- |
 | L113 文件系统集成与本地导出 | ✅ 已落地（见 §6）：用户自选路径导出闭环 | 覆盖已存在文件直接替换（写前确认未做，留待后续） |
 | L114 系统通知与托盘 | ✅ 已闭环（见 §7）：通知模型/队列/托盘菜单状态机 + 告警检查链（check_alerts）+ 托盘接线（platform.rs） | 通知点击唤起主窗；托盘图标随状态换图（需多套图标资产）；定时轮询取数 |
-| L115 本地数据库同步与离线模式 | `FileKeyValueStore` 是雏形（KV 语义够用，非查询型） | 换 SQLite/本地缓存并做同步冲突策略 |
-| L116 快捷键与右键菜单 | `global-shortcut-all` 特性已在 allowlist | 注册快捷键与菜单事件 |
+| L115 窗口管理与主题适配 | ✅ 已落地（见 §8）：窗口几何持久化 + 多显示器放置 + 深浅色跟随/覆盖 | 记忆「上次所用显示器」（现按可见性判定）；托盘图标随主题换图 |
+| L116 本地数据库同步与离线模式 | `FileKeyValueStore` 是雏形（KV 语义够用，非查询型） | 换 SQLite/本地缓存并做同步冲突策略 |
+| L117 快捷键与右键菜单 | `global-shortcut-all` 特性已在 allowlist | 注册快捷键与菜单事件 |
 
 另：演示行情是确定性生成的占位数据，接真实后端（api-gateway）时只需替换
 `market` 模块的取数实现，分析/导出链路不动。
@@ -342,3 +343,67 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
 显示/隐藏/退出真实生效（macOS `menuOnLeftClick=false` → 右键出菜单，Linux
 行为另有差异）；tooltip 随 `set_tray_status` 变化；菜单可用态随窗口可见性
 翻转；通知点击唤起主窗未做（v1 通知点击事件属后续）。
+
+## 8. L115 跨平台窗口管理和主题适配（2026-09-30）
+
+口径：**放置决策与主题映射的纯逻辑下沉框架层，平台读数/调用留在接线层**——
+延续 L112–L114 的可验证性主线。窗口管理是体验优化：任何一步拿不到数据
+（无窗口句柄、无配置目录、读数失败、状态未注入）都**静默跳过**，不允许
+因为它阻断启动或弹错误窗。
+
+```
+启动 setup ──▶ window_gui::restore_window（读 window-state.json → 枚举显示器）
+        │            │ window::resolve_placement（框架层决策）
+        ▼            ▼
+   无保存/非法 → OS 默认   maximized → maximize()
+   任一屏可见 → 原样还原   否则 → 钳入主屏（尺寸也钳、贴边）
+
+移动/缩放/关闭事件 ──▶ window_gui::on_window_event
+        │ window_gui::current_geometry（outer_position/inner_size/is_maximized）
+        ▼
+   window::WindowStateTracker（框架层节流：≥1s 且几何有变才落盘）
+        ▼
+   CloseRequested → flush（关闭兜底，不受间隔限制）→ 原子写 window-state.json
+```
+
+框架层断言（`desktop/src/window.rs` + `config.rs`，Linux 门禁可跑）：
+
+* `MonitorRect::shows_window`：与显示器交集宽/高各 ≥ 100px 才算「在屏上」
+  （贴边一点不算丢，避免误钳）；
+* `resolve_placement`：无保存/尺寸低于 conf 最小值 → `None` 交还 OS 默认；
+  最大化原样保留（只恢复 maximize，坐标不钳）；显示器拔出/布局变化 →
+  钳入 `monitors[0]`（接线层保证主屏排首），主屏比窗口小时尺寸钳到屏宽、
+  贴原点（`clamp_axis` 处理 span < size 的负区间）；
+* `load_window_state` 缺失/损坏 → `None`（与 config/alerts 容错同口径）；
+  `save_window_state` 临时文件 + rename 原子替换（负坐标往返保留）；
+* `WindowStateTracker::observe`（事件路径：同几何不重写、间隔内跳过）与
+  `flush`（关闭路径：与上次不同即落盘、兜底不重复）；
+* 主题：`theme_pref`（trim + 大小写不敏感，未知值宽容回退 `System`——非法值
+  由 `AppConfig::validate` 单独上报，解析层保证壳层永远拿到可渲染偏好）×
+  `resolve_theme(pref, system_prefers_dark)` → `"light"`/`"dark"`，Light/Dark
+  强制覆盖系统。
+
+接线（`src/window_gui.rs`，gui 门控，118 行）：`restore_window`（setup）/
+`on_window_event`（Moved|Resized → 节流 observe，CloseRequested → flush）/
+`current_monitors`（`available_monitors` + `primary_monitor` 排首）/机械翻译
+`Monitor`→`MonitorRect`；`gui.rs` 只加两行（setup 调恢复 + Builder 挂事件，
+215 行仍在 220 上限内）；`AppState` 内嵌 `Mutex<WindowStateTracker>`（与
+通知队列同模式）。纪律由 wiring_contract `window_glue_stays_mechanical`
+（<140 行/无命令/无自造错误串/必须引用 `window::`）与
+`window_management_is_wired` 锁定。
+
+主题的真实边界（假设已注明）：Tauri 1.x **没有运行期 `Window::set_theme`**
+（v2 才有），原生窗口装饰的主题只能由 `tauri.conf.json` 创建期决定——本仓
+已配 `"theme": "System"`（跟随系统）。因此「配置强制 light/dark 覆盖」落在
+**内容层**：壳层 JS 按 `theme_pref` 语义在 `<html>` 落 `data-theme`
+（`system` 跟随 `prefers-color-scheme` 并监听实时切换，兼容旧 WebKit 的
+`addListener` 回退；配置返回前先按系统口径渲染），`index.html` 的 CSS 变量
+在 `:root[data-theme="light"]` 覆盖块整体翻浅色，badge/code/button 原硬编码
+底色提取为 `--chip` 变量一并主题化——「覆盖既有组件」由 wiring_contract
+`shell_theme_follows_system_with_override` 锁定。
+
+真机验收边界（CI Desktop 只编译+链接，需真实桌面人工观察）：双显示器拖拽
+后重启位置还原、拔掉副屏后窗口钳回主屏；最大化还原；系统深浅色实时切换时
+壳层跟随（native 装饰由 conf System 跟随，两边一致性取决于 WM）；Linux 上
+托盘图标不随主题换图（单图标资产，已登记后续）；多屏 DPI 混排时物理像素
+口径的还原精度。

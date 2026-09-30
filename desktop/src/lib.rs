@@ -33,6 +33,7 @@ pub mod market;
 pub mod notify;
 pub mod paths;
 pub mod state;
+pub mod window;
 
 #[cfg(feature = "gui")]
 pub mod gui;
@@ -42,10 +43,14 @@ pub mod gui;
 #[cfg(feature = "gui")]
 pub mod platform;
 
+/// 平台胶水（窗口几何恢复/持久化接线；`gui` 特性门控，口径同 [`platform`]）
+#[cfg(feature = "gui")]
+pub mod window_gui;
+
 pub use alerts::{upsert_request, Alert, AlertKind};
 pub use analysis::{analyze, analyze_request, quotes, quotes_request};
 pub use app::{app_info, AppInfo, APP_NAME};
-pub use config::{load_or_default, AppConfig, ConfigSource};
+pub use config::{load_or_default, resolve_theme, theme_pref, AppConfig, ConfigSource, ThemePref};
 pub use error::{DesktopError, DesktopResult};
 pub use export::{
     export, export_request, export_symbol_request, export_to_file, ExportFormat, ExportOutcome,
@@ -60,3 +65,7 @@ pub use notify::{
 };
 pub use paths::AppPaths;
 pub use state::{bootstrap_app, AppState};
+pub use window::{
+    load_window_state, resolve_placement, save_window_state, MonitorRect, WindowGeometry,
+    WindowStateTracker,
+};

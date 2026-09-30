@@ -272,6 +272,11 @@ fn framework_entry_points_are_exported() {
         "check_request",
         "tray_menu_model",
         "tray_action",
+        "load_window_state",
+        "resolve_placement",
+        "save_window_state",
+        "theme_pref",
+        "resolve_theme",
     ] {
         assert!(
             lib.contains(entry),
@@ -408,4 +413,74 @@ fn shell_alert_loop_uses_v1_camel_case_arguments() {
             "兜底壳布防告警应含 {needle}（v1 参数默认 camelCase）"
         );
     }
+}
+
+/// L115 窗口接线：gui.rs 必须挂上恢复（setup）与事件持久化（on_window_event）
+#[test]
+fn window_management_is_wired() {
+    let gui = gui_source();
+    assert!(
+        gui.contains("crate::window_gui::restore_window(app)"),
+        "setup 应调用窗口恢复（L115）"
+    );
+    assert!(
+        gui.contains(".on_window_event(crate::window_gui::on_window_event)"),
+        "Builder 应挂窗口事件监听（L115 移动/缩放/关闭落盘）"
+    );
+}
+
+/// L115 窗口平台胶水（`src/window_gui.rs`，gui 特性）：与 platform.rs 同纪律——
+/// 不得定义命令、不得自造错误文案，放置决策一律从框架层 window.rs 取
+#[test]
+fn window_glue_stays_mechanical() {
+    let glue =
+        std::fs::read_to_string(crate_dir().join("src/window_gui.rs")).expect("读 window_gui.rs");
+    let lines = glue.lines().count();
+    assert!(
+        lines < 140,
+        "window_gui.rs 涨到 {lines} 行（平台胶水应保持机械翻译，放置决策在 window.rs）"
+    );
+    assert!(
+        !glue.contains("#[tauri::command]"),
+        "窗口胶水不应定义命令（命令都在 gui.rs，受薄度契约约束）"
+    );
+    let code = strip_rust_comments(&glue);
+    assert!(
+        !code.contains("Err(\""),
+        "窗口胶水不应自造错误串（窗口管理是体验优化，静默跳过而非报错）"
+    );
+    assert!(
+        code.contains("window::"),
+        "窗口胶水应从框架层 window.rs 取清洗/钳制/节流判定，而非自造"
+    );
+}
+
+/// L115 主题适配：配置/系统的深浅色切换落在内容层 data-theme + CSS 变量，
+/// 且跟随 prefers-color-scheme（Tauri 1.x 无运行期 set_theme，原生装饰由
+/// tauri.conf.json "theme": "System" 创建期跟随系统）
+#[test]
+fn shell_theme_follows_system_with_override() {
+    let dist = tauri_dist_dir();
+    let shell = std::fs::read_to_string(crate_dir().join(&dist).join("desktop-shell.js"))
+        .expect("读兜底壳");
+    for needle in [
+        "data-theme",
+        "prefers-color-scheme",
+        "applyTheme(cfg.theme)",
+    ] {
+        assert!(
+            shell.contains(needle),
+            "兜底壳主题适配应含 {needle}（system 跟随 + 配置覆盖）"
+        );
+    }
+    let index =
+        std::fs::read_to_string(crate_dir().join(&dist).join("index.html")).expect("读兜底壳页面");
+    assert!(
+        index.contains("[data-theme=\"light\"]"),
+        "兜底壳页面应有浅色主题覆盖块（覆盖既有组件的 CSS 变量）"
+    );
+    assert!(
+        index.contains("--chip"),
+        "既有组件的硬编码底色（badge/code/button）应主题化为变量"
+    );
 }

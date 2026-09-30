@@ -177,7 +177,33 @@
   Notification 的 on_action 属后续）。门禁：check-desktop.sh [1-5/5] ✅ /
   check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅；
   gui/platform 的链接与运行由 CI Desktop (macOS) 作业验证）
-- [ ] 构建跨平台窗口管理和主题适配
+- [x] 构建跨平台窗口管理和主题适配
+  （✅ 2026-09-30）口径同前四轮：放置决策/主题映射的纯逻辑下沉框架层，平台读数与调用留接线层。
+  框架层新增 window.rs（零 Tauri 依赖）：MonitorRect::shows_window（交集宽/高各 ≥100px 才算在屏，
+  贴边一点不误判丢失）、resolve_placement（无保存/尺寸低于 conf 最小值 → None 交还 OS 默认；最大化
+  只恢复 maximize 不钳坐标；任一屏可见原样还原；显示器拔出/布局变化 → 钳入主屏——尺寸也钳到屏宽、
+  clamp_axis 处理主屏比窗口小的负区间）、load/save_window_state（缺失/损坏 → None 容错同 config/alerts
+  口径；临时文件+rename 原子写，负坐标往返保留）、WindowStateTracker（移动/缩放事件节流 ≥1s 且几何有变
+  才落盘 observe，CloseRequested 时 flush 关闭兜底不受间隔限制）；config.rs 补主题规范映射 theme_pref
+  （trim+大小写不敏感，未知值宽容回退 System——非法值由 validate 单独上报，壳层永远拿到可渲染偏好）与
+  resolve_theme（pref × system_prefers_dark → light/dark，Light/Dark 强制覆盖系统）；paths.rs 加
+  window-state.json；AppState 内嵌 Mutex<WindowStateTracker>（与通知队列同模式）。接线层 window_gui.rs
+  （gui 门控，118 行）：restore_window（setup 读状态→枚举显示器→主屏排首→resolve_placement→机械翻译
+  set_size/set_position/maximize，任一步拿不到静默跳过——窗口管理是体验优化，不允许阻断启动）、
+  on_window_event（Moved|Resized → 节流落盘，CloseRequested → flush）；gui.rs 只加两行（215 行 < 220 上限）。
+  主题：Tauri 1.x 无运行期 set_theme（v2 才有），原生装饰由 tauri.conf.json "theme": "System" 创建期跟随
+  系统（已有配置不动）；配置强制 light/dark 的覆盖落在内容层——壳层 JS 按配置在 <html> 落 data-theme
+  （system 跟随 prefers-color-scheme 并监听实时切换，旧 WebKit addListener 回退；配置返回前先按系统口径），
+  index.html CSS 变量 :root[data-theme="light"] 整体翻浅色，badge/code/button 原硬编码 #232936 提取为
+  --chip 一并主题化（覆盖既有组件）。契约：wiring_contract 11 → 14 例（window_glue_stays_mechanical
+  <140 行/无命令/无自造错误串/必须引用 window::；window_management_is_wired；
+  shell_theme_follows_system_with_override；framework_entry_points_are_exported 补 6 个新入口）；
+  框架层+契约单测合计 184（lib 160：window +8/config 主题 +3/state +1，另 tauri_config 10 + wiring_contract 14）。
+  真机验收边界（CI Desktop 只编译+链接，以下需真实桌面环境人工观察）：①双显示器拖拽后重启位置还原；
+  ②拔掉副屏后窗口钳回主屏（含最大化还原）；③系统深浅色实时切换壳层跟随（native 装饰由 conf System
+  跟随，两边一致性取决于 WM）；④托盘图标不随主题换图（单图标资产，登记后续）；⑤多屏 DPI 混排时
+  物理像素口径的还原精度。门禁：check-desktop.sh [1-5/5] ✅ / check-lint.sh ✅ / 全仓测试 ✅ /
+  check-cross-platform.sh 四步 ✅；window_gui/gui 的链接与运行由 CI Desktop (macOS) 作业验证）
 - [ ] 实现本地数据库同步和离线模式
 - [ ] 开发键盘快捷键和右键菜单支持
 

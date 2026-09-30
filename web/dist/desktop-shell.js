@@ -11,6 +11,10 @@
  * 原生另存为对话框调 export_symbol_to_file（TODO L113），保存位置由用户自选；
  * 告警卡片（TODO L114）走 set_price_alert → check_alerts → set_tray_status：
  * 触发告警由 Rust 侧弹系统通知并入队，托盘 tooltip 反映告警状态。
+ * 主题（TODO L115）：配置 theme=light/dark 强制覆盖，system（或缺省）跟随
+ * prefers-color-scheme 并实时响应系统切换——Tauri 1.x 原生装饰无运行期
+ * set_theme（窗口主题由 tauri.conf.json 创建期跟随），覆盖落在内容层
+ * data-theme + CSS 变量（index.html）。窗口几何持久化在 Rust 侧，不经前端。
  *
  * 非 Tauri 环境（普通浏览器直接打开 web/dist/index.html）不报错，改为提示先构建前端。
  */
@@ -58,10 +62,37 @@
   var symbols = [];
   var firstQuote = null;
 
+  // L115 主题适配：system（或缺省/未知）跟随系统且实时切换；light/dark 强制覆盖。
+  // matchMedia 兼容旧 WebKit 的 addListener 回退；无 matchMedia 时按浅色渲染。
+  var themeQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  var currentTheme = "system";
+
+  function applyTheme(pref) {
+    currentTheme = pref || "system";
+    var dark =
+      currentTheme === "dark" ||
+      (currentTheme === "system" && themeQuery && themeQuery.matches);
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  }
+
+  function onSystemThemeChange() {
+    applyTheme(currentTheme);
+  }
+
+  if (themeQuery) {
+    if (typeof themeQuery.addEventListener === "function") {
+      themeQuery.addEventListener("change", onSystemThemeChange);
+    } else if (typeof themeQuery.addListener === "function") {
+      themeQuery.addListener(onSystemThemeChange);
+    }
+  }
+  applyTheme("system"); // 配置返回前先按系统口径，返回后以配置覆盖
+
   invoke("initialize_app")
     .then(function (payload) {
       var cfg = payload.config;
       symbols = cfg.symbols || [];
+      applyTheme(cfg.theme);
       banner.textContent = "Rust 侧已就绪（配置来源：" + payload.source + "）";
       var problems =
         payload.validation && payload.validation.length
