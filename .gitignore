@@ -37,6 +37,10 @@ wasm-analyzer/node_modules/
 web/dist/*
 web/pkg/*
 !web/dist/.gitkeep
+# 桌面端 Tauri 的 distDir（tauri.conf.json build.distDir）必须有内容才能启动窗口，
+# 故兜底壳受版本控制；`npm run build` 会用真实前端覆盖这两个文件
+!web/dist/index.html
+!web/dist/desktop-shell.js
 
 # Web (generated vendor bundles)
 web/vendor/*

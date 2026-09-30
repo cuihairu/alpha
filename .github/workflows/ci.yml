@@ -74,8 +74,30 @@ jobs:
       - name: 缓存 Cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: 运行测试
+      # gui 特性：Tauri 接线层（命令 + generate_context!）唯一能在无额外系统依赖的
+      # runner 上编译的作业（macOS WKWebView 内置；Linux 需 WebKitGTK/libSoup）
+      - name: 运行测试（gui 特性全量）
         run: cargo test -p alpha-desktop --all-targets
+
+  desktop-framework:
+    name: Desktop Framework
+    runs-on: ubuntu-latest
+    # 框架层（desktop lib，零 Tauri 依赖）：配置自洽性 + clippy + 单测。
+    # 与 Desktop (macOS) 互补——Linux runner 无 GUI 依赖，靠 gui 特性门控把框架层
+    # 拉进常规流水线（scripts/check-desktop.sh，与本地一致）。
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: 桌面端框架门禁
+        run: scripts/check-desktop.sh
 
   wasm:
     name: WebAssembly 构建

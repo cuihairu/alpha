@@ -6,55 +6,55 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lib]
+# 框架层（零 Tauri 依赖）：可在缺 GUI 系统库的环境（Linux CI）编译与测试，
+# 详见 docs/desktop-framework.md
+name = "alpha_desktop"
+path = "src/lib.rs"
+
 [build-dependencies]
 tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
-# Tauri 框架
-tauri = { version = "1.5", features = ["dialog-open", "dialog-save", "fs-copy-file", "fs-create-dir", "fs-read-dir", "fs-read-file", "fs-remove-dir", "fs-remove-file", "fs-rename-file", "fs-write-file", "shell-open", "system-tray", "notification-all", "path-all", "global-shortcut-all"] }
+# Tauri 框架（gui 特性门控）：Tauri 在 Linux 需 WebKitGTK + libsoup 系统库，
+# macOS/Windows 免外部系统依赖；门控后框架层可在任意 CI 编译测试，
+# GUI 接线由 CI Desktop 作业（macOS）验证
+tauri = { version = "1.5", optional = true, features = ["dialog-open", "dialog-save", "fs-copy-file", "fs-create-dir", "fs-read-dir", "fs-read-file", "fs-remove-dir", "fs-remove-file", "fs-rename-file", "fs-write-file", "shell-open", "system-tray", "notification-all", "path-all", "global-shortcut-all"] }
 
 # 异步运行时
 tokio = { workspace = true }
+# alpha-core 平台适配层 trait（KeyValueStore 等）为 async-trait 定义
+async-trait = { workspace = true }
 
 # 序列化
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# 配置管理
-config = { workspace = true }
-
 # 日志
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-# 错误处理
-anyhow = { workspace = true }
-
 # 时间处理
 chrono = { workspace = true }
 
-# 随机与导出
-rand = "0.8"
+# 导出
 csv = "1.3"
 
 # 内部包
 alpha-core = { workspace = true }
-alpha-storage = { workspace = true }
 
-# HTTP 客户端
-reqwest = { version = "0.11", features = ["json"] }
-
-# 文件系统
-dirs = "5.0"
+[dev-dependencies]
+tempfile = "3"
 
 [[bin]]
 name = "alpha-desktop"
 path = "src/main.rs"
 
 [features]
-# by default Tauri runs in production mode
-# when `tauri dev` runs it is executed with `cargo run --no-default-features` if `devPath` is an URL
-default = [ "custom-protocol" ]
-# this feature is used for production builds or when `devPath` points to the filesystem
-# DO NOT REMOVE!!
-custom-protocol = [ "tauri/custom-protocol" ]
+# gui：Tauri 接线层（窗口 + 命令 + generate_context）。Linux 需系统 GUI 依赖，
+# 默认开启以保持 `cargo build`/`tauri dev` 行为不变；CI 的框架层门禁用
+# --no-default-features 只编译测试 lib（见 scripts/check-desktop.sh）。
+default = ["gui"]
+gui = ["dep:tauri"]
+# 生产构建自定义协议（tauri CLI 传 --features custom-protocol；此项同时拉起 gui）
+custom-protocol = ["gui", "tauri?/custom-protocol"]

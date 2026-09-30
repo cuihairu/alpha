@@ -10,6 +10,7 @@
     "version": "0.1.0"
   },
   "tauri": {
+    "withGlobalTauri": true,
     "allowlist": {
       "all": false,
       "shell": {
