@@ -16,8 +16,8 @@
 //!
 //! 边界：L112 只落「框架」。L113 原生文件集成（用户自选路径导出
 //! [`export::export_to_file`]/[`export::export_symbol_request`] + `dialog.save`
-//! 链路）与系统通知/托盘（TODO L114）中，后者仍是接口缝——此处仅提供可测的
-//! 纯逻辑与 IPC 契约，不接平台 API（见 [`platform`] 说明）。
+//! 链路）与 L114 系统通知/托盘（[`notify`]：通知模型/有界队列/托盘状态/
+//! 告警触发文案 + 接线层平台 API 展示）均已落地；平台 API 调用只在接线层。
 
 #![warn(missing_docs)]
 
@@ -30,6 +30,7 @@ pub mod export;
 pub mod ipc;
 pub mod kv;
 pub mod market;
+pub mod notify;
 pub mod paths;
 pub mod state;
 
@@ -47,5 +48,9 @@ pub use export::{
 pub use ipc::{AnalyzeRequest, ExportRequest, InitPayload};
 pub use kv::FileKeyValueStore;
 pub use market::{synthetic_quote, synthetic_series, DEFAULT_BARS};
+pub use notify::{
+    alert_notification, notification_id, notify_request, tray_status_request, Notification,
+    NotificationLevel, NotificationQueue, TrayState, DEFAULT_QUEUE_CAPACITY,
+};
 pub use paths::AppPaths;
 pub use state::{bootstrap_app, AppState};

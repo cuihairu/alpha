@@ -3,6 +3,7 @@
 //! 只含纯 Rust 类型，故可在无 GUI 环境构造并测试；Tauri 接线层用它做命令参数。
 
 use crate::error::DesktopResult;
+use crate::notify;
 use crate::paths::AppPaths;
 use alpha_core::analytics::AnalysisEngine;
 
@@ -11,6 +12,9 @@ use alpha_core::analytics::AnalysisEngine;
 pub struct AppState {
     engine: AnalysisEngine,
     paths: AppPaths,
+    /// 通知队列（L114）：会话内通知历史，`send_notification` 入队、
+    /// `list_notifications` 读取；互斥锁只保护入队/读取的短临界区
+    notifications: std::sync::Mutex<notify::NotificationQueue>,
 }
 
 impl AppState {
@@ -24,6 +28,9 @@ impl AppState {
         Ok(Self {
             engine: AnalysisEngine::new(),
             paths,
+            notifications: std::sync::Mutex::new(notify::NotificationQueue::new(
+                notify::DEFAULT_QUEUE_CAPACITY,
+            )),
         })
     }
 
@@ -32,6 +39,9 @@ impl AppState {
         Self {
             engine: AnalysisEngine::new(),
             paths,
+            notifications: std::sync::Mutex::new(notify::NotificationQueue::new(
+                notify::DEFAULT_QUEUE_CAPACITY,
+            )),
         }
     }
 
@@ -43,6 +53,12 @@ impl AppState {
     /// 目录布局
     pub fn paths(&self) -> &AppPaths {
         &self.paths
+    }
+
+    /// 通知队列（L114）：接线层 `send_notification`/`list_notifications` 经此
+    /// 取锁；返回 `&Mutex` 而非守卫，使调用方自行控制临界区范围
+    pub fn notification_queue(&self) -> &std::sync::Mutex<notify::NotificationQueue> {
+        &self.notifications
     }
 }
 
@@ -66,6 +82,9 @@ pub fn bootstrap_app(
     let state = AppState {
         engine: AnalysisEngine::new(),
         paths,
+        notifications: std::sync::Mutex::new(notify::NotificationQueue::new(
+            notify::DEFAULT_QUEUE_CAPACITY,
+        )),
     };
     let payload = crate::ipc::InitPayload::new(config, source);
     // 降级提示的判定也在此：接线层只回传载荷，不再复述一遍分支
@@ -166,5 +185,15 @@ mod tests {
         std::fs::write(&blocker, b"file").expect("写占位文件");
         let err = AppState::bootstrap(&blocker, tmp.path().join("data")).expect_err("应失败");
         assert_eq!(err.kind(), "io");
+    }
+
+    #[test]
+    fn notification_queue_is_usable_right_after_bootstrap() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let state = AppState::bootstrap(tmp.path().join("config"), tmp.path().join("data"))
+            .expect("启动应成功");
+        let queue = state.notifications.lock().expect("通知队列锁中毒");
+        assert!(queue.is_empty());
+        assert_eq!(queue.capacity(), notify::DEFAULT_QUEUE_CAPACITY);
     }
 }

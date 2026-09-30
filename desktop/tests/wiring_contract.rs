@@ -105,6 +105,9 @@ fn command_bodies_have_no_business_judgement() {
         "export_data",
         "export_symbol_to_file",
         "get_app_info",
+        "send_notification",
+        "list_notifications",
+        "set_tray_status",
     ] {
         let body = command_body(&gui, name);
         let code = strip_rust_comments(&body);
@@ -136,6 +139,9 @@ fn command_bodies_delegate_to_framework_entry_points() {
         ("export_data", "export_request"),
         ("export_symbol_to_file", "export_symbol_request"),
         ("get_app_info", "app_info"),
+        ("send_notification", "notify_request"),
+        ("list_notifications", "recent"),
+        ("set_tray_status", "tray_status_request"),
     ] {
         let body = command_body(&gui, name);
         assert!(
@@ -145,7 +151,8 @@ fn command_bodies_delegate_to_framework_entry_points() {
     }
 
     // 有失败可能的命令必须映射错误为前端可读串；
-    // get_app_info 是纯读取（app_info 不返回 Result），故豁免
+    // get_app_info 是纯读取（app_info 不返回 Result），故豁免；
+    // list_notifications 只读队列（锁中毒用 expect 兜底，无 Result 边界）
     for name in [
         "initialize_app",
         "analyze_symbol",
@@ -153,6 +160,8 @@ fn command_bodies_delegate_to_framework_entry_points() {
         "set_price_alert",
         "export_data",
         "export_symbol_to_file",
+        "send_notification",
+        "set_tray_status",
     ] {
         let body = command_body(&gui, name);
         assert!(
@@ -173,6 +182,7 @@ fn wiring_layer_does_not_reach_around_request_entry_points() {
         ("AlertKind::parse", "方向串解析走 upsert_request"),
         ("ExportFormat::parse", "格式解析走 export_request"),
         ("market::synthetic_series", "取数走 export_request"),
+        ("NotificationLevel::parse", "级别串解析走 notify_request"),
     ] {
         assert!(
             !gui.contains(banned),
@@ -198,7 +208,7 @@ fn registered_commands_match_fallback_shell_invocations() {
         .collect();
     assert_eq!(
         registered.len(),
-        7,
+        10,
         "注册命令数应与前端契约一致，实际: {registered:?}"
     );
     for cmd in &registered {
@@ -233,8 +243,9 @@ fn wiring_layer_stays_thin() {
     let gui = gui_source();
     let lines = gui.lines().count();
     assert!(
-        lines < 160,
-        "gui.rs 涨到 {lines} 行（接线层应保持薄，业务下沉框架层）"
+        lines < 200,
+        "gui.rs 涨到 {lines} 行（接线层应保持薄，业务下沉框架层；L114 通知/托盘
+        三命令后上限 160 → 200，每命令仍 ~20 行薄委派）"
     );
     // 业务模块的函数体不应出现在接线层（抽查两个典型业务函数）
     assert!(!gui.contains("for symbol in"), "接线层不应出现批量循环");
@@ -251,6 +262,8 @@ fn framework_entry_points_are_exported() {
         "upsert_request",
         "export_request",
         "export_symbol_request",
+        "notify_request",
+        "tray_status_request",
     ] {
         assert!(
             lib.contains(entry),

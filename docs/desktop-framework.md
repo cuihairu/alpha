@@ -202,7 +202,7 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 | TODO | 现状 | 下一步 |
 | --- | --- | --- |
 | L113 文件系统集成与本地导出 | ✅ 已落地（见 §6）：用户自选路径导出闭环 | 覆盖已存在文件直接替换（写前确认未做，留待后续） |
-| L114 系统通知与托盘 | `AlertKind::matches` 已给出触发判定 | 接 Tauri notification/tray API 与定时轮询 |
+| L114 系统通知与托盘 | ✅ 已落地（见 §7）：通知模型/队列/托盘状态 + 接线层平台 API | 告警触发自动通知（`alert_notification` 已备，接线留后续） |
 | L115 本地数据库同步与离线模式 | `FileKeyValueStore` 是雏形（KV 语义够用，非查询型） | 换 SQLite/本地缓存并做同步冲突策略 |
 | L116 快捷键与右键菜单 | `global-shortcut-all` 特性已在 allowlist | 注册快捷键与菜单事件 |
 
@@ -248,3 +248,48 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 非交互假设（自行判定，已注明）：单文件单标的（批量多标的仍走 `exports/`
 目录导出）；覆盖写直接替换；`dialog.save` 取消返回 null（v1 约定）按"已取消"
 处理；演示行情仍是确定性占位数据（换真实取数只动 `market` 模块）。
+## 7. L114 系统通知与托盘集成（2026-09-30）
+
+口径：**通知/托盘的纯逻辑下沉框架层，平台 API 留在接线层**——与 L112/L113
+同一条可验证性主线：能在 Linux 门禁跑单测的部分全部下沉，留在 macOS 作业
+的只剩「取句柄 → 委派 → `map_err`」的薄胶水。
+
+```
+告警触发/手动发送 ──invoke──▶ gui::send_notification（薄委派）
+        │                          │ 无判断
+        ▼                          ▼
+    notify::notify_request（级别解析/判空/id 生成/入队）
+        │ notify::NotificationQueue（有界 FIFO + 同标题正文去重）
+        ▼
+    tauri::api::notification::Notification::show()（接线层平台胶水）
+
+告警集合变化 ──invoke──▶ gui::set_tray_status（薄委派）
+        │                          │
+        ▼                          ▼
+    notify::tray_status_request（读告警文件 → 生效数/最近触发 → 状态文本）
+        ▼
+    tray_handle_by_id("main").set_tooltip()（接线层平台胶水）
+```
+
+框架层断言（`desktop/src/notify.rs`，Linux 门禁可跑）：
+
+* `NotificationLevel` 解析大小写不敏感，未知级别拒绝；
+* `notify_request` 空标的/空标题/未知级别一律先拒绝且不入队；
+* `NotificationQueue` 同标题正文去重（窗口内重复触发只保留一条）、超容量
+  驱逐最旧、`recent(n)` 新→旧；
+* `tray_status_request` 停用告警不计入、无告警时状态文本为「无告警」、
+  损坏告警文件回退空表（与 `alerts::load` 同口径）；
+* `alert_notification` 复用 `AlertKind::matches` 判定，未触发/已停用返回
+  `None`，触发时级别为 `Critical`（L112 注释标明的复用点）。
+
+接线与状态：`gui.rs` 新增三命令（`send_notification`/`list_notifications`/
+`set_tray_status`，注册命令 7 → 10，薄度上限 160 → 200 行）；`AppState` 内嵌
+`Mutex<NotificationQueue>`（`notification_queue()` 访问器，与 `engine()`/
+`paths()` 同模式）；`Notification`/`TrayState` 的字段名即前端契约（单测锁定
+serde 往返）。`tauri::api::notification::Notification` 与
+`tray_handle_by_id().set_tooltip()` 的类型用法由 `check-desktop.sh` [5/5]
+（假 pkg-config）在 Linux 门禁检查；链接与运行仍由 macOS 作业验证。
+
+非交互假设（自行判定，已注明）：通知队列容量 50（会话内历史，非持久化）；
+托盘 tooltip 只反映告警状态（不显示行情）；告警触发自动通知的接线
+（`alert_notification` 已备未接）留待后续轮次。

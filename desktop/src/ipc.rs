@@ -54,6 +54,19 @@ impl ExportRequest {
     }
 }
 
+/// `send_notification` 请求
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NotificationRequest {
+    /// 标的代码
+    pub symbol: String,
+    /// 通知标题
+    pub title: String,
+    /// 通知正文
+    pub body: String,
+    /// 级别串：info / warning / critical
+    pub level: String,
+}
+
 /// `initialize_app` 应答
 ///
 /// 放在框架层而非接线层：载荷的**形状**（前端据此渲染「已回退默认配置」提示）
@@ -160,6 +173,29 @@ mod tests {
         let recovered =
             InitPayload::new(crate::config::AppConfig::default(), ConfigSource::Recovered);
         assert!(recovered.is_recovered());
+    }
+
+    #[test]
+    fn notification_request_deserializes_frontend_payload() {
+        let payload =
+            r#"{"symbol":"600519","title":"价格告警","body":"当前价 101","level":"critical"}"#;
+        let req: NotificationRequest = serde_json::from_str(payload).expect("解析前端负载");
+        assert_eq!(req.symbol, "600519");
+        assert_eq!(req.title, "价格告警");
+        assert_eq!(req.level, "critical");
+    }
+
+    #[test]
+    fn notification_request_roundtrips() {
+        let req = NotificationRequest {
+            symbol: "AAPL".to_string(),
+            title: "t".to_string(),
+            body: "b".to_string(),
+            level: "info".to_string(),
+        };
+        let json = serde_json::to_string(&req).expect("序列化");
+        let parsed: NotificationRequest = serde_json::from_str(&json).expect("反序列化");
+        assert_eq!(parsed, req);
     }
 
     /// 问题列表随载荷下行：接线层不再自己算，形状由框架层单测锁定

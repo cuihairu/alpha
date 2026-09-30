@@ -20,7 +20,8 @@ use crate::analysis;
 use crate::app;
 use crate::error::DesktopError;
 use crate::export;
-use crate::ipc::{AnalyzeRequest, ExportRequest, InitPayload};
+use crate::ipc::{AnalyzeRequest, ExportRequest, InitPayload, NotificationRequest};
+use crate::notify::{self, Notification, TrayState};
 use crate::state::AppState;
 use alpha_core::models::{AnalysisResult, MarketData};
 use chrono::Utc;
@@ -122,6 +123,52 @@ async fn get_app_info(app_handle: tauri::AppHandle) -> Result<app::AppInfo, Stri
     Ok(app::app_info(identifier_from(&app_handle)))
 }
 
+/// 发送系统通知（L114）：框架层校验+入队，接线层只负责平台 API 展示
+#[tauri::command]
+async fn send_notification(
+    request: NotificationRequest,
+    state: State<'_, AppState>,
+) -> Result<Notification, String> {
+    let notification = {
+        let mut queue = state.notification_queue().lock().expect("通知队列锁中毒");
+        notify::notify_request(&request, &mut queue, Utc::now())
+            .map_err(|e: DesktopError| e.to_string())?
+    };
+    tauri::api::notification::Notification::new(&notification.id)
+        .title(&notification.title)
+        .body(&notification.body)
+        .show()
+        .map_err(|e| e.to_string())?;
+    Ok(notification)
+}
+
+/// 最近通知（L114）：框架层队列读取，接线层只透传
+#[tauri::command]
+async fn list_notifications(
+    state: State<'_, AppState>,
+    limit: usize,
+) -> Result<Vec<Notification>, String> {
+    Ok(state
+        .notification_queue()
+        .lock()
+        .expect("通知队列锁中毒")
+        .recent(limit))
+}
+
+/// 更新托盘状态（L114）：框架层由告警集合算状态文本，接线层只负责 set_tooltip
+#[tauri::command]
+async fn set_tray_status(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<TrayState, String> {
+    let status = notify::tray_status_request(&state.paths().alerts_file());
+    if let Some(tray) = app_handle.tray_handle_by_id(notify::TRAY_ID) {
+        tray.set_tooltip(&status.status_text)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(status)
+}
+
 /// 启动 Tauri 应用（进程入口，供 `main.rs` 调用）
 pub fn run() {
     tracing_subscriber::fmt::init();
@@ -138,7 +185,10 @@ pub fn run() {
             set_price_alert,
             export_data,
             export_symbol_to_file,
-            get_app_info
+            get_app_info,
+            send_notification,
+            list_notifications,
+            set_tray_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

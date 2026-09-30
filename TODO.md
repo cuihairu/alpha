@@ -126,7 +126,23 @@
   （写前确认未做）、dialog.save 取消返回 null 按「已取消」处理。门禁：
   check-desktop.sh ✅ / check-lint.sh ✅ / 全仓 231 测 0 失败 ✅ /
   check-cross-platform.sh 四步 ✅）
-- [ ] 开发系统通知和托盘集成功能
+- [x] 开发系统通知和托盘集成功能（2026-09-30 最小可用版本：通知/托盘纯逻辑下沉框架层 +
+  平台 API 留接线层。框架层 notify.rs——NotificationLevel 解析（大小写不敏感）/
+  Notification + TrayState（serde 往返字段名即前端契约）/NotificationQueue
+  （有界 FIFO 50 + 同标题正文去重 + 超容量驱逐最旧 + recent 新→旧）/
+  notify_request（级别解析/空标的/空标题先拒绝且不入队）/tray_status_request
+  （读告警文件→生效数/最近触发→状态文本，停用不计入、损坏回退空表）/
+  alert_notification（复用 AlertKind::matches，未触发/停用 None，触发 Critical）；
+  AppState 内嵌 Mutex<NotificationQueue>（notification_queue() 访问器，与
+  engine()/paths() 同模式）；接线层 gui.rs 三命令 send_notification/
+  list_notifications/set_tray_status（注册命令 7→10，薄度上限 160→200 行），
+  平台胶水 tauri::api::notification::Notification::show() 与
+  tray_handle_by_id("main").set_tooltip() 由 check-desktop.sh [5/5] 假
+  pkg-config 在 Linux 门禁类型检查；allowlist 的 notification-all 与
+  systemTray 配置 L112 已对齐，本轮无需改配置。非交互假设：队列容量 50
+  （会话内历史非持久化）；托盘 tooltip 只反映告警状态；告警触发自动通知
+  接线（alert_notification 已备未接）留待后续。门禁：check-desktop.sh ✅ /
+  check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅）
 - [ ] 构建跨平台窗口管理和主题适配
 - [ ] 实现本地数据库同步和离线模式
 - [ ] 开发键盘快捷键和右键菜单支持
