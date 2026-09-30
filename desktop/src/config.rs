@@ -72,6 +72,15 @@ impl AppConfig {
         }
     }
 
+    /// 校验问题列表（接线层与 IPC 返回用）
+    ///
+    /// 与 [`Self::validate`] 同一套规则，但返回列表而非 `Result`，避免接线层写
+    /// `validate().unwrap_or_default()` 时把 `()` 当成问题列表（首次 CI 就栽在这：
+    /// `Result<(), Vec<String>>` 的成功值是 `()`，`is_empty()` 直接编译不过）。
+    pub fn validation_problems(&self) -> Vec<String> {
+        self.validate().err().unwrap_or_default()
+    }
+
     /// 缩进 JSON（落盘与 IPC 返回共用同一序列化口径）
     pub fn to_json(&self) -> DesktopResult<String> {
         Ok(serde_json::to_string_pretty(self)?)
@@ -283,6 +292,30 @@ mod tests {
         assert!(
             problems.iter().any(|p| p.contains("symbols")),
             "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn validation_problems_is_empty_for_valid_config() {
+        assert!(
+            AppConfig::default().validation_problems().is_empty(),
+            "默认配置应无校验问题"
+        );
+    }
+
+    #[test]
+    fn validation_problems_mirrors_validate_err_payload() {
+        let config = AppConfig {
+            api_url: String::new(),
+            theme: "neon".to_string(),
+            ..AppConfig::default()
+        };
+        let expected = config.validate().expect_err("应判非法");
+        assert_eq!(config.validation_problems(), expected);
+        assert_eq!(
+            config.validation_problems().len(),
+            2,
+            "接线层拿到的是问题列表本身（不是 ()）"
         );
     }
 

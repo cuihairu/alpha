@@ -1,0 +1,5 @@
+Name: cairo
+Description: fake for type-check only
+Version: 99.99.99
+Libs:
+Cflags:

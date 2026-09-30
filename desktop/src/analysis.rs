@@ -24,6 +24,29 @@ pub fn quotes(symbols: &[String]) -> Vec<MarketData> {
     symbols.iter().map(|s| market::synthetic_quote(s)).collect()
 }
 
+/// 按 IPC 请求跑分析（`analyze_symbol` 命令的实现体）
+///
+/// 存在的理由：请求字段的语义校验（空标的）属于业务口径，留在接线层就要在
+/// 两处（命令 + 框架层）各写一遍；下沉后接线层只做「取 state → 委派」。
+/// `timeframe`/`indicators` 在骨架期不参与计算（演示行情口径，见 market 模块），
+/// 但保留在 DTO 里以锁定前端契约。
+pub async fn analyze_request(
+    engine: &AnalysisEngine,
+    request: &crate::ipc::AnalyzeRequest,
+) -> AlphaResult<AnalysisResult> {
+    analyze(engine, &request.symbol).await
+}
+
+/// 快照请求校验：空标的列表返回 Err 而非静默返回空数组
+pub fn quotes_request(symbols: &[String]) -> AlphaResult<Vec<MarketData>> {
+    if symbols.is_empty() {
+        return Err(alpha_core::errors::AlphaError::invalid_input(
+            "symbols 不能为空",
+        ));
+    }
+    Ok(quotes(symbols))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,6 +99,40 @@ mod tests {
     #[test]
     fn quotes_of_empty_list_is_empty() {
         assert!(quotes(&[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn analyze_request_delegates_to_symbol_analysis() {
+        let request = crate::ipc::AnalyzeRequest::new("600519", "1d");
+        let result = analyze_request(&engine(), &request)
+            .await
+            .expect("分析应成功");
+        assert_eq!(result.symbol, "600519");
+    }
+
+    #[tokio::test]
+    async fn analyze_request_rejects_blank_symbol_in_request() {
+        let mut request = crate::ipc::AnalyzeRequest::new("  ", "1d");
+        request.indicators.push("RSI".to_string());
+        let err = analyze_request(&engine(), &request)
+            .await
+            .expect_err("空白标的应报错");
+        assert!(matches!(err, AlphaError::InvalidInput(_)), "实际 {err:?}");
+    }
+
+    #[test]
+    fn quotes_request_rejects_empty_symbol_list() {
+        let err = quotes_request(&[]).expect_err("空标的列表应报错");
+        assert!(matches!(err, AlphaError::InvalidInput(_)), "实际 {err:?}");
+        assert!(err.to_string().contains("symbols"), "错误应点名入参: {err}");
+    }
+
+    #[test]
+    fn quotes_request_preserves_order() {
+        let symbols = vec!["600519".to_string(), "000001".to_string()];
+        let got = quotes_request(&symbols).expect("应成功");
+        let order: Vec<&str> = got.iter().map(|q| q.symbol.as_str()).collect();
+        assert_eq!(order, ["600519", "000001"]);
     }
 
     #[test]

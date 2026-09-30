@@ -46,6 +46,37 @@ impl AppState {
     }
 }
 
+/// 启动应用：加载/自举配置 → 落盘可用配置 → 建目录 → 初始化引擎
+///
+/// `initialize_app` 命令的实现体。放在框架层的理由同上：配置自举（缺失或损坏
+/// 时把可用配置写回磁盘，保证下次走 File 路径）是业务口径而非平台接线，
+/// 且必须能在无 GUI 环境测试——接线层只负责取目录与 `manage` 注入。
+pub fn bootstrap_app(
+    config_dir: impl Into<std::path::PathBuf>,
+    data_dir: impl Into<std::path::PathBuf>,
+) -> DesktopResult<(AppState, crate::ipc::InitPayload)> {
+    let paths = AppPaths::new(config_dir.into(), data_dir.into());
+    let config_file = paths.config_file();
+    let (config, source) = crate::config::load_or_default(&config_file);
+    if source != crate::config::ConfigSource::File {
+        // 首次启动/配置损坏：把可用配置落盘，保证下次走 File 路径
+        crate::config::save(&config_file, &config)?;
+    }
+    paths.ensure()?;
+    let state = AppState {
+        engine: AnalysisEngine::new(),
+        paths,
+    };
+    let payload = crate::ipc::InitPayload::new(config, source);
+    // 降级提示的判定也在此：接线层只回传载荷，不再复述一遍分支
+    if payload.is_recovered() {
+        tracing::warn!(problems = ?payload.validation, "配置损坏，已回退默认值");
+    } else if !payload.validation.is_empty() {
+        tracing::warn!(problems = ?payload.validation, "应用配置不完整，按当前值启动");
+    }
+    Ok((state, payload))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,6 +90,52 @@ mod tests {
         for dir in state.paths().all_dirs() {
             assert!(dir.is_dir(), "缺目录: {}", dir.display());
         }
+    }
+
+    #[test]
+    fn bootstrap_app_persists_default_config_on_first_run() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let config_dir = tmp.path().join("config");
+        let data_dir = tmp.path().join("data");
+        let (_state, payload) = bootstrap_app(&config_dir, &data_dir).expect("首次启动应成功");
+
+        assert_eq!(payload.source, "defaults", "首次应走默认配置");
+        assert!(!payload.is_recovered());
+        let config_file = config_dir.join(crate::paths::CONFIG_FILE_NAME);
+        assert!(config_file.is_file(), "可用配置应已落盘: {config_file:?}");
+        // 二次启动应读到文件而非再判 defaults
+        let (_state2, again) = bootstrap_app(&config_dir, &data_dir).expect("二次启动应成功");
+        assert_eq!(again.source, "file");
+        assert_eq!(again.config, payload.config, "落盘内容应与生效配置一致");
+    }
+
+    #[test]
+    fn bootstrap_app_creates_all_directories() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let (state, _payload) =
+            bootstrap_app(tmp.path().join("config"), tmp.path().join("data")).expect("启动应成功");
+        for dir in state.paths().all_dirs() {
+            assert!(dir.is_dir(), "缺目录: {}", dir.display());
+        }
+    }
+
+    #[test]
+    fn bootstrap_app_reports_validation_problems_without_failing() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let config_dir = tmp.path().join("config");
+        // 先落一份非法配置（symbols 为空）
+        let mut bad = crate::config::AppConfig::default();
+        bad.symbols.clear();
+        crate::config::save(&config_dir.join(crate::paths::CONFIG_FILE_NAME), &bad)
+            .expect("写配置");
+        let (_state, payload) =
+            bootstrap_app(&config_dir, tmp.path().join("data")).expect("配置不完整不应阻断启动");
+        assert!(
+            payload.validation.iter().any(|p| p.contains("symbols")),
+            "应报出 symbols 问题: {:?}",
+            payload.validation
+        );
+        assert_eq!(payload.source, "file", "读到的是文件（虽有校验问题）");
     }
 
     #[tokio::test]

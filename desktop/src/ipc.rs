@@ -54,9 +54,41 @@ impl ExportRequest {
     }
 }
 
+/// `initialize_app` 应答
+///
+/// 放在框架层而非接线层：载荷的**形状**（前端据此渲染「已回退默认配置」提示）
+/// 属于契约，`tests/wiring_contract.rs` 要能在无 GUI 环境断言它。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InitPayload {
+    /// 当前生效的配置（缺失或损坏时是回退后的默认值）
+    pub config: crate::config::AppConfig,
+    /// 配置来源标签：`defaults` / `file` / `recovered`（见 `ConfigSource::as_str`）
+    pub source: String,
+    /// 配置校验问题列表（空表示无问题；前端提示但不阻断启动）
+    pub validation: Vec<String>,
+}
+
+impl InitPayload {
+    /// 由配置与来源组装载荷（问题列表由 `AppConfig::validation_problems` 给出）
+    pub fn new(config: crate::config::AppConfig, source: crate::config::ConfigSource) -> Self {
+        let validation = config.validation_problems();
+        Self {
+            config,
+            source: source.as_str().to_string(),
+            validation,
+        }
+    }
+
+    /// 是否发生过损坏回退（前端据此显示醒目提示）
+    pub fn is_recovered(&self) -> bool {
+        self.source == crate::config::ConfigSource::Recovered.as_str()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{ConfigSource, DEFAULT_SYMBOLS};
 
     #[test]
     fn analyze_request_deserializes_frontend_payload() {
@@ -109,5 +141,52 @@ mod tests {
         assert_eq!(parsed.symbols, req.symbols);
         assert_eq!(parsed.format, req.format);
         assert!(parsed.date_range.is_none());
+    }
+
+    #[test]
+    fn init_payload_carries_config_source_and_problems() {
+        let payload = InitPayload::new(crate::config::AppConfig::default(), ConfigSource::File);
+        assert_eq!(payload.source, "file");
+        assert!(payload.validation.is_empty(), "默认配置应无问题");
+        assert!(!payload.is_recovered());
+        assert_eq!(payload.config.symbols.len(), DEFAULT_SYMBOLS.len());
+    }
+
+    #[test]
+    fn init_payload_from_defaults_is_recoverable() {
+        let payload = InitPayload::new(crate::config::AppConfig::default(), ConfigSource::Defaults);
+        assert_eq!(payload.source, "defaults");
+        assert!(!payload.is_recovered(), "defaults 不是损坏回退");
+        let recovered =
+            InitPayload::new(crate::config::AppConfig::default(), ConfigSource::Recovered);
+        assert!(recovered.is_recovered());
+    }
+
+    /// 问题列表随载荷下行：接线层不再自己算，形状由框架层单测锁定
+    #[test]
+    fn init_payload_embeds_validation_problems() {
+        let mut config = crate::config::AppConfig::default();
+        config.symbols.clear();
+        let payload = InitPayload::new(config, ConfigSource::Recovered);
+        assert!(
+            payload.validation.iter().any(|p| p.contains("symbols")),
+            "{:?}",
+            payload.validation
+        );
+    }
+
+    /// 前端契约：字段名即 DOM 读取的键，桌面兜底壳按 config/source/validation 渲染
+    #[test]
+    fn init_payload_field_names_match_frontend_contract() {
+        let json = serde_json::to_value(InitPayload::new(
+            crate::config::AppConfig::default(),
+            ConfigSource::File,
+        ))
+        .expect("序列化");
+        for key in ["config", "source", "validation"] {
+            assert!(json.get(key).is_some(), "载荷应含字段 {key}: {json}");
+        }
+        let payload: InitPayload = serde_json::from_value(json).expect("往返");
+        assert_eq!(payload.source, "file");
     }
 }

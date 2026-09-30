@@ -16,11 +16,12 @@ Tauri 写死为直接依赖，整个包在 Linux CI 上无法编译——本仓�
 | 层 | 位置 | 依赖 | 验证方式 |
 | --- | --- | --- | --- |
 | 框架层 | `desktop/src/lib.rs` + 各模块 | std + alpha-core + chrono/csv/serde | 任意 Linux runner：`cargo test -p alpha-desktop --no-default-features --all-targets` |
-| 接线层 | `desktop/src/gui.rs`、`main.rs`、`tauri.conf.json` | Tauri（`gui` 特性） | CI `Desktop (macOS)`：`cargo test -p alpha-desktop --all-targets` |
+| 接线层 | `desktop/src/gui.rs`、`main.rs`、`tauri.conf.json` | Tauri（`gui` 特性） | Linux：`scripts/check-desktop.sh` [4/5][5/5]（假 pkg-config 做类型检查与 lint，不链接）；链接与运行：CI `Desktop (macOS)` |
 
-接线层的职责只有三件：解析平台路径 → 委派框架层 → 映射错误给前端。
-所有业务逻辑都在框架层，因此 macOS 作业覆盖的是极薄的胶水代码，而逻辑正确性
-由 91 个可在 Linux 上跑的框架层单测 + 10 个配置契约测试保证。
+接线层的职责只有三件：解析平台路径/句柄 → 委派框架层 → 映射错误给前端。
+所有业务判断都在框架层，因此 macOS 作业覆盖的是极薄的胶水代码，而逻辑正确性
+由 112 个可在 Linux 上跑的框架层单测 + 10 个配置契约测试 + 8 个接线薄度契约测试
+保证（详见 §4.1）。
 
 ```
 frontend (web/dist)  ──invoke──▶  gui.rs（#[tauri::command] 薄包装）
@@ -43,9 +44,12 @@ frontend (web/dist)  ──invoke──▶  gui.rs（#[tauri::command] 薄包装
 | `analysis` | 编排 | 委托 `alpha_core::analytics::AnalysisEngine`，桌面端不重复实现指标 |
 | `export` | CSV/JSON 导出 | CSV 表头与既有 web 导出口径一致；缺失可选字段写空单元格；导出时刻由调用方注入（文件名可断言） |
 | `alerts` | 价格告警持久化 | 与 config 同口径（原子写 + 损坏回退空表）；方向用 `above/below` 可读标签落盘 |
-| `ipc` | 前后端请求 DTO | 字段名即前端契约，`serde` 往返 + 前端 JSON 负载解析由单测锁定 |
-| `app` | 应用元信息 | 名称/版本/平台/架构 |
-| `state` | `manage` 的载荷 | 分析引擎 + 目录布局，只含纯 Rust 类型 ⇒ 可在无 GUI 环境构造与测试 |
+| `ipc` | 前后端 DTO | 请求（`AnalyzeRequest`/`ExportRequest`）与应答（`InitPayload`）；字段名即前端契约，`serde` 往返 + 前端 JSON 负载解析由单测锁定 |
+| `app` | 应用元信息 | 名称/版本/平台/架构 + `identifier`（只能从 Tauri 运行时读，故由接线层注入，框架层不编造） |
+| `state` | `manage` 的载荷 + `bootstrap_app` | 分析引擎 + 目录布局，只含纯 Rust 类型 ⇒ 可在无 GUI 环境构造与测试；`bootstrap_app` 是 `initialize_app` 的实现体（配置自举落盘 + 降级提示都在这里） |
+
+各模块对命令层暴露的 `*_request` / `bootstrap_app` 入口是**唯一**的接线面——命令体里
+不应再出现任何判断，见 §4.1 的薄度契约。
 
 ## 3. 前端集成与「不白屏」
 
@@ -105,6 +109,65 @@ WebKitGTK，跑不了）——于是只能等 CI 的 `Desktop (macOS)` 作业变
 第 1 步与契约测试均已用反向用例验证：把 `withGlobalTauri` 挪回 `tauri` 段、把兜底壳
 的 `api.invoke` 改成 `api.ipcRenderer.invoke`、给 allowlist 加未启用的 `fs-exists`、
 抽走 `distDir/index.html` —— 均被拦下（改配置时 10 例中 9 例转红）。
+
+### 4.1 接线层薄度契约（首轮 CI 红灯的直接产物）
+
+首轮 CI 的第二个红灯是**业务代码写在了编译不了的地方**：命令体里把框架层的
+`validate() -> Result<(), Vec<String>>` 当成 `Vec<String>` 用（`is_empty()` 直接编译
+不过）。这类错误在 macOS 作业编译 gui 层之前没有任何本地手段能发现，而 macOS 作业一
+轮要几分钟——红灯是往返延迟，不是反馈。
+
+因此把命令体改写成「只委派」：所有判断（空标的、未知方向串、未知导出格式、空符号
+列表、配置自举与降级提示）都下沉到框架层的 `*_request` / `bootstrap_app` 入口，
+每个入口在 Linux 门禁里有单测：
+
+| 命令 | 委派入口 | 判断在哪 |
+| --- | --- | --- |
+| `initialize_app` | `state::bootstrap_app` | 配置自举落盘、降级日志、问题列表 |
+| `analyze_symbol` | `analysis::analyze_request` | 空标的 |
+| `get_real_time_quotes` | `analysis::quotes_request` | 空标的列表 |
+| `set_price_alert` | `alerts::upsert_request` | 方向串解析、价格校验 |
+| `export_data` | `export::export_request` | 格式解析、空列表 |
+| `get_app_info` | `app::app_info` | 纯读取（唯一无失败路径的命令） |
+
+`desktop/tests/wiring_contract.rs`（8 例）把这个约定变成可本地执行的断言：命令体不得
+出现判空/兜底/自造错误串；每个命令必须委派到上表的入口并 `map_err`；接线层不得绕过
+入口直接调底层（`config::load_or_default`、`AlertKind::parse` 等）；`generate_handler!`
+注册的命令与兜底壳 `invoke` 一致；`lib.rs` 的重导出都指向真实存在的项；文件行数上限
+（防止接线层重新长胖）。反向用例已实测：在 `get_app_info` 里塞回 `validate().unwrap_or_default()`
+这类判断，8 例中 2 例转红。
+
+诚实边界：`tests/wiring_contract.rs` 是**源码契约**断言，它能守住「接线层不该干什么」，
+但不能替代编译。补上编译的那一步见下一节。
+
+### 4.2 假 pkg-config：把 gui.rs 的**类型检查**搬回 Linux
+
+`cargo check`/`cargo clippy` 不链接。Tauri 1.x 的 sys crate（`webkit2gtk-sys`、
+`soup2-sys`、`javascriptcore-rs-sys`）只在 build 期跑 `pkg-config` 查
+`webkit2gtk-4.0` / `javascriptcoregtk-4.0` / `libsoup-2.4`。于是
+`scripts/desktop-fake-pc/` 里放一组「版本号给足、`Libs`/`Cflags` 留空」的 `.pc`，
+配合 `PKG_CONFIG_PATH` 与 `PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1`，依赖图就能在任意 Linux
+runner 上完整编译：
+
+```
+PKG_CONFIG_PATH="$PWD/scripts/desktop-fake-pc" PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
+    cargo clippy -p alpha-desktop --features gui --all-targets -- -D warnings
+```
+
+这一步（门禁 [5/5]）把 `#[tauri::command]` 宏展开、`AppHandle`/`State` 用法、
+`generate_context!`、以及接线层对框架层的全部调用签名都纳入 Linux 门禁。首轮的
+编译错误（`validate() -> Result<(), Vec<String>>` 被当 `Vec<String>` 用）就是在这条
+命令下复现并拦下的——修复前手动跑一次即得完全相同的 `E0599: no method named
+is_empty found for unit type ()`。
+
+**不能覆盖的**：链接与启动窗口仍然需要真实 WebKitGTK（或 CI 的 macOS 作业，那里
+WKWebView 内置）。假 `.pc` 只让类型系统与 lint 在 Linux 上干活。
+
+顺带修掉一个真实缺陷：为了在 Linux 上编 gui 特性，暴露出锁文件里
+`zbus 5.11.0` 配 `zbus_macros 5.19.0` 的上游 semver 破坏（宏 5.19 生成的代码引用
+zbus 5.11 里不存在的 `DispatchResult2`）。`zbus` 是 tauri 仅 Linux/BSD 的依赖，
+macOS CI 从不编译它，所以这处锁文件腐烂此前对 CI 不可见，却让 Linux 上任何
+`cargo build`（默认带 gui 特性）失败。已把 `zbus_macros` 钉到 `5.11.0`。
 
 ## 5. 本轮不做的（留给后续 TODO）
 

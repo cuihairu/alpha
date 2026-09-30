@@ -121,6 +121,20 @@ pub fn upsert(
     Ok(id)
 }
 
+/// 按前端入参新增告警（`set_price_alert` 命令的实现体）
+///
+/// 方向串解析 + 入参校验都在框架层，接线层只传字符串。
+pub fn upsert_request(
+    path: &Path,
+    symbol: &str,
+    target_price: f64,
+    alert_type: &str,
+    at: DateTime<Utc>,
+) -> DesktopResult<String> {
+    let kind = AlertKind::parse(alert_type)?;
+    upsert(path, symbol, target_price, kind, at)
+}
+
 /// 读取全部告警（按 id 排序，便于前端稳定展示）
 pub fn list(path: &Path) -> Vec<(String, Alert)> {
     let mut items: Vec<(String, Alert)> = load(path).into_iter().collect();
@@ -274,6 +288,35 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, vec!["alerts.json".to_string()], "残留: {names:?}");
+    }
+
+    #[test]
+    fn upsert_request_parses_direction_and_persists() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let path = tmp.path().join("alerts.json");
+        let id = upsert_request(&path, "600519", 1500.0, "BELOW", at()).expect("应写入");
+        let book = load(&path);
+        assert_eq!(book[&id].alert_type, AlertKind::Below, "方向串应大小写无关");
+        assert_eq!(book[&id].symbol, "600519");
+    }
+
+    #[test]
+    fn upsert_request_rejects_unknown_direction() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let path = tmp.path().join("alerts.json");
+        let err =
+            upsert_request(&path, "600519", 1500.0, "sideways", at()).expect_err("未知方向应报错");
+        assert_eq!(err.kind(), "invalid_input");
+        assert!(err.to_string().contains("sideways"), "实际: {err}");
+        assert!(!path.exists(), "失败不应落盘");
+    }
+
+    #[test]
+    fn upsert_request_validates_price_after_parsing_direction() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let path = tmp.path().join("alerts.json");
+        let err = upsert_request(&path, "600519", -1.0, "above", at()).expect_err("负价格应报错");
+        assert_eq!(err.kind(), "invalid_input");
     }
 
     #[test]

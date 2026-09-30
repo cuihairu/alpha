@@ -7,7 +7,7 @@
 #   * GUI 接线层（gui 特性：命令 + generate_context!）—— 需 GUI 依赖，由 CI 的
 #     Desktop (macOS) 作业 `cargo test -p alpha-desktop --all-targets` 验证。
 #
-# 本脚本的可移植部分（[1/4]）是**配置自洽性门禁**，抓的是「配置与代码漂移」类红灯：
+# 本脚本的可移植部分（[1/5]）是**配置自洽性门禁**，抓的是「配置与代码漂移」类红灯：
 #   1. tauri.conf.json 可解析且必填字段齐全（identifier/distDir/devPath/窗口尺寸）；
 #   2. bundle.icon 列出的文件真实存在（否则打包期才炸）；
 #   3. distDir 存在且含 index.html（否则窗口全白——骨架的核心诉求之一）；
@@ -20,8 +20,13 @@
 #      （早期脚手架残留的 tauri.conf.json 会让人改错文件）。
 #
 # 注：配置 schema 本身（字段名/层级是否匹配 Tauri 1.x 的 deny_unknown_fields）
-# 由 tests/tauri_config.rs 用 tauri-utils 走 tauri-build 同一条解析路径校验，
-# 覆盖在 [4/4]；本脚本只做无需编译的快速检查。
+# 由 tests/tauri_config.rs 用 tauri-utils 走 tauri-build 同一条解析路径校验；
+# 接线层薄度（命令体不含业务判断、只委派框架层入口、命令名两侧一致）由
+# tests/wiring_contract.rs 断言。两者都在 [4/4] 覆盖；本脚本只做无需编译的快速检查。
+#
+# 覆盖不到的诚实边界：[5/5] 用假 pkg-config 把 gui.rs 的**类型**在 Linux 上查了，
+# 但链接与运行仍需真实 WebKitGTK / CI 的 macOS 作业。手段是命令体越薄越好——
+# 把判断与文案下沉框架层，使留在「只能 macOS 链接」那一步的代码只剩薄胶水。
 #
 # 用法：scripts/check-desktop.sh
 
@@ -34,7 +39,7 @@ ok()   { echo "✅ $*"; }
 
 echo "=== 桌面端框架门禁 ==="
 
-echo "--- [1/4] tauri.conf.json 配置自洽性"
+echo "--- [1/5] tauri.conf.json 配置自洽性"
 python3 - <<'PY' || exit 1
 import json, pathlib, re, sys
 
@@ -180,17 +185,33 @@ print(f"✅ tauri.conf.json 自洽（图标 {len(icons)} 个 / distDir {dist}）
 PY
 ok "配置自洽性检查通过"
 
-echo "--- [2/4] 无孤儿 Tauri 配置"
+echo "--- [2/5] 无孤儿 Tauri 配置"
 [ ! -e desktop/src-tauri ] || fail "desktop/src-tauri 应删除（crate 根是 desktop/）"
 ok "无孤儿配置"
 
-echo "--- [3/4] 框架层 clippy（--no-default-features，无需 GUI 系统库）"
+echo "--- [3/5] 框架层 clippy（--no-default-features，无需 GUI 系统库）"
 cargo clippy -p alpha-desktop --no-default-features --all-targets -- -D warnings
 ok "框架层 clippy 零警告"
 
-echo "--- [4/4] 框架层单测 + tauri.conf.json 契约测试（--no-default-features）"
+echo "--- [4/5] 框架层单测 + 配置/接线契约测试（--no-default-features）"
 cargo test -p alpha-desktop --no-default-features --all-targets
-ok "框架层单测通过（含 tests/tauri_config.rs 配置契约）"
+ok "框架层单测通过（含 tests/tauri_config.rs 配置契约、tests/wiring_contract.rs 接线契约）"
 
-echo "=== 桌面端框架门禁全部通过 ==="
-info "GUI 接线层（gui 特性）由 CI Desktop (macOS) 作业编译验证：cargo test -p alpha-desktop --all-targets"
+# [5/5] GUI 接线层的类型检查 + lint（gui 特性）。
+#
+# 关键点：这步**不链接**，因此不需要真的 WebKitGTK。Tauri 1.x 的 sys crate
+# （webkit2gtk-sys/soup2-sys/javascriptcore-rs-sys）只在 build 期跑 pkg-config，
+# 给一套假的 .pc（scripts/desktop-fake-pc/，版本号给足、flag 留空）就能让依赖图
+# 完整编译，于是 gui.rs 的 #[tauri::command] 宏展开、AppHandle/State 用法、
+# 以及对框架层的全部调用签名都在 Linux 上被检查——这正是 L112 连续两次 CI 红灯
+# （withGlobalTauri 段位错、validate() 误当 Vec<String>）漏网的那一类。
+#
+# 不能覆盖的：链接与运行（仍需真实 WebKitGTK 或 CI 的 macOS 作业）。
+echo "--- [5/5] GUI 接线层类型检查 + clippy（gui 特性，假 pkg-config，不链接）"
+PKG_CONFIG_PATH="$PWD/scripts/desktop-fake-pc" PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
+    cargo clippy -p alpha-desktop --features gui --all-targets -- -D warnings \
+    || fail "GUI 接线层类型检查/lint 失败（见上）"
+ok "GUI 接线层 clippy 零警告（类型已检查；链接/运行由 macOS 作业验证）"
+
+echo "=== 桌面端门禁全部通过 ==="
+info "GUI 接线层的链接与运行由 CI Desktop (macOS) 作业验证：cargo test -p alpha-desktop --all-targets"

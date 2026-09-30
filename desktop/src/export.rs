@@ -96,6 +96,30 @@ pub fn export(
     })
 }
 
+/// 按 IPC 请求批量导出（`export_data` 命令的实现体）
+///
+/// 格式串解析、取数、逐标的导出都在框架层；返回导出的文件名列表（前端提示用）。
+/// 空标的列表在这里被拒——早前是在接线层判的（`symbols.is_empty()`），那类判断
+/// 属于业务口径，放在只能靠 macOS CI 编译的接线层等于没有测试覆盖。
+pub fn export_request(
+    request: &crate::ipc::ExportRequest,
+    dir: &Path,
+    at: DateTime<Utc>,
+) -> DesktopResult<Vec<String>> {
+    let format = ExportFormat::parse(&request.format)?;
+    if request.symbols.is_empty() {
+        return Err(DesktopError::InvalidInput(
+            "symbols 至少需要一个标的".to_string(),
+        ));
+    }
+    let mut files = Vec::with_capacity(request.symbols.len());
+    for symbol in &request.symbols {
+        let series = crate::market::synthetic_series(symbol, crate::market::DEFAULT_BARS);
+        files.push(export(&series, dir, symbol, format, at)?.filename);
+    }
+    Ok(files)
+}
+
 fn write_csv(data: &[MarketData], path: &Path) -> DesktopResult<()> {
     let mut writer = csv::Writer::from_path(path)?;
     writer.write_record(CSV_HEADER)?;
@@ -162,6 +186,51 @@ mod tests {
             "600519_20231114_221320.csv"
         );
         assert!(export_filename("AAPL", ExportFormat::Json, at()).ends_with(".json"));
+    }
+
+    #[test]
+    fn export_request_writes_one_file_per_symbol_in_order() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let request =
+            crate::ipc::ExportRequest::new(vec!["600519".to_string(), "000001".to_string()], "csv");
+        let files = export_request(&request, tmp.path(), at()).expect("批量导出");
+
+        assert_eq!(files.len(), 2, "每个标的一个文件");
+        assert!(files[0].starts_with("600519"), "{files:?}");
+        assert!(files[1].starts_with("000001"), "{files:?}");
+        for name in &files {
+            assert!(tmp.path().join(name).is_file(), "应落盘: {name}");
+        }
+    }
+
+    #[test]
+    fn export_request_rejects_empty_symbol_list() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let request = crate::ipc::ExportRequest::new(Vec::new(), "csv");
+        let err = export_request(&request, tmp.path(), at()).expect_err("空列表应报错");
+        assert_eq!(err.kind(), "invalid_input");
+        assert!(err.to_string().contains("symbols"), "实际: {err}");
+    }
+
+    #[test]
+    fn export_request_rejects_unknown_format_before_writing() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let request = crate::ipc::ExportRequest::new(vec!["600519".to_string()], "xlsx");
+        let err = export_request(&request, tmp.path(), at()).expect_err("未知格式应报错");
+        assert!(err.to_string().contains("xlsx"), "实际: {err}");
+        assert_eq!(
+            std::fs::read_dir(tmp.path()).expect("列目录").count(),
+            0,
+            "失败不应留下残留文件"
+        );
+    }
+
+    #[test]
+    fn export_request_honours_json_format() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let request = crate::ipc::ExportRequest::new(vec!["600519".to_string()], "json");
+        let files = export_request(&request, tmp.path(), at()).expect("导出");
+        assert!(files[0].ends_with(".json"), "{files:?}");
     }
 
     #[test]

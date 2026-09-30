@@ -34,14 +34,14 @@ pub mod state;
 #[cfg(feature = "gui")]
 pub mod gui;
 
-pub use alerts::{Alert, AlertKind};
-pub use analysis::{analyze, quotes};
+pub use alerts::{upsert_request, Alert, AlertKind};
+pub use analysis::{analyze, analyze_request, quotes, quotes_request};
 pub use app::{app_info, AppInfo, APP_NAME};
 pub use config::{load_or_default, AppConfig, ConfigSource};
 pub use error::{DesktopError, DesktopResult};
-pub use export::{export, ExportFormat, ExportOutcome};
-pub use ipc::{AnalyzeRequest, ExportRequest};
+pub use export::{export, export_request, ExportFormat, ExportOutcome};
+pub use ipc::{AnalyzeRequest, ExportRequest, InitPayload};
 pub use kv::FileKeyValueStore;
 pub use market::{synthetic_quote, synthetic_series, DEFAULT_BARS};
 pub use paths::AppPaths;
-pub use state::AppState;
+pub use state::{bootstrap_app, AppState};
