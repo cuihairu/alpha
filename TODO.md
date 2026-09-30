@@ -298,7 +298,41 @@
   门禁：check-lint.sh ✅（workspace clippy 含新成员）/ 全仓测试 ✅（20 段
   ok，alpha-mobile 16 例）/ check-cross-platform.sh 四步 ✅ /
   check-desktop.sh [1-5/5] ✅）
-- [ ] 搭建 Android Kotlin + Rust 混合开发环境（Jetpack Compose）
+- [x] 搭建 Android Kotlin + Rust 混合开发环境（Jetpack Compose）
+  （✅ 2026-09-30，台账 L301）口径：**设计文档 + 最小可编译骨架 + 单测**，另
+  做本机 SDK 实证（关键假设⑧：派发前提「本环境无 Android SDK」已过时——本机
+  实有 SDK platforms 34/35/36 + build-tools + NDK r27/28 + Gradle 9.8 + JDK 21，
+  故 Android 侧做了超出 workspace 门禁的实证；真机/模拟器**运行**仍留边界）。
+  交付面 mobile/android/：Gradle 工程（wrapper 8.11.1 入库 / AGP 8.9.0 /
+  Kotlin 1.9.25——composeOptions 1.5.15+serialization 插件 / minSdk 26 /
+  compileSdk 35 / abiFilters arm64-v8a）+ Compose 壳三件（MainActivity 状态头+
+  快照列表+行内分析；AlphaBridge 唯一 uniffi 消费点——Dispatchers.IO +
+  MobileException 就地翻译成 Kotlin 侧 Error，UI 层零 uniffi 引用；MarketModels
+  载荷模型 @SerialName 对齐 serde snake_case 契约）+ JVM 载荷契约单测 4 例
+  （无需设备）。
+  Rust 侧增量：mobile 加 uniffi-bindgen CLI（--features bindgen 裁剪，默认构建
+  零增量）+ 契约测试 android_shell_contract.rs 9 例（跨语言四名一致 / 生成绑定
+  FFI 面点名 / import uniffi.* 仅 AlphaBridge 特权 / 清单-主题-Gradle 三方一致 /
+  .gitignore 分离生成源与产物 / alpha-core android jni 依赖回归守门）。
+  **本机实证**（README 记录步骤）：uniffi-bindgen 从 host .so 生成 Kotlin 绑定
+  （入库 mobile/android/app/src/main/java/uniffi/alpha_mobile/alpha_mobile.kt）；
+  NDK clang linker 交叉编译 arm64 libalpha_mobile.so（无需 cargo-ndk，
+  CARGO_TARGET_*_LINKER 指 aarch64-linux-android26-clang，minSdk 对齐）进
+  jniLibs（.so 不入库）；./gradlew :app:assembleDebug + testDebugUnitTest 通过
+  （JNA @aar 依赖为 uniffi 0.25 生成面的硬要求）。初版取 Kotlin 2.1.0 被
+  K2 拒——uniffi 0.25 生成绑定在 2.x 下过载歧义（错误类构造属性与 override
+  `message` 同名双候选，已知不兼容），按假设②（uniffi pin 0.25 不升级）降级
+  壳侧 Kotlin 1.9.25 实证通过（假设⑩：升级 Kotlin 的前置是升级 uniffi，两层
+  锁同进退，契约测试负向守卫）。
+  **顺带修复潜伏孤儿**：packages/core 的 From<jni::errors::Error> 只有
+  cfg(target_os="android") 门控而无依赖——android target 一编即 E0433（从未
+  参与编译所以从未暴露，L38 trading.rs 同类），按同文件 js-sys 先例补
+  [target.'cfg(target_os = "android")'.dependencies]（假设⑨：不做 optional
+  feature，TODO 272 启用 JNI 逃生舱时天然带上）。
+  边界（文档 §12）：真机加载 .so 与运行、x86_64 模拟器镜像 ABI、ANR 表现、
+  并发压测、R8/签名发布流水线（TODO 351 行附近）。
+  门禁：check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅ /
+  check-desktop.sh [1-5/5] ✅（Android 工具链不进 CI 门禁，靠契约测试守结构）
 - [ ] 实现 iOS Swift + Rust 集成（SwiftUI + UniFFI）
 - [ ] 开发移动端特有的推送通知和后台同步
 - [ ] 实现触屏手势和移动端 UI 交互优化

@@ -11,10 +11,13 @@
   Rust 定义生成绑定；错误、数据契约、线程模型先在文档与单测里定死。
 * **本轮交付**：设计文档（本文件）+ 最小可编译骨架（`alpha-mobile`，进 workspace
   成员名单因而随 lint/test 门禁走）+ 框架层单测（Linux 全绿）。
-* **本轮不交付**（按 TODO 顺序留给后续项，见 §10）：Android SDK/NDK 工具链搭建
-  （270）、Swift/SwiftUI 集成（271）、推送/后台同步（272）、离线存储与同步（274）、
-  触屏交互（273）。本环境（Linux，无 Android SDK / Xcode）装不了这些工具链，
-  骨架的**编译与测试在 workspace 门禁内完成**，平台端绑定生成与真机运行属边界。
+* **L301 增量交付**（TODO 270）：Android Kotlin + Jetpack Compose 混合工程
+  （`mobile/android/`，§9/§10.1）——绑定生成、arm64 交叉编译、Gradle
+  assembleDebug 与 JVM 契约单测均在本机实证；真机/模拟器**运行**仍属边界
+  （§12①）。
+* **仍不交付**（按 TODO 顺序留给后续项，见 §13）：Swift/SwiftUI 集成（271）、
+  推送/后台同步（272）、离线存储与同步（274）、触屏交互（273）。iOS 侧无
+  Xcode 不可执行；Android 门禁化验证靠契约单测（CI 无 SDK 也能守结构）。
 
 ## 2. 架构总览
 
@@ -80,7 +83,7 @@ AlphaError（alpha-core，含 InvalidInput/CalculationError/JniError 等 15 变�
     ▼
 MobileError（uniffi::Error + thiserror，FFI 上是「抛异常」）
     ├─ InvalidSymbol { symbol }   —— 观察列表外的标的（核心库自己的业务判断）
-    └─ Failed { message }         —— 其余核心错误（Display 全文透传）
+    └─ Failed { detail }          —— 其余核心错误（Display 全文透传）
 ```
 
 Kotlin/Swift 侧收到的是类型化异常（`MobileError.InvalidSymbol` 等），不是错误码
@@ -115,17 +118,31 @@ Kotlin/Swift 侧收到的是类型化异常（`MobileError.InvalidSymbol` 等）
 桌面/移动两端生命周期不同，过早上提到 `alpha-core` 会把「演示占位」焊进共享层
 （§5 依赖方向的反向搬运禁忌）；两端收敛到共享层等真实数据源接入时一并做。
 
-## 9. 构建管线（设计，本环境不可执行）
+## 9. 构建管线（Android 侧已实证，L301；iOS 侧仍属设计）
 
-| 平台 | 产物 | 工具链（后续 TODO 270/271） |
-|---|---|---|
-| Android | `cdylib`（`.so`，uniFFI JNI 绑定装入 Kotlin/JNA 或手写 JNI） | `cargo ndk`（aarch64-linux-android 等 target）+ Gradle |
-| iOS | `staticlib`（`.a`，Swift 侧经 uniffi 生成的 Swift 绑定链接） | `cargo-lipo`/Xcode + Swift Package |
+| 平台 | 产物 | 工具链 | 状态 |
+|---|---|---|---|
+| Android | `cdylib`（`libalpha_mobile.so`）+ Kotlin 绑定 | Rust + NDK clang linker + Gradle（wrapper 8.11.1 / AGP 8.9.0 / Kotlin 1.9.25） | **本机 assembleDebug 实证通过（L301）** |
+| iOS | `staticlib`（`.a`，Swift 侧经 uniffi 生成的 Swift 绑定链接） | Xcode + Swift Package（TODO 271） | 设计，无工具链 |
 
-骨架的 `crate-type = ["lib", "cdylib", "staticlib"]` 三型齐备（三型在本机门禁
-编译通过即「产物形态就位」）；真机产物链接（.so/.a 在目标架构上）属边界。
+Android 实际管线（`mobile/android/gen-bindings.sh`，两步都不需要 cargo-ndk——
+单 target 用 `CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER` 指到 NDK 的
+`aarch64-linux-android26-clang` 即可，minSdk 26 对齐）：
+
+1. **绑定生成**：`cargo run -p alpha-mobile --features bindgen --bin
+   uniffi-bindgen -- generate --library target/debug/libalpha_mobile.so
+   --language kotlin --out-dir mobile/android/app/src/main/java`。生成的
+   `uniffi/alpha_mobile/alpha_mobile.kt` **入库**（消费面随提交可审；FFI 面
+   变更必须重跑，运行期 checksum 兜底）。壳侧依赖 JNA（`jna@aar`，uniffi 0.25
+   生成面用 `Native.load("alpha_mobile")`）。
+2. **交叉编译**：`cargo build -p alpha-mobile --target aarch64-linux-android`
+   → `.so` 拷进 `app/src/main/jniLibs/arm64-v8a/`（**不入库**，`.gitignore`）。
+
 `setup_scaffolding!`（proc-macro-only，无 UDL 副本——避免「UDL 与 Rust 签名
-漂移」这一 uniffi 头号事故源）。
+漂移」这一 uniffi 头号事故源）。**L301 顺带修复**：`packages/core` 的
+`From<jni::errors::Error>` 此前只有 `#[cfg(target_os = "android")]` 门控而无
+对应依赖（android target 一编即 E0433 的潜伏孤儿，从未参与编译所以从未暴露），
+按同文件 js-sys 先例补 `[target.'cfg(target_os = "android")'.dependencies]`。
 
 ## 10. 骨架 API 与单测
 
@@ -142,9 +159,32 @@ Rust 层 API（单测可直接调）：`new(symbols, api_url)`、`symbols()`、`
 JSON 载荷字段契约、`From<AlphaError>` 映射、空观察列表退化。
 
 覆盖边界（诚实声明）：**FFI 层只到编译**——`setup_scaffolding!` 与 `export`
-宏展开由门禁（`cargo clippy/test --workspace`）验证；绑定的**生成**
-（`uniffi-bindgen generate`）与 Kotlin/Swift 调用需要 SDK/工具链，本环境不做，
-见真机边界 ①②。
+宏展开由门禁（`cargo clippy/test --workspace`）验证；绑定的**生成**已在 L301
+实证（见 §9），Kotlin 壳在本机 Gradle 下 assembleDebug 通过；仍不可观察的
+部分（真机加载 .so、ANR 表现、压测）见 §12。
+
+### 10.1 Android 壳（L301 交付面，`mobile/android/`）
+
+```
+mobile/android/
+├── gen-bindings.sh            绑定生成 + arm64 .so 交叉编译（§9 两步的脚本化）
+├── settings/build.gradle.kts  单模块 :app；AGP 8.9.0 + Kotlin 1.9.25（composeOptions 1.5.15 + serialization 插件）
+├── gradle/wrapper/            Gradle 8.11.1（wrapper jar/属性入库）
+└── app/src/
+    ├── main/java/com/alpha/finance/mobile/
+    │   ├── MainActivity.kt    Compose 界面（状态头 + 快照 LazyColumn + 行内分析）
+    │   ├── AlphaBridge.kt     唯一 uniffi 消费点（Dispatchers.IO + MobileException→Error 翻译）
+    │   └── MarketModels.kt    FFI JSON 载荷 ↔ kotlinx-serialization（@SerialName 对齐 serde）
+    ├── main/java/uniffi/alpha_mobile/alpha_mobile.kt   生成绑定（入库）
+    ├── main/jniLibs/arm64-v8a/                          .so（不入库）
+    └── test/java/.../PayloadParsingTest.kt              JVM 载荷契约单测（无需设备）
+```
+
+分层纪律（由 `mobile/tests/android_shell_contract.rs` 9 例守门，CI 无 SDK 也
+能防漂移）：跨语言四名一致（cdylib `alpha_mobile` ↔ JNA 载名 ↔ uniffi 命名
+空间 ↔ jniLibs 路径）；生成绑定必须暴露壳层在用的 FFI 面；`import uniffi.*`
+是 AlphaBridge 的特权，UI 层零生成绑定引用；清单/主题/Gradle 三方一致；
+`.gitignore` 分离「生成源入库 / 构建产物不入库」。
 
 ## 11. 非交互假设（自行判定，已注明）
 
@@ -163,13 +203,32 @@ JSON 载荷字段契约、`From<AlphaError>` 映射、空观察列表退化。
    仅驱动 future）；不引入 `enable_all` 之外的驱动假设，不提前做运行时复用优化。
 7. **观察列表外一律 `InvalidSymbol`**（含空 symbol、空列表退化）——能力边界统一
    由核心库判定，平台壳不重复实现。
+8. **L301 工具链假设**：派发前提「本环境无 Android SDK」实际已过时——本机实有
+   SDK（platforms 34/35/36 + build-tools + NDK r27/28）、Gradle 9.8、JDK 21，故
+   Android 侧在本机做了超出 workspace 门禁的实证（绑定生成 + 交叉编译 +
+   assembleDebug + JVM 单测）；真机/模拟器运行仍留边界。版本组合取
+   Gradle wrapper 8.11.1 + AGP 8.9.0 + Kotlin 1.9.25 + JNA 5.13.0 + Compose BOM
+   2024.12.01（本机拉包构建实证，非最新但组合关系明确）；wrapper 由系统
+   Gradle 9.8 一次性 bootstrap，门禁与 CI 均不依赖 Android 工具链。
+10. **Kotlin 锁 1.9.25**：初版组合取 Kotlin 2.1.0（+compose 插件），K2 编译
+    uniffi 0.25 生成绑定报「Overload resolution ambiguity」——错误类的构造
+    属性与 override `message` 同名双候选，属 uniffi 0.25 与 Kotlin 2.x 的已知
+    不兼容。降级壳侧 Kotlin 1.9.25（composeOptions 1.5.15 官方配对）后实证
+    通过；升级 Kotlin 的前置条件是升级 uniffi（workspace pin 0.25 是 L118
+    假设②），两层锁必须同进退，契约测试已作负向守卫。
+9. **alpha-core android 依赖修复口径**：`jni` 按 target 挂依赖（与 js-sys 的
+   wasm 门控同款式），不做 optional feature——TODO 272 启用 JNI 逃生舱时
+   android 构建天然带上，语义与 `#[cfg(target_os = "android")]` 的错误映射
+   一一对应。
 
 ## 12. 真机验收边界（本环境不可观察，登记）
 
-1. `uniffi-bindgen generate --language kotlin/swift` 生成绑定 + Android Studio
-   真机加载 `.so`（crash/符号问题只有目标架构能暴露）。
+1. 真机加载 `.so` 与运行（L301 已实证到 `assembleDebug` 产物可出、JVM 契约
+   单测可跑；crash/符号/装载问题只有目标设备能暴露；x86_64 模拟器镜像需补
+   `x86_64` ABI，gen-bindings.sh 加一个 target 即可）。
 2. Swift 侧经 staticlib 链接与调用（iOS 无 Xcode 不可执行）。
-3. 主线程调用禁忌的实际表现（ANR/jank）与平台壳后台调度约定的落实。
+3. 主线程调用禁忌的实际表现（ANR/jank）与平台壳后台调度约定的落实
+   （Kotlin 侧已按 Dispatchers.IO 接线，效果未实测）。
 4. 推送 token/生命周期等 SDK 回调经 JNI 逃生舱回灌核心库（TODO 272 的首个
    JNI 实战场）。
 5. 多线程并发调用 `MobileCore` 方法（uniffi 对象按 Arc 共享；纯数据 + per-call
@@ -177,10 +236,10 @@ JSON 载荷字段契约、`From<AlphaError>` 映射、空观察列表退化。
 
 ## 13. 后续 TODO 映射
 
-| TODO 项 | 本文依托 |
-|---|---|
-| 270 Android Kotlin 环境 | §9 cargo-ndk 管线 + §3 JNI 逃生舱启用点 |
-| 271 iOS Swift 集成 | §9 staticlib + uniffi Swift 绑定 |
-| 272 推送/后台同步 | §5 错误分类 + `api_url` 配置槽 + JNI 回调 |
-| 273 触屏手势 | 平台壳职责，不在核心库 |
-| 274 移动端离线存储与同步 | §7 `api_url` 起点；同步语义参考桌面 L116（kv 快照 + 指纹增量）同口径复用 |
+| TODO 项 | 本文依托 | 状态 |
+|---|---|---|
+| 270 Android Kotlin 环境 | §9 管线 + §10.1 壳 | **L301 已落**（设计文档+骨架+契约单测；真机运行留 §12①） |
+| 271 iOS Swift 集成 | §9 staticlib + uniffi Swift 绑定 | 未启（无工具链） |
+| 272 推送/后台同步 | §5 错误分类 + `api_url` 配置槽 + JNI 回调 | 未启（JNI 逃生舱已随 L301 连依赖） |
+| 273 触屏手势 | 平台壳职责，不在核心库 | 未启 |
+| 274 移动端离线存储与同步 | §7 `api_url` 起点；同步语义参考桌面 L116（kv 快照 + 指纹增量）同口径复用 | 未启 |

@@ -29,3 +29,13 @@ thiserror = { workspace = true }
 # async 执行器：alpha-core 的 analyze_symbol 形为 async、体为同步计算，
 # 按调用建 current-thread 运行时驱动（§6 线程模型；工作区统一 pin full）
 tokio = { workspace = true }
+
+# L301：绑定生成 CLI 只走 `--features bindgen`（默认构建零增量——cli 拉入
+# clap 等依赖，不该进 lint/test 门禁）；bin 目标同样按特性裁剪，见下
+[features]
+bindgen = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]

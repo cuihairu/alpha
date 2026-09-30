@@ -40,6 +40,12 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 
+# JNI 错误映射（errors.rs 的 From<jni::errors::Error>）：此前只有 cfg 门控、
+# 无对应依赖，android target 一编即 E0433——潜伏孤儿（从未参与编译所以从未
+# 暴露），L301 android 交叉编译时暴露，按同文件 js-sys 先例对称补齐
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { workspace = true }
+
 # Rayon 多核并行：wasm32-unknown-unknown 无线程模型（Web Worker 承担并行，
 # 见 wasm-analyzer/src/worker.rs），故按 target 门控——native 走真线程池，
 # wasm32 由 parallel.rs 的顺序分支兜底（语义等价，见 check-cross-platform.sh 门禁）。

@@ -1,0 +1,8 @@
+# L301 Android 工程忽略面：构建产物不入库，生成绑定（uniffi/*.kt）入库，
+# .so 由 gen-bindings.sh 现地生成（真机 ABI 产物，属构建产物不入库）
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+app/src/main/jniLibs/**/*.so

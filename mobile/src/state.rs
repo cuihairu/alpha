@@ -22,17 +22,21 @@ pub enum MobileError {
         symbol: String,
     },
     /// 其余核心错误（`AlphaError` 等经 Display 全文透传，不猜不缩）
-    #[error("{message}")]
+    ///
+    /// 字段名不能叫 `message`：uniffi 生成的 Kotlin 会给错误类自动加
+    /// `override val message` 展示属性，构造属性与之同名即冲突（K1/K2 都
+    /// 编不过）——L301 实证，字段一律避开 `message`。
+    #[error("{detail}")]
     Failed {
         /// 错误全文（`Display` 输出）
-        message: String,
+        detail: String,
     },
 }
 
 impl From<AlphaError> for MobileError {
     fn from(err: AlphaError) -> Self {
         MobileError::Failed {
-            message: err.to_string(),
+            detail: err.to_string(),
         }
     }
 }
@@ -118,14 +122,14 @@ impl MobileCore {
     /// 提升（`LiftRef` 只对已导出类型与 owned 内建类型实现）
     pub fn quote_json(&self, symbol: String) -> Result<String, MobileError> {
         serde_json::to_string(&self.quote(&symbol)?).map_err(|e| MobileError::Failed {
-            message: e.to_string(),
+            detail: e.to_string(),
         })
     }
 
     /// 分析结果的 JSON 载荷（`AnalysisResult` serde 字段即契约）
     pub fn analyze_json(&self, symbol: String) -> Result<String, MobileError> {
         serde_json::to_string(&self.analyze(&symbol)?).map_err(|e| MobileError::Failed {
-            message: e.to_string(),
+            detail: e.to_string(),
         })
     }
 
@@ -279,7 +283,7 @@ mod tests {
         ));
     }
 
-    /// From<AlphaError>：分类不变、Display 全文进 Failed.message（§5）
+    /// From<AlphaError>：分类不变、Display 全文进 Failed.detail（§5）
     #[test]
     fn alpha_error_maps_to_failed_with_display_text() {
         let source = AlphaError::invalid_input("bad input");

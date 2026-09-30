@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 纯 Compose 主题：平台 Material Light NoActionBar 起底，配色由
+     MaterialTheme 在 Compose 侧接管（不引 appcompat） -->
+<resources>
+    <style name="Theme.AlphaMobile" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
