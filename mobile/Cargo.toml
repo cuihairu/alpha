@@ -1,0 +1,31 @@
+[package]
+name = "alpha-mobile"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# 移动端 Rust 核心库（L118）：FFI 桥（UniFFI proc-macro）+ 核心状态。
+# 架构与假设见 docs/mobile-core-architecture.md；纯 Rust、无平台 SDK 依赖，
+# 因而进 workspace 成员名单、随 lint/test 门禁编译测试。
+description = "Alpha Finance 移动端 Rust 核心库（UniFFI 桥 + 核心状态）"
+
+[lib]
+# 三型齐备：lib 供门禁测试与 Rust 复用；cdylib/android .so、staticlib/iOS .a
+# 的目标架构产物由后续工具链（cargo-ndk / Xcode）产出——本机只验证形态可编译
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+# 共享核心：分析引擎/模型/错误（docs/mobile-core-architecture.md §2）
+alpha-core = { workspace = true }
+# FFI 桥：proc-macro-only（setup_scaffolding，无 UDL 副本），pin 沿用 workspace
+uniffi = { workspace = true }
+# 序列化：FFI 载荷 = JSON 字符串（§4 数据契约）
+serde_json = { workspace = true }
+# 演示行情时间戳（market.rs 与桌面端同口径）
+chrono = { workspace = true }
+# 错误类型（MobileError 的 Display，经 uniffi::Error 跨桥抛异常）
+thiserror = { workspace = true }
+# async 执行器：alpha-core 的 analyze_symbol 形为 async、体为同步计算，
+# 按调用建 current-thread 运行时驱动（§6 线程模型；工作区统一 pin full）
+tokio = { workspace = true }

@@ -15,12 +15,16 @@ members = [
     "wasm-analyzer",
     "desktop",
 
+    # 移动端核心库（L118：纯 Rust FFI 桥 + 核心状态，无平台 SDK 依赖，
+    # 故与 desktop 框架层同待遇进成员名单、随 workspace 门禁编译测试；
+    # 平台壳/工具链归后续 TODO，见 docs/mobile-core-architecture.md）
+    "mobile",
+
     # 开发工具
     "tools/build-tools"
 ]
 
 exclude = [
-    "mobile",
     "tools/benchmark",
     "tools/data-migration"
 ]

@@ -266,7 +266,38 @@
 - [x] 构建统一配置管理（config-rs）和分布式追踪（tracing）
 
 ## 📱 移动端应用（Android & iOS）
-- [ ] 设计移动端 Rust 核心库架构（JNI + UniFFI）
+- [x] 设计移动端 Rust 核心库架构（JNI + UniFFI）
+  （✅ 2026-09-30）口径：**设计文档 + 最小可编译骨架 + 单测**（本轮为巡检派发
+  首选项；工具链/SDK 构建属后续 TODO 270/271，本环境无 Android SDK/Xcode，
+  骨架的编译与测试在 workspace 门禁内完成——台账按 L112–L117 dispatch 顺序
+  记为 L118，行号会漂移不作编号依据）。设计文档 docs/mobile-core-architecture.md：
+  分层（平台壳 → UniFFI 桥 alpha-mobile → alpha-core 同一份计算）、JNI vs
+  UniFFI 决策（UniFFI proc-macro-only 单一桥接源=两端绑定同源；裸 JNI 只作
+  SDK 回调逃生舱，workspace 预 pin 的 jni=0.21 本轮不引用）、JSON 字符串桥
+  契约（alpha-core 类型无法跨 crate derive Record，与 web/desktop 同一 serde
+  字段口径）、错误映射（AlphaError → MobileError 类型化异常，Display 全文
+  透传）、线程模型（analyze_symbol 形 async 体同步 → per-call current-thread
+  运行时驱动，对象纯数据 Send+Sync）、构建管线与后续 TODO 映射。
+  骨架 crate mobile/ → alpha-mobile（从 workspace exclude 移入 members，随
+  lint/test 门禁覆盖）：lib.rs（setup_scaffolding! + 重导出）/ state.rs
+  （MobileCore 观察列表+配置槽+引擎、MobileError=uniffi::Error+thiserror、
+  FFI 面 quote_json/analyze_json/status_json，单测 11 例）/ market.rs（与
+  桌面同算法确定性演示行情，单测 5 例——其中「快照 ≡ 序列末根」倒逼生成器
+  与序列逐 draw 同序，修掉初版抽取序不同导致的口径谎言）。crate-type 三型
+  （lib/cdylib/staticlib）齐备。
+  非交互假设（文档 §11 编号）：①台账 L118 沿顺序假设；②uniffi=0.25
+  proc-macro-only（无 UDL 副本，消除双定义漂移）pin 不升级；③JNI 逃生舱
+  后续启用；④JSON 桥非 Record；⑤进 members（纯 Rust 无 SDK 依赖）；
+  ⑥per-call 运行时；⑦观察列表外一律 InvalidSymbol。两处编译期适配已注明：
+  uniffi 0.25 FFI 参数不支持 &str（改 owned String）；setup_scaffolding 展开
+  码命中 rustc unpredictable_function_pointer_comparisons（crate 级 allow，
+  调用处 allow 不传导）。
+  真机验收边界（文档 §12 编号）：①uniffi-bindgen 生成 Kotlin 绑定 + 真机
+  加载 .so；②Swift staticlib 链接；③主线程调用禁忌/后台调度落实；④JNI
+  回调实战场（TODO 272）；⑤多线程并发调用压测。
+  门禁：check-lint.sh ✅（workspace clippy 含新成员）/ 全仓测试 ✅（20 段
+  ok，alpha-mobile 16 例）/ check-cross-platform.sh 四步 ✅ /
+  check-desktop.sh [1-5/5] ✅）
 - [ ] 搭建 Android Kotlin + Rust 混合开发环境（Jetpack Compose）
 - [ ] 实现 iOS Swift + Rust 集成（SwiftUI + UniFFI）
 - [ ] 开发移动端特有的推送通知和后台同步
