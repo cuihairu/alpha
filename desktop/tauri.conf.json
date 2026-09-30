@@ -3,14 +3,14 @@
     "beforeBuildCommand": "cd ../web && npm run build",
     "beforeDevCommand": "cd ../web && npm start",
     "devPath": "http://localhost:8080",
-    "distDir": "../web/dist"
+    "distDir": "../web/dist",
+    "withGlobalTauri": true
   },
   "package": {
     "productName": "Alpha Finance",
     "version": "0.1.0"
   },
   "tauri": {
-    "withGlobalTauri": true,
     "allowlist": {
       "all": false,
       "shell": {

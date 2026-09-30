@@ -11,10 +11,17 @@
 #   1. tauri.conf.json 可解析且必填字段齐全（identifier/distDir/devPath/窗口尺寸）；
 #   2. bundle.icon 列出的文件真实存在（否则打包期才炸）；
 #   3. distDir 存在且含 index.html（否则窗口全白——骨架的核心诉求之一）；
-#   4. allowlist 放开的 API 在 desktop/Cargo.toml 里确实启用了对应 tauri 特性
+#   4. 兜底壳用的 Tauri 版本契约：全局 API 开关在 **build** 段（v1 语义；v2 才是
+#      tauri 段，字段名/段位置写错只会在 tauri_build::build() 运行时才炸），
+#      且兜底壳代码里不得出现 v2 的 ipcRenderer（v1 全局 API 直接提供 invoke）；
+#   5. allowlist 放开的 API 在 desktop/Cargo.toml 里确实启用了对应 tauri 特性
 #      （allowlist 与 Rust feature 不一致是运行期 panic 的经典来源）；
-#   5. 无孤儿配置：真正的 crate 根是 desktop/，desktop/src-tauri/ 不应存在
+#   6. 无孤儿配置：真正的 crate 根是 desktop/，desktop/src-tauri/ 不应存在
 #      （早期脚手架残留的 tauri.conf.json 会让人改错文件）。
+#
+# 注：配置 schema 本身（字段名/层级是否匹配 Tauri 1.x 的 deny_unknown_fields）
+# 由 tests/tauri_config.rs 用 tauri-utils 走 tauri-build 同一条解析路径校验，
+# 覆盖在 [4/4]；本脚本只做无需编译的快速检查。
 #
 # 用法：scripts/check-desktop.sh
 
@@ -86,11 +93,33 @@ else:
             f"build.distDir 缺少 index.html（窗口会全白）: {dist_dir}/index.html"
         )
 
-# 4) 兜底壳依赖全局 API → 必须 withGlobalTauri
-if not tauri.get("withGlobalTauri"):
+# 4) 兜底壳依赖全局 API → build 段必须 withGlobalTauri（v1 语义）
+if not build.get("withGlobalTauri"):
     errors.append(
-        "tauri.withGlobalTauri 未开启：distDir 兜底壳通过 window.__TAURI__ 调 Rust 命令"
+        "build.withGlobalTauri 未开启：distDir 兜底壳通过 window.__TAURI__ 调 Rust 命令"
     )
+if tauri.get("withGlobalTauri") is not None:
+    errors.append(
+        "tauri.withGlobalTauri 不是 Tauri 1.x 的合法字段（v1 该字段属于 build 段，"
+        "放在 tauri 段会让 tauri_build::build() 因 deny_unknown_fields 直接失败）"
+    )
+
+# 4b) 兜底壳代码的 IPC 入口必须是 v1 的 window.__TAURI__.invoke
+if dist_dir.is_dir():
+    shell_path = dist_dir / "desktop-shell.js"
+    if not shell_path.is_file():
+        errors.append(f"兜底壳脚本缺失: {shell_path}")
+    else:
+        shell = shell_path.read_text(encoding="utf-8")
+        # 去掉注释后再断言：注释里可以解释「为什么不用 v2 的 ipcRenderer」
+        code = re.sub(r"/\*.*?\*/", "", shell, flags=re.S)
+        code = re.sub(r"(?m)^\s*//.*$", "", code)
+        if "window.__TAURI__" not in code:
+            errors.append("兜底壳未使用 window.__TAURI__（需 build.withGlobalTauri 注入）")
+        if "ipcRenderer" in code:
+            errors.append(
+                "兜底壳代码出现 ipcRenderer：那是 Tauri v2 的 API，v1 全局 API 直接提供 invoke"
+            )
 
 # 5) allowlist 与 Cargo.toml 的 tauri 特性对齐
 allow = tauri.get("allowlist", {})
@@ -159,9 +188,9 @@ echo "--- [3/4] 框架层 clippy（--no-default-features，无需 GUI 系统库�
 cargo clippy -p alpha-desktop --no-default-features --all-targets -- -D warnings
 ok "框架层 clippy 零警告"
 
-echo "--- [4/4] 框架层单测（--no-default-features）"
-cargo test -p alpha-desktop --no-default-features --lib
-ok "框架层单测通过"
+echo "--- [4/4] 框架层单测 + tauri.conf.json 契约测试（--no-default-features）"
+cargo test -p alpha-desktop --no-default-features --all-targets
+ok "框架层单测通过（含 tests/tauri_config.rs 配置契约）"
 
 echo "=== 桌面端框架门禁全部通过 ==="
 info "GUI 接线层（gui 特性）由 CI Desktop (macOS) 作业编译验证：cargo test -p alpha-desktop --all-targets"

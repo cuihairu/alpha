@@ -15,12 +15,12 @@ Tauri 写死为直接依赖，整个包在 Linux CI 上无法编译——本仓�
 
 | 层 | 位置 | 依赖 | 验证方式 |
 | --- | --- | --- | --- |
-| 框架层 | `desktop/src/lib.rs` + 各模块 | std + alpha-core + chrono/csv/serde | 任意 Linux runner：`cargo test -p alpha-desktop --no-default-features --lib` |
+| 框架层 | `desktop/src/lib.rs` + 各模块 | std + alpha-core + chrono/csv/serde | 任意 Linux runner：`cargo test -p alpha-desktop --no-default-features --all-targets` |
 | 接线层 | `desktop/src/gui.rs`、`main.rs`、`tauri.conf.json` | Tauri（`gui` 特性） | CI `Desktop (macOS)`：`cargo test -p alpha-desktop --all-targets` |
 
 接线层的职责只有三件：解析平台路径 → 委派框架层 → 映射错误给前端。
 所有业务逻辑都在框架层，因此 macOS 作业覆盖的是极薄的胶水代码，而逻辑正确性
-由 91 个可在 Linux 上跑的框架层单测保证。
+由 91 个可在 Linux 上跑的框架层单测 + 10 个配置契约测试保证。
 
 ```
 frontend (web/dist)  ──invoke──▶  gui.rs（#[tauri::command] 薄包装）
@@ -55,8 +55,8 @@ frontend (web/dist)  ──invoke──▶  gui.rs（#[tauri::command] 薄包装
 Tauri 窗口会全白——骨架阶段就该堵住。
 
 做法：把兜底壳 `web/dist/index.html` + `web/dist/desktop-shell.js` 作为**受版本控制**
-的文件提交（`.gitignore` 加例外），并在 `tauri.conf.json` 打开 `withGlobalTauri`，
-让壳通过 `window.__TAURI__.ipcRenderer` 调用 Rust 命令：
+的文件提交（`.gitignore` 加例外），并在 `tauri.conf.json` 的 **`build` 段**打开
+`withGlobalTauri`，让壳通过 `window.__TAURI__.invoke(...)` 调用 Rust 命令：
 
 ```
 initialize_app → get_app_info → get_real_time_quotes → analyze_symbol
@@ -67,22 +67,44 @@ initialize_app → get_app_info → get_real_time_quotes → analyze_symbol
 `script-src 'unsafe-inline'`）。执行 `cd web && npm run build` 后真实前端会覆盖这两个
 文件，届时 `git status` 显示该文件变更属预期。
 
+### 3.1 v1 的两个 API 约定（写错只会让 CI 变红）
+
+| 事项 | Tauri 1.x（本仓口径） | Tauri 2.x（易误用） |
+| --- | --- | --- |
+| 全局 API 开关 | `build.withGlobalTauri`（**build 段**） | `app.withGlobalTauri`（app 段） |
+| 前端 IPC 入口 | `window.__TAURI__.invoke(cmd, args)` | `window.__TAURI__.ipcRenderer.invoke(...)` |
+
+两处都不是类型系统能拦的：字段段写错由 `Config` 的 `deny_unknown_fields` 在
+`tauri_build::build()` **运行时**抛出，而那一步需要 `gui` 特性（Linux runner 缺
+WebKitGTK，跑不了）——于是只能等 CI 的 `Desktop (macOS)` 作业变红才暴露；
+`ipcRenderer` 更隐蔽，是运行期 `undefined is not a function`，窗口静默无响应。
+两者都被下节的契约测试锁住。
+
 ## 4. 构建门禁
 
 `scripts/check-desktop.sh`（非交互，CI 作业 `Desktop Framework` 与本地一致）：
 
-1. **配置自洽性**（`tauri.conf.json`）：必填字段（identifier / productName / devPath /
-   窗口尺寸）、`bundle.icon` 文件真实存在、`distDir` 存在且含 `index.html`、
-   `withGlobalTauri` 已开、**allowlist 放开的 API 在 `desktop/Cargo.toml` 里确实启用了
-   对应 tauri 特性**（两者漂移是运行期 panic 的经典来源）、`desktop/src-tauri/` 不存在。
+1. **配置自洽性**（`tauri.conf.json`，纯 Python 快速检查）：必填字段（identifier /
+   productName / devPath / 窗口尺寸）、`bundle.icon` 文件真实存在、`distDir` 存在且含
+   `index.html`、**`build.withGlobalTauri` 已开且不在 `tauri` 段**、兜底壳代码用
+   `window.__TAURI__` 且无 `ipcRenderer`、**allowlist 放开的 API 在
+   `desktop/Cargo.toml` 里确实启用了对应 tauri 特性**（两者漂移是运行期 panic 的
+   经典来源）、`desktop/src-tauri/` 不存在。
 2. **无孤儿配置**：真正的 crate 根是 `desktop/`，早期脚手架残留的
    `desktop/src-tauri/tauri.conf.json` 已删除（它 allowlist/devPath 与生效配置不同，
    留着只会让人改错文件）。
 3. **框架层 clippy**：`cargo clippy -p alpha-desktop --no-default-features --all-targets -- -D warnings`。
-4. **框架层单测**：`cargo test -p alpha-desktop --no-default-features --lib`。
+4. **框架层单测 + 配置契约测试**：`cargo test -p alpha-desktop --no-default-features --all-targets`。
 
-第 1 步已用反向用例验证（去掉 `withGlobalTauri`、给 allowlist 加未启用的 `fs-exists`、
-抽走 `distDir/index.html` 均被门禁拦下）。
+`desktop/tests/tauri_config.rs`（10 例）是第 1 步的**编译期加强版**：用
+`tauri-utils` 走 `tauri_build::build()` 完全相同的解析路径
+（`config::parse::read_from` → `serde_json::from_value::<Config>`），把字段名/段位置
+是否匹配 Tauri 1.x schema 从「CI macOS 运行时才发现」前移到本地与常规 CI；另加
+兜底壳 ↔ 接线层契约（命令名两侧一致、v1 IPC 入口、distDir 有入口文件、无孤儿目录）。
+
+第 1 步与契约测试均已用反向用例验证：把 `withGlobalTauri` 挪回 `tauri` 段、把兜底壳
+的 `api.invoke` 改成 `api.ipcRenderer.invoke`、给 allowlist 加未启用的 `fs-exists`、
+抽走 `distDir/index.html` —— 均被拦下（改配置时 10 例中 9 例转红）。
 
 ## 5. 本轮不做的（留给后续 TODO）
 

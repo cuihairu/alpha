@@ -1,7 +1,8 @@
 /**
  * 桌面骨架兜底壳的前端逻辑（TODO L112）。
  *
- * 只用 Tauri 全局 API（window.__TAURI__，由 tauri.conf.json 的 withGlobalTauri 暴露），
+ * 只用 Tauri v1 全局 API（window.__TAURI__，由 tauri.conf.json 的 build.withGlobalTauri
+ * 注入；v1 全局 API 是 window.__TAURI__.invoke(cmd, args)，没有 v2 的 ipcRenderer），
  * 不引入 npm 依赖 —— 保证 distDir 只有这两个文件时窗口依然可用。四条命令对应
  * desktop/src/gui.rs 的 #[tauri::command]：
  *   initialize_app → get_app_info → get_real_time_quotes → analyze_symbol
@@ -13,7 +14,8 @@
 (function () {
   "use strict";
 
-  var ipc = window.__TAURI__ && window.__TAURI__.ipcRenderer;
+  var api = window.__TAURI__ || null;
+  var invoke = api && typeof api.invoke === "function" ? api.invoke.bind(api) : null;
   var banner = document.getElementById("banner");
 
   function setText(id, text, cls) {
@@ -36,7 +38,7 @@
     return value === null || value === undefined ? "—" : Number(value).toFixed(digits);
   }
 
-  if (!ipc) {
+  if (!invoke) {
     banner.textContent = "未检测到 Tauri 运行时";
     document.getElementById("hint").innerHTML =
       "本页面是桌面端兜底壳：请用 <code>cargo run -p alpha-desktop</code> 或 <code>tauri dev</code> 启动窗口；" +
@@ -51,8 +53,7 @@
 
   var symbols = [];
 
-  ipc
-    .invoke("initialize_app")
+  invoke("initialize_app")
     .then(function (payload) {
       var cfg = payload.config;
       symbols = cfg.symbols || [];
@@ -67,7 +68,7 @@
         kv("主题", esc(cfg.theme)) +
         kv("自动刷新", cfg.auto_update ? "开" : "关") +
         problems;
-      return ipc.invoke("get_app_info");
+      return invoke("get_app_info");
     })
     .then(function (info) {
       document.getElementById("app-info").innerHTML =
@@ -77,7 +78,7 @@
       return symbols;
     })
     .then(function (list) {
-      return ipc.invoke("get_real_time_quotes", { symbols: list }).then(function (quotes) {
+      return invoke("get_real_time_quotes", { symbols: list }).then(function (quotes) {
         var rows = quotes
           .map(function (q) {
             var cls = q.price >= q.open ? "up" : "down";
@@ -96,25 +97,23 @@
     })
     .then(function (symbol) {
       if (!symbol) throw new Error("配置未给出任何标的");
-      return ipc
-        .invoke("analyze_symbol", {
-          request: { symbol: symbol, timeframe: "1m", indicators: ["RSI", "SMA20"] },
-        })
-        .then(function (result) {
-          var indicators = result.indicators
-            .map(function (ind) {
-              var values = ind.values || [];
-              var last = values.length ? values[values.length - 1] : null;
-              return kv(ind.name, num(last, 4));
-            })
-            .join("");
-          document.getElementById("analysis").innerHTML =
-            kv("标的", esc(result.symbol)) +
-            kv("结论", '<span class="badge">' + esc(result.recommendation) + "</span>") +
-            kv("置信度", num(result.confidence, 4)) +
-            kv("波动率", num(result.risk_metrics.volatility, 4)) +
-            indicators;
-        });
+      return invoke("analyze_symbol", {
+        request: { symbol: symbol, timeframe: "1m", indicators: ["RSI", "SMA20"] },
+      }).then(function (result) {
+        var indicators = result.indicators
+          .map(function (ind) {
+            var values = ind.values || [];
+            var last = values.length ? values[values.length - 1] : null;
+            return kv(ind.name, num(last, 4));
+          })
+          .join("");
+        document.getElementById("analysis").innerHTML =
+          kv("标的", esc(result.symbol)) +
+          kv("结论", '<span class="badge">' + esc(result.recommendation) + "</span>") +
+          kv("置信度", num(result.confidence, 4)) +
+          kv("波动率", num(result.risk_metrics.volatility, 4)) +
+          indicators;
+      });
     })
     .catch(function (error) {
       setText("analysis", error && error.message ? error.message : String(error), "err");

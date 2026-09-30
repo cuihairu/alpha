@@ -45,6 +45,9 @@ alpha-core = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+# 纯 Rust 的 Tauri 配置解析库（无 GUI 系统依赖）：供 tests/tauri_config.rs
+# 走与 tauri-build::build() 相同的解析路径，在无 GUI 依赖的环境校验配置 schema
+tauri-utils = "1.6"
 
 [[bin]]
 name = "alpha-desktop"
