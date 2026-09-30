@@ -44,7 +44,9 @@ async-trait = { workspace = true }
 
 # 序列化
 serde = { workspace = true }
-serde_json = { workspace = true }
+# float_roundtrip：默认的 f64 快速解析有 ±1 ulp 误差，本地数据库（L116）的
+# 快照往返必须逐位一致，否则「往返一致」单测在价格末位抖动
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 
 # 日志
 tracing = { workspace = true }

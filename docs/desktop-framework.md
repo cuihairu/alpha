@@ -204,7 +204,7 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 | L113 文件系统集成与本地导出 | ✅ 已落地（见 §6）：用户自选路径导出闭环 | 覆盖已存在文件直接替换（写前确认未做，留待后续） |
 | L114 系统通知与托盘 | ✅ 已闭环（见 §7）：通知模型/队列/托盘菜单状态机 + 告警检查链（check_alerts）+ 托盘接线（platform.rs） | 通知点击唤起主窗；托盘图标随状态换图（需多套图标资产）；定时轮询取数 |
 | L115 窗口管理与主题适配 | ✅ 已落地（见 §8）：窗口几何持久化 + 多显示器放置 + 深浅色跟随/覆盖 | 记忆「上次所用显示器」（现按可见性判定）；托盘图标随主题换图 |
-| L116 本地数据库同步与离线模式 | `FileKeyValueStore` 是雏形（KV 语义够用，非查询型） | 换 SQLite/本地缓存并做同步冲突策略 |
+| L116 本地数据库同步与离线模式 | ✅ 已落地（见 §9）：kv 快照 + 连通探测 + 指纹增量同步 + 离线降级读 | 换 SQLite（出现范围查询需求时）；真实 HTTP 远端实现（QuoteRemote 缝已留） |
 | L117 快捷键与右键菜单 | `global-shortcut-all` 特性已在 allowlist | 注册快捷键与菜单事件 |
 
 另：演示行情是确定性生成的占位数据，接真实后端（api-gateway）时只需替换
@@ -407,3 +407,64 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
 壳层跟随（native 装饰由 conf System 跟随，两边一致性取决于 WM）；Linux 上
 托盘图标不随主题换图（单图标资产，已登记后续）；多屏 DPI 混排时物理像素
 口径的还原精度。
+
+## 9. L116 本地数据库同步和离线模式（2026-09-30）
+
+口径：**降级判定与增量语义全在框架层，网络 IO 收敛为两处最小实现**——
+`/health` 连通探测（`probe_health`，tokio TcpStream 上的最小 HTTP GET）与
+远端取数缝 `QuoteRemote`（生产实现 `SyntheticRemote` 即演示行情口径）。本地
+数据库复用 kv 目录的 `FileKeyValueStore`（键 `quotes/{symbol}` → JSON 快照行）。
+
+```
+读路径  get_offline_quotes ──▶ offline::quotes_request（探测连通）
+                                 │ quotes_from（降级矩阵）
+                                 ▼
+        在线：远端拉取 → 写穿落库 → live    单标的拉取失败 → 缓存降级 → cache
+        离线：只读缓存 → cache              缓存也缺失 → missing（宁缺毋滥）
+
+同步    sync_offline_data ──▶ offline::sync_request（探测连通）
+                                 │ sync_from（增量）
+                                 ▼
+        离线 → 空报告 online=false（无操作不是错误）
+        在线：远端 seq == 本地 seq → unchanged（跳过）
+              ≠ 或本地无 → 落库 applied     拉取失败 → failed（本地保留）
+```
+
+框架层断言（`desktop/src/offline.rs`，17 例，Linux 门禁可跑）：
+
+* `content_seq` 确定性指纹（价格位模式+成交量 FNV-1a）：同内容同指纹、
+  价格/成交量任一变化指纹必变——增量的比较基准；
+* 探测：本地 TcpListener 假服务端 200 → 在线；连接拒绝/503/超时/https
+  （纯 TCP 无 TLS，保守判离线）→ 离线——真实网络 IO 在单测内闭环；
+* 读路径降级矩阵：在线拉取成功写穿落库（live）、在线单标的失败落缓存
+  （cache）、离线只读缓存且缺失入 `missing`、空列表 `Err`、**落库失败响亮
+  上抛**（持久化是本条核心，静默丢缓存不可接受）；
+* 同步：首次 applied → 二次 unchanged（增量语义核心）→ 内容变化再 applied；
+  拉取失败本地保留；离线空报告；serde 往返锁定载荷/报告字段名（前端契约）。
+
+接线：`AppState` 内嵌 `kv`（`FileKeyValueStore`，指向 `paths.kv_dir()`）、
+`remote`（`Arc<dyn QuoteRemote>`，可替换缝）、`api_url`（bootstrap 从生效
+配置注入——探测目标随用户配置走）；`gui.rs` 新增两命令（`get_offline_quotes`/
+`sync_offline_data`，注册命令 11 → 13，薄度上限 220 → 260），同步范围由前端
+传观察列表（与 `get_real_time_quotes` 同构，避免命令体读配置的 reach-around）。
+
+两个实现要点：
+
+1. **serde_json 加 `float_roundtrip` 特性**：默认的 f64 解析有 ±1 ulp 误差，
+   快照往返后价格末位抖动会让「往返一致」单测与指纹比对失效；本地数据库的
+   契约是逐位一致，故桌面 crate 显式开启精确解析。
+2. **指纹（seq）以 u64 落库**，比对发生在「存储的 seq ↔ 由本次远端数据现算
+   的 seq」之间——即使解析有 ulp 抖动，增量语义也不受影响（seq 字段本身
+   整数精确）；`float_roundtrip` 后连数据本体也逐位一致。
+
+非交互假设（自行判定，已注明）：本地数据库 = 文件 KV（L38 注释「文件/SQLite」
+的文件路线，SQLite 等出现范围查询需求再换，读写面已收拢在 offline.rs）；
+增量按记录内容指纹比对（服务端尚无版本号/水位协议，`QuoteRemote` 实现替换
+即可接真实协议，`sync_from` 语义不变）；https 目标无法纯 TCP 探测（保守判
+离线），方括号 IPv6 不支持；同步方向只读行情（本地告警/配置无远端契约，
+不上传）。
+
+真机验收边界（本地单测用假服务端/假 .pc，以下需真实环境人工观察）：真机
+杀掉 api-gateway 后壳层离线卡片显示「离线（读本地缓存）」且行情来自 cache
+标记；重启网关后「联网增量同步」报告 applied/unchanged 分布；慢网（>500ms）
+下的探测超时表现；真实 https 后端的探测策略（需 TLS 探测实现，当前保守判离线）。

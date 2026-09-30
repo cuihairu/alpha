@@ -23,6 +23,7 @@ pub fn key_filename(key: &str) -> String {
 }
 
 /// 基于目录的文件键值存储（`&self` 方法，线程安全要求由 `Mutex` 无关——每次调用独立打开文件）
+#[derive(Debug, Clone)]
 pub struct FileKeyValueStore {
     dir: PathBuf,
 }

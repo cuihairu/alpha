@@ -18,6 +18,13 @@ pub struct AppState {
     /// 窗口几何节流器（L115）：接线层移动/缩放事件高频触发，经此判定
     /// 是否值得落盘；返回 `&Mutex` 而非守卫，调用方自行控制临界区
     window_tracker: std::sync::Mutex<crate::window::WindowStateTracker>,
+    /// 本地数据库（L116）：kv 目录的文件键值存储，离线快照/同步水位落这里
+    kv: crate::kv::FileKeyValueStore,
+    /// 远端取数缝（L116）：生产为演示行情口径 [`crate::offline::SyntheticRemote`]，
+    /// 真实后端接入时替换实现，同步/降级语义不动
+    remote: std::sync::Arc<dyn crate::offline::QuoteRemote>,
+    /// 后端地址（L116 连通探测目标；来自生效配置，缺省 `DEFAULT_API_URL`）
+    api_url: String,
 }
 
 impl AppState {
@@ -28,20 +35,17 @@ impl AppState {
     ) -> DesktopResult<Self> {
         let paths = AppPaths::new(config_dir, data_dir);
         paths.ensure()?;
-        Ok(Self {
-            engine: AnalysisEngine::new(),
-            paths,
-            notifications: std::sync::Mutex::new(notify::NotificationQueue::new(
-                notify::DEFAULT_QUEUE_CAPACITY,
-            )),
-            window_tracker: std::sync::Mutex::new(crate::window::WindowStateTracker::default()),
-        })
+        Ok(Self::with_paths(paths))
     }
 
     /// 仅构造不建目录（测试/只读场景）
     pub fn with_paths(paths: AppPaths) -> Self {
+        let kv = crate::kv::FileKeyValueStore::new(paths.kv_dir());
         Self {
             engine: AnalysisEngine::new(),
+            kv,
+            remote: std::sync::Arc::new(crate::offline::SyntheticRemote),
+            api_url: crate::config::DEFAULT_API_URL.to_string(),
             paths,
             notifications: std::sync::Mutex::new(notify::NotificationQueue::new(
                 notify::DEFAULT_QUEUE_CAPACITY,
@@ -71,6 +75,21 @@ impl AppState {
     pub fn window_tracker(&self) -> &std::sync::Mutex<crate::window::WindowStateTracker> {
         &self.window_tracker
     }
+
+    /// 本地数据库（L116）：离线快照与同步水位的读写面
+    pub fn kv(&self) -> &crate::kv::FileKeyValueStore {
+        &self.kv
+    }
+
+    /// 远端取数缝（L116）：命令体只透传，实现可替换
+    pub fn remote(&self) -> &std::sync::Arc<dyn crate::offline::QuoteRemote> {
+        &self.remote
+    }
+
+    /// 后端地址（L116 连通探测目标）
+    pub fn api_url(&self) -> &str {
+        &self.api_url
+    }
 }
 
 /// 启动应用：加载/自举配置 → 落盘可用配置 → 建目录 → 初始化引擎
@@ -92,6 +111,9 @@ pub fn bootstrap_app(
     paths.ensure()?;
     let state = AppState {
         engine: AnalysisEngine::new(),
+        kv: crate::kv::FileKeyValueStore::new(paths.kv_dir()),
+        remote: std::sync::Arc::new(crate::offline::SyntheticRemote),
+        api_url: config.api_url.clone(),
         paths,
         notifications: std::sync::Mutex::new(notify::NotificationQueue::new(
             notify::DEFAULT_QUEUE_CAPACITY,
@@ -226,6 +248,52 @@ mod tests {
             tracker.observe(chrono::Utc::now(), geometry),
             Some(geometry),
             "首次事件应判定落盘"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_db_and_remote_are_usable_right_after_bootstrap() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let state = AppState::bootstrap(tmp.path().join("config"), tmp.path().join("data"))
+            .expect("启动应成功");
+        assert_eq!(
+            state.api_url(),
+            crate::config::DEFAULT_API_URL,
+            "缺省探测目标"
+        );
+        // 本地数据库读写闭环
+        let record = crate::offline::QuoteRecord::from_market(
+            crate::market::synthetic_quote("600519"),
+            chrono::Utc::now(),
+        );
+        crate::offline::save_quote(state.kv(), &record)
+            .await
+            .expect("落库");
+        let loaded = crate::offline::load_quote(state.kv(), "600519")
+            .await
+            .expect("读取")
+            .expect("应有快照");
+        assert_eq!(loaded, record, "经 state.kv() 的读写闭环");
+        // 远端缝可用
+        let fetched = state.remote().fetch("000001").await.expect("演示远端");
+        assert_eq!(fetched.symbol, "000001");
+    }
+
+    #[tokio::test]
+    async fn bootstrap_app_carries_configured_api_url_into_state() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let config_dir = tmp.path().join("config");
+        let config = crate::config::AppConfig {
+            api_url: "http://backend.internal:9000".to_string(),
+            ..crate::config::AppConfig::default()
+        };
+        crate::config::save(&config_dir.join(crate::paths::CONFIG_FILE_NAME), &config)
+            .expect("写配置");
+        let (state, _payload) = bootstrap_app(&config_dir, tmp.path().join("data")).expect("启动");
+        assert_eq!(
+            state.api_url(),
+            "http://backend.internal:9000",
+            "探测目标应取生效配置"
         );
     }
 }

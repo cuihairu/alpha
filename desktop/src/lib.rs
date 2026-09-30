@@ -16,8 +16,10 @@
 //!
 //! 边界：L112 只落「框架」。L113 原生文件集成（用户自选路径导出
 //! [`export::export_to_file`]/[`export::export_symbol_request`] + `dialog.save`
-//! 链路）与 L114 系统通知/托盘（[`notify`]：通知模型/有界队列/托盘状态/
-//! 告警触发文案 + 接线层平台 API 展示）均已落地；平台 API 调用只在接线层。
+//! 链路）、L114 系统通知/托盘（[`notify`]：通知模型/有界队列/托盘状态/
+//! 告警触发文案 + 接线层平台 API 展示）、L115 窗口几何持久化（[`window`]）与
+//! L116 本地数据库同步/离线模式（[`offline`]：kv 快照、连通探测、增量同步）
+//! 均已落地；平台 API 调用只在接线层。
 
 #![warn(missing_docs)]
 
@@ -31,6 +33,7 @@ pub mod ipc;
 pub mod kv;
 pub mod market;
 pub mod notify;
+pub mod offline;
 pub mod paths;
 pub mod state;
 pub mod window;
@@ -62,6 +65,10 @@ pub use notify::{
     alert_notification, check_request, notification_id, notify_request, tray_action,
     tray_menu_model, tray_status_request, Notification, NotificationLevel, NotificationQueue,
     TrayAction, TrayEntry, TrayState, DEFAULT_QUEUE_CAPACITY,
+};
+pub use offline::{
+    content_seq, load_quote, probe_health, save_quote, sync_request, QuoteRecord, QuoteRemote,
+    QuoteView, QuotesPayload, SyncReport, SyntheticRemote,
 };
 pub use paths::AppPaths;
 pub use state::{bootstrap_app, AppState};

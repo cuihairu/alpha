@@ -15,6 +15,10 @@
  * prefers-color-scheme 并实时响应系统切换——Tauri 1.x 原生装饰无运行期
  * set_theme（窗口主题由 tauri.conf.json 创建期跟随），覆盖落在内容层
  * data-theme + CSS 变量（index.html）。窗口几何持久化在 Rust 侧，不经前端。
+ * 离线缓存与同步（TODO L116）：get_offline_quotes 读路径带来源标记
+ * （live=远端实拉并落库 / cache=本地降级，缺失标的进 missing 如实上报）；
+ * sync_offline_data 按内容指纹增量落库（Rust 侧探测 api_url 的 /health 判
+ * 连通，离线时返回空报告——降级不是错误）。本地库 = kv 目录文件存储。
  *
  * 非 Tauri 环境（普通浏览器直接打开 web/dist/index.html）不报错，改为提示先构建前端。
  */
@@ -277,6 +281,72 @@
         })
         .then(function () {
           alertBtn.disabled = false;
+        });
+    });
+  }
+
+  // L116 离线缓存与同步：降级语义（在线拉取失败落缓存、离线只读缓存、
+  // 缓存缺失进 missing）全在 Rust 侧，壳层只渲染来源标记与差异。
+  function renderOffline(payload) {
+    document.getElementById("offline-result").innerHTML =
+      kv("连通性", payload.online ? "在线" : "离线（读本地缓存）") +
+      (payload.quotes || [])
+        .map(function (q) {
+          var cls = q.price >= q.open ? "up" : "down";
+          return (
+            '<div class="kv"><span>' + esc(q.symbol) +
+            '</span><span><span class="' + cls + '">' + num(q.price, 2) +
+            "</span> [" + esc(q.source) + "]</span></div>"
+          );
+        })
+        .join("") +
+      (payload.missing && payload.missing.length
+        ? kv("无数据", '<span class="err">' + esc(payload.missing.join("，")) + "</span>")
+        : "");
+  }
+
+  function renderSync(report) {
+    document.getElementById("sync-result").innerHTML =
+      kv("连通性", report.online ? "在线" : "离线（未同步）") +
+      kv("增量落库", esc((report.applied || []).join("，") || "—")) +
+      kv("指纹一致跳过", String(report.unchanged)) +
+      kv("拉取失败", '<span class="err">' + esc((report.failed || []).join("，") || "—") + "</span>");
+  }
+
+  var offlineBtn = document.getElementById("offline-btn");
+  if (offlineBtn) {
+    offlineBtn.addEventListener("click", function () {
+      if (!symbols.length) {
+        setText("offline-result", "无可读取标的（配置 symbols 为空）", "err");
+        return;
+      }
+      invoke("get_offline_quotes", { symbols: symbols })
+        .then(renderOffline)
+        .catch(function (error) {
+          setText(
+            "offline-result",
+            "离线读取失败：" + (error && error.message ? error.message : String(error)),
+            "err"
+          );
+        });
+    });
+  }
+
+  var syncBtn = document.getElementById("sync-btn");
+  if (syncBtn) {
+    syncBtn.addEventListener("click", function () {
+      if (!symbols.length) {
+        setText("sync-result", "无可同步标的（配置 symbols 为空）", "err");
+        return;
+      }
+      invoke("sync_offline_data", { symbols: symbols })
+        .then(renderSync)
+        .catch(function (error) {
+          setText(
+            "sync-result",
+            "同步失败：" + (error && error.message ? error.message : String(error)),
+            "err"
+          );
         });
     });
   }

@@ -183,6 +183,43 @@ async fn check_alerts(
     Ok(fired)
 }
 
+/// 离线感知行情读取（L116）：探测 → 在线拉取+写穿落库 / 离线读缓存，
+/// 降级矩阵（在线拉取失败落缓存、缓存缺失入 missing）全在框架层 `quotes_request`
+#[tauri::command]
+async fn get_offline_quotes(
+    symbols: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::offline::QuotesPayload, String> {
+    crate::offline::quotes_request(
+        state.kv(),
+        state.remote().as_ref(),
+        &symbols,
+        state.api_url(),
+        Utc::now(),
+    )
+    .await
+    .map_err(|e: DesktopError| e.to_string())
+}
+
+/// 联网恢复增量同步（L116）：内容指纹比对只落变更，离线返回空报告（降级非错误），
+/// 语义全在框架层 `sync_request`；同步范围由前端传观察列表（与 `get_real_time_quotes`
+/// 同构，配置已在 `initialize_app` 下行）
+#[tauri::command]
+async fn sync_offline_data(
+    symbols: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::offline::SyncReport, String> {
+    crate::offline::sync_request(
+        state.kv(),
+        state.remote().as_ref(),
+        &symbols,
+        state.api_url(),
+        Utc::now(),
+    )
+    .await
+    .map_err(|e: DesktopError| e.to_string())
+}
+
 /// 启动 Tauri 应用（进程入口，供 `main.rs` 调用）
 pub fn run() {
     tracing_subscriber::fmt::init();
@@ -208,7 +245,9 @@ pub fn run() {
             send_notification,
             list_notifications,
             set_tray_status,
-            check_alerts
+            check_alerts,
+            get_offline_quotes,
+            sync_offline_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

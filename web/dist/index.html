@@ -100,6 +100,15 @@
         <div id="tray-status">—</div>
         <p><button id="alert-btn" type="button">布防并检查告警（上穿：现价 −1%）</button></p>
       </div>
+      <div class="card">
+        <h2>离线缓存与同步 <code>get_offline_quotes</code> <code>sync_offline_data</code></h2>
+        <div id="offline-result">—</div>
+        <div id="sync-result">—</div>
+        <p>
+          <button id="offline-btn" type="button">读取行情（带缓存来源）</button>
+          <button id="sync-btn" type="button">联网增量同步</button>
+        </p>
+      </div>
     </div>
 
     <p class="hint" id="hint"></p>

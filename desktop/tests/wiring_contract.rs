@@ -109,6 +109,8 @@ fn command_bodies_have_no_business_judgement() {
         "list_notifications",
         "set_tray_status",
         "check_alerts",
+        "get_offline_quotes",
+        "sync_offline_data",
     ] {
         let body = command_body(&gui, name);
         let code = strip_rust_comments(&body);
@@ -144,6 +146,8 @@ fn command_bodies_delegate_to_framework_entry_points() {
         ("list_notifications", "recent"),
         ("set_tray_status", "tray_status_request"),
         ("check_alerts", "check_request"),
+        ("get_offline_quotes", "quotes_request"),
+        ("sync_offline_data", "sync_request"),
     ] {
         let body = command_body(&gui, name);
         assert!(
@@ -165,6 +169,8 @@ fn command_bodies_delegate_to_framework_entry_points() {
         "send_notification",
         "set_tray_status",
         "check_alerts",
+        "get_offline_quotes",
+        "sync_offline_data",
     ] {
         let body = command_body(&gui, name);
         assert!(
@@ -211,7 +217,7 @@ fn registered_commands_match_fallback_shell_invocations() {
         .collect();
     assert_eq!(
         registered.len(),
-        11,
+        13,
         "注册命令数应与前端契约一致，实际: {registered:?}"
     );
     for cmd in &registered {
@@ -246,11 +252,12 @@ fn wiring_layer_stays_thin() {
     let gui = gui_source();
     let lines = gui.lines().count();
     assert!(
-        lines < 220,
+        lines < 260,
         "gui.rs 涨到 {lines} 行（接线层应保持薄，业务下沉框架层；L114 通知/托盘
-        三命令后上限 160 → 200，check_alerts 闭环命令后 200 → 220，每命令仍
-        ~20 行薄委派；托盘/通知平台胶水在 src/platform.rs，上限见
-        platform_glue_stays_mechanical）"
+        三命令后上限 160 → 200，check_alerts 闭环命令后 200 → 220，L116 离线
+        两命令后 220 → 260，每命令仍 ~20 行薄委派；托盘/通知平台胶水在
+        src/platform.rs，窗口胶水在 src/window_gui.rs，上限见
+        platform_glue_stays_mechanical / window_glue_stays_mechanical）"
     );
     // 业务模块的函数体不应出现在接线层（抽查两个典型业务函数）
     assert!(!gui.contains("for symbol in"), "接线层不应出现批量循环");
@@ -277,6 +284,9 @@ fn framework_entry_points_are_exported() {
         "save_window_state",
         "theme_pref",
         "resolve_theme",
+        "sync_request",
+        "probe_health",
+        "QuoteRemote",
     ] {
         assert!(
             lib.contains(entry),
@@ -344,6 +354,8 @@ fn shell_commands_have_framework_entry_points() {
         "export_symbol_to_file",
         "check_alerts",
         "set_tray_status",
+        "get_offline_quotes",
+        "sync_offline_data",
     ] {
         assert!(
             shell.contains(&format!("invoke(\"{cmd}\"")),
@@ -483,4 +495,35 @@ fn shell_theme_follows_system_with_override() {
         index.contains("--chip"),
         "既有组件的硬编码底色（badge/code/button）应主题化为变量"
     );
+}
+
+/// L116 离线缓存与同步的前端接线：读路径必须渲染来源标记（live/cache）与
+/// missing（缓存缺失如实上报），同步报告按字段渲染——降级语义在 Rust 侧，
+/// 壳层职责只是如实展示
+#[test]
+fn shell_offline_card_renders_source_and_missing() {
+    let dist = tauri_dist_dir();
+    let shell = std::fs::read_to_string(crate_dir().join(&dist).join("desktop-shell.js"))
+        .expect("读兜底壳");
+    for needle in [
+        "invoke(\"get_offline_quotes\"",
+        "invoke(\"sync_offline_data\"",
+        "q.source",
+        "missing",
+        "applied",
+        "unchanged",
+    ] {
+        assert!(
+            shell.contains(needle),
+            "兜底壳离线卡片应含 {needle}（来源标记/缺失上报/增量报告是前端契约）"
+        );
+    }
+    let index =
+        std::fs::read_to_string(crate_dir().join(&dist).join("index.html")).expect("读兜底壳页面");
+    for id in ["offline-result", "sync-result", "offline-btn", "sync-btn"] {
+        assert!(
+            index.contains(&format!("id=\"{id}\"")),
+            "兜底壳页面应有离线卡片元素 {id}"
+        );
+    }
 }

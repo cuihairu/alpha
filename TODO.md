@@ -204,7 +204,29 @@
   跟随，两边一致性取决于 WM）；④托盘图标不随主题换图（单图标资产，登记后续）；⑤多屏 DPI 混排时
   物理像素口径的还原精度。门禁：check-desktop.sh [1-5/5] ✅ / check-lint.sh ✅ / 全仓测试 ✅ /
   check-cross-platform.sh 四步 ✅；window_gui/gui 的链接与运行由 CI Desktop (macOS) 作业验证）
-- [ ] 实现本地数据库同步和离线模式
+- [x] 实现本地数据库同步和离线模式
+  （✅ 2026-09-30）口径同前五轮：降级判定与增量语义下沉框架层，网络 IO 收敛两处最小实现。
+  框架层新增 offline.rs（零 Tauri）：本地数据库复用 kv 目录 FileKeyValueStore（键 quotes/{symbol}
+  → JSON 快照行，整体存 MarketData 不丢展示字段）；content_seq 内容指纹（价格位模式+成交量
+  FNV-1a，u64 落库）作增量比对基准；probe_health 真实网络 IO（tokio TcpStream 最小 HTTP GET
+  /health，500ms 超时，连接拒绝/503/超时/https → 离线）；读路径降级矩阵 quotes_from（在线拉取
+  写穿落库 live / 单标的失败落缓存 cache / 离线只读缓存 / 缓存缺失入 missing 宁缺毋滥 / 落库失败
+  响亮上抛）；增量同步 sync_from（离线→空报告非错误；在线→指纹同 unchanged 跳过、异或本地无
+  → applied 落库、拉取失败 failed 且本地保留）。远端缝 QuoteRemote trait（Arc 注入 AppState，
+  生产实现 SyntheticRemote=演示行情口径，真实 HTTP 后端只换实现不动语义）。serde_json 加
+  float_roundtrip 特性——默认 f64 解析 ±1 ulp 抖动会破坏「往返一致」与末位一致性，本地数据库
+  契约要求逐位一致。AppState 内嵌 kv/remote/api_url（bootstrap 从生效配置注入探测目标）；
+  gui.rs 两薄命令（get_offline_quotes/sync_offline_data，注册 11 → 13，薄度上限 220 → 260，
+  同步范围由前端传观察列表避免命令体读配置的 reach-around）；壳层离线卡片渲染来源标记与增量
+  报告。契约 wiring_contract 15 → 16 例（shell_offline_card_renders_source_and_missing：invoke+
+  q.source+missing+applied/unchanged+卡片元素；另有两命令入无判断/委派/map_err/壳调用清单、
+  注册数 13、框架入口补 sync_request/probe_health/QuoteRemote）。框架层单测 181（offline +17，
+  state +2，kv 派生 Debug 后既有 13 例不受影响）。
+  真机验收边界（本地单测用假服务端/假 .pc，以下需真实环境人工观察）：①杀掉 api-gateway 后离线
+  卡片显示「离线（读本地缓存）」且行情标 cache；②重启网关后增量同步报告 applied/unchanged
+  分布；③慢网（>500ms）探测超时表现；④真实 https 后端需 TLS 探测实现（当前保守判离线走缓存）。
+  门禁：check-desktop.sh [1-5/5] ✅ / check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh
+  四步 ✅；gui 两命令的链接与运行由 CI Desktop (macOS) 作业验证）
 - [ ] 开发键盘快捷键和右键菜单支持
 
 ## 🔧 Rust 微服务架构
