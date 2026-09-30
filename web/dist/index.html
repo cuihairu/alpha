@@ -38,8 +38,7 @@
       .sub { color: var(--muted); margin-bottom: 24px; }
       .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
       .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
-      .card h2 { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
-      .kv { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+      .card h2 { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }      .kv { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
       .kv span:first-child { color: var(--muted); }
       table { width: 100%; border-collapse: collapse; }
       th, td { text-align: right; padding: 5px 0; border-bottom: 1px solid var(--line); }
@@ -51,6 +50,9 @@
       code { background: #232936; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
       .hint { margin-top: 24px; color: var(--muted); }
       .err { color: var(--up); }
+      button { background: #232936; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 14px; font: inherit; cursor: pointer; }
+      button:disabled { opacity: .45; cursor: default; }
+      button:not(:disabled):hover { border-color: var(--muted); }
     </style>
   </head>
   <body>
@@ -73,6 +75,11 @@
       <div class="card">
         <h2>技术分析 <code>analyze_symbol</code></h2>
         <div id="analysis">—</div>
+      </div>
+      <div class="card">
+        <h2>本地导出 <code>export_symbol_to_file</code></h2>
+        <div id="export-result">—</div>
+        <p><button id="export-btn" type="button">导出首个标的…</button></p>
       </div>
     </div>
 

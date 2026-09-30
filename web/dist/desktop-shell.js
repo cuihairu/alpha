@@ -3,10 +3,11 @@
  *
  * 只用 Tauri v1 全局 API（window.__TAURI__，由 tauri.conf.json 的 build.withGlobalTauri
  * 注入；v1 全局 API 是 window.__TAURI__.invoke(cmd, args)，没有 v2 的 ipcRenderer），
- * 不引入 npm 依赖 —— 保证 distDir 只有这两个文件时窗口依然可用。四条命令对应
+ * 不引入 npm 依赖 —— 保证 distDir 只有这两个文件时窗口依然可用。五条命令对应
  * desktop/src/gui.rs 的 #[tauri::command]：
  *   initialize_app → get_app_info → get_real_time_quotes → analyze_symbol
- * 链路终点是 alpha-core 的 AnalysisEngine（真实计算，非桩数据）。
+ * 链路终点是 alpha-core 的 AnalysisEngine（真实计算，非桩数据）；另有导出卡片经
+ * 原生另存为对话框调 export_symbol_to_file（TODO L113），保存位置由用户自选。
  *
  * 非 Tauri 环境（普通浏览器直接打开 web/dist/index.html）不报错，改为提示先构建前端。
  */
@@ -118,4 +119,55 @@
     .catch(function (error) {
       setText("analysis", error && error.message ? error.message : String(error), "err");
     });
+
+  // L113 原生文件集成：经系统「另存为」对话框拿路径，再调 Rust 命令落盘。
+  // dialog.save 是 v1 全局 API（window.__TAURI__.dialog），解析为用户选的路径，
+  // 取消时为 null；后缀决定格式（.json 走 JSON，其余走 CSV，与 Rust 侧校验一致）。
+  var exportBtn = document.getElementById("export-btn");
+  var exportResult = document.getElementById("export-result");
+  if (exportBtn && exportResult) {
+    if (!invoke || !api.dialog || typeof api.dialog.save !== "function") {
+      exportBtn.disabled = true;
+      exportResult.textContent = "当前环境不支持原生对话框（需在 Tauri 窗口中打开）";
+    } else {
+      exportBtn.addEventListener("click", function () {
+        var symbol = symbols[0];
+        if (!symbol) {
+          exportResult.textContent = "无可导出标的（配置 symbols 为空）";
+          return;
+        }
+        exportResult.textContent = "等待选择保存位置…";
+        api.dialog
+          .save({
+            defaultPath: symbol + ".csv",
+            filters: [
+              { name: "CSV", extensions: ["csv"] },
+              { name: "JSON", extensions: ["json"] },
+            ],
+          })
+          .then(function (path) {
+            if (!path) {
+              exportResult.textContent = "已取消";
+              return null;
+            }
+            var fmt = /\.json$/i.test(path) ? "json" : "csv";
+            return invoke("export_symbol_to_file", {
+              symbol: symbol,
+              format: fmt,
+              file_path: path,
+            });
+          })
+          .then(function (outcome) {
+            if (outcome) {
+              exportResult.textContent =
+                "已导出 " + outcome.rows + " 行 → " + outcome.filename;
+            }
+          })
+          .catch(function (error) {
+            exportResult.textContent =
+              "导出失败：" + (error && error.message ? error.message : String(error));
+          });
+      });
+    }
+  }
 })();

@@ -183,6 +183,14 @@ if errors:
     sys.exit(1)
 print(f"✅ tauri.conf.json 自洽（图标 {len(icons)} 个 / distDir {dist}）")
 PY
+# 兜底壳是手写 JS（无构建期类型检查）：语法错误会让窗口功能静默失效，先做语法门禁
+DIST_DIR=$(python3 -c "import json; print(json.load(open('desktop/tauri.conf.json'))['build']['distDir'])")
+if command -v node >/dev/null 2>&1; then
+  node --check "desktop/$DIST_DIR/desktop-shell.js" || fail "兜底壳 desktop-shell.js 语法错误"
+  ok "兜底壳 JS 语法通过"
+else
+  info "无 node，跳过兜底壳语法检查（CI 的 ubuntu-latest 自带 node）"
+fi
 ok "配置自洽性检查通过"
 
 echo "--- [2/5] 无孤儿 Tauri 配置"

@@ -20,8 +20,8 @@ Tauri 写死为直接依赖，整个包在 Linux CI 上无法编译——本仓�
 
 接线层的职责只有三件：解析平台路径/句柄 → 委派框架层 → 映射错误给前端。
 所有业务判断都在框架层，因此 macOS 作业覆盖的是极薄的胶水代码，而逻辑正确性
-由 112 个可在 Linux 上跑的框架层单测 + 10 个配置契约测试 + 8 个接线薄度契约测试
-保证（详见 §4.1）。
+由 124 个可在 Linux 上跑的框架层单测 + 10 个配置契约测试 + 9 个接线薄度契约测试
+保证（详见 §4.1；L113 落地后计数，见 §6）。
 
 ```
 frontend (web/dist)  ──invoke──▶  gui.rs（#[tauri::command] 薄包装）
@@ -67,7 +67,8 @@ initialize_app → get_app_info → get_real_time_quotes → analyze_symbol
 ```
 
 四个命令串起来正好证明「窗口 → 前端 → Rust 命令 → alpha-core 计算」闭环成立，
-且终点的分析结果是真实计算而非桩数据。壳用外部 JS 文件（不放行 CSP 的
+且终点的分析结果是真实计算而非桩数据。L113 另加导出卡片：`dialog.save` 拿路径 →
+`export_symbol_to_file` 落盘（见 §6）。壳用外部 JS 文件（不放行 CSP 的
 `script-src 'unsafe-inline'`）。执行 `cd web && npm run build` 后真实前端会覆盖这两个
 文件，届时 `git status` 显示该文件变更属预期。
 
@@ -128,14 +129,15 @@ WebKitGTK，跑不了）——于是只能等 CI 的 `Desktop (macOS)` 作业变
 | `get_real_time_quotes` | `analysis::quotes_request` | 空标的列表 |
 | `set_price_alert` | `alerts::upsert_request` | 方向串解析、价格校验 |
 | `export_data` | `export::export_request` | 格式解析、空列表 |
+| `export_symbol_to_file`（L113） | `export::export_symbol_request` | 格式解析、空标的、后缀一致性（见 §6） |
 | `get_app_info` | `app::app_info` | 纯读取（唯一无失败路径的命令） |
 
-`desktop/tests/wiring_contract.rs`（8 例）把这个约定变成可本地执行的断言：命令体不得
+`desktop/tests/wiring_contract.rs`（9 例）把这个约定变成可本地执行的断言：命令体不得
 出现判空/兜底/自造错误串；每个命令必须委派到上表的入口并 `map_err`；接线层不得绕过
 入口直接调底层（`config::load_or_default`、`AlertKind::parse` 等）；`generate_handler!`
 注册的命令与兜底壳 `invoke` 一致；`lib.rs` 的重导出都指向真实存在的项；文件行数上限
-（防止接线层重新长胖）。反向用例已实测：在 `get_app_info` 里塞回 `validate().unwrap_or_default()`
-这类判断，8 例中 2 例转红。
+（防止接线层重新长胖）；兜底壳导出走原生 `dialog.save`（L113，见 §6）。反向用例已实测：在 `get_app_info` 里塞回 `validate().unwrap_or_default()`
+这类判断，9 例中 2 例转红。
 
 诚实边界：`tests/wiring_contract.rs` 是**源码契约**断言，它能守住「接线层不该干什么」，
 但不能替代编译。补上编译的那一步见下一节。
@@ -199,10 +201,50 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 
 | TODO | 现状 | 下一步 |
 | --- | --- | --- |
-| L113 文件系统集成与本地导出 | 导出逻辑已可测，落点在应用数据目录 `exports/` | 接原生「另存为」对话框与任意路径、写前确认 |
+| L113 文件系统集成与本地导出 | ✅ 已落地（见 §6）：用户自选路径导出闭环 | 覆盖已存在文件直接替换（写前确认未做，留待后续） |
 | L114 系统通知与托盘 | `AlertKind::matches` 已给出触发判定 | 接 Tauri notification/tray API 与定时轮询 |
 | L115 本地数据库同步与离线模式 | `FileKeyValueStore` 是雏形（KV 语义够用，非查询型） | 换 SQLite/本地缓存并做同步冲突策略 |
 | L116 快捷键与右键菜单 | `global-shortcut-all` 特性已在 allowlist | 注册快捷键与菜单事件 |
 
 另：演示行情是确定性生成的占位数据，接真实后端（api-gateway）时只需替换
 `market` 模块的取数实现，分析/导出链路不动。
+
+## 6. L113 原生文件集成与本地导出（2026-09-30）
+
+口径：**用户自选路径导出闭环**——前端经原生「另存为」对话框拿到路径，
+调新命令落盘；原 `export_data`（写应用数据目录 `exports/` 的快速导出）保留，
+两条路径复用同一 CSV/JSON 序列化口径。
+
+```
+兜底壳导出卡片 ──dialog.save──▶ 用户选路径 ──invoke──▶ gui::export_symbol_to_file
+        │ 薄委派                                              │ 无判断
+        ▼                                                     ▼
+            export::export_symbol_request（格式解析/空标的/取数）
+                        │ export::export_to_file（后缀一致性/原子落盘）
+                        ▼
+                磁盘任意路径（父目录自建、tmp + rename 原子替换）
+```
+
+框架层断言（`desktop/src/export.rs`，Linux 门禁可跑）：
+
+* 路径后缀必须与格式一致（大小写不敏感），不符/缺文件名/空序列/空标的/
+  未知格式一律先拒绝且不留任何文件（含临时文件）；
+* 父目录不存在自动创建；写盘走临时文件 + rename（与 `config::save` 同口径，
+  崩溃不断半截文件；覆盖已存在文件直接替换——写前确认未做，见本节末假设）；
+* `ExportOutcome` 补 `Serialize`（命令返回值经 Tauri 序列化给前端，字段
+  `path`/`filename`/`rows` 由单测锁定前端契约）。
+
+接线与前端：`gui::export_symbol_to_file` 只做「透传三参 → 委派 →
+`map_err`」（注册命令 6 → 7，`gui.rs` 仍在 160 行薄度上限内）；
+兜底壳加导出卡片（`dialog.save` 取路径、后缀定格式、取消显示"已取消"，
+非 Tauri 环境按钮禁用并注明）；`dialog`/`fs` 的 allowlist 与 Cargo 特性
+在 L112 已对齐，本轮无需改配置。
+
+门禁增量：`check-desktop.sh` [1/5] 加 `node --check`（手写 JS 无构建期
+检查）；`wiring_contract.rs` 8 → 9 例（新命令的无判断/委派/注册一致性 +
+壳 `dialog.save` 链路断言）；[5/5] 假 pkg-config 下新命令的宏展开与
+`Serialize` 界自动被类型检查。
+
+非交互假设（自行判定，已注明）：单文件单标的（批量多标的仍走 `exports/`
+目录导出）；覆盖写直接替换；`dialog.save` 取消返回 null（v1 约定）按"已取消"
+处理；演示行情仍是确定性占位数据（换真实取数只动 `market` 模块）。

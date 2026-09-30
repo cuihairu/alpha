@@ -1,12 +1,16 @@
 //! 本地数据导出：CSV / JSON
 //!
-//! 骨架期导出到应用数据目录下的 `exports/`（TODO L113 会接原生「另存为」对话框与
-//! 任意路径：届时只需在导出成功后追加一次目录选择）。导出时刻由调用方注入，
-//! 使文件名可断言（否则只能靠正则匹配）。
+//! 两条写路径（TODO L112 骨架 + L113 原生文件集成）：
+//! * [`export`]：写到应用数据目录下的 `exports/`（快速导出，无需用户选路径）；
+//! * [`export_to_file`]：写到调用方给定的显式文件路径（L113：前端经原生
+//!   「另存为」对话框拿到路径后传入，见 `gui::export_symbol_to_file`）。
+//!   两条路径写盘都走「临时文件 + rename」原子替换（与 `config::save` 同口径），
+//!   导出时刻由调用方注入，使文件名可断言（否则只能靠正则匹配）。
 
 use crate::error::{DesktopError, DesktopResult};
 use alpha_core::models::MarketData;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// CSV 表头（与 web 前端导入口径一致）
@@ -51,7 +55,7 @@ impl ExportFormat {
 }
 
 /// 导出结果：落盘路径 + 文件名（供命令返回给前端）
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExportOutcome {
     /// 落盘绝对/相对路径
     pub path: PathBuf,
@@ -142,6 +146,86 @@ fn write_json(data: &[MarketData], path: &Path) -> DesktopResult<()> {
     let json = serde_json::to_string_pretty(data)?;
     std::fs::write(path, json)?;
     Ok(())
+}
+
+/// 与目标同目录的临时文件路径（`a.csv` → `a.csv.tmp`，无后缀 → `name.tmp`）
+fn tmp_sibling(path: &Path) -> PathBuf {
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let tmp_ext = if ext.is_empty() {
+        "tmp".to_string()
+    } else {
+        format!("{ext}.tmp")
+    };
+    path.with_extension(tmp_ext)
+}
+
+/// 导出一段序列到调用方给定的显式文件路径（L113 原生「另存为」链路）
+///
+/// 口径（均为框架层断言，接线层只透传，见 `export_symbol_request`）：
+/// * 路径后缀必须与格式一致（`csv`/`json`，大小写不敏感），否则拒绝且不落任何文件；
+/// * 父目录不存在则自动创建；写盘走临时文件 + rename 原子替换（与 `config::save` 同口径）；
+/// * 空序列拒绝（与 [`export`] 一致）。
+pub fn export_to_file(
+    data: &[MarketData],
+    path: &Path,
+    format: ExportFormat,
+) -> DesktopResult<ExportOutcome> {
+    if data.is_empty() {
+        return Err(DesktopError::InvalidInput("没有可导出的数据".to_string()));
+    }
+    let filename = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            DesktopError::InvalidInput(format!("导出路径缺少文件名: {}", path.display()))
+        })?
+        .to_string();
+    let actual = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if actual != format.extension() {
+        return Err(DesktopError::InvalidInput(format!(
+            "导出路径后缀应为 .{}（与格式一致），实际: {}",
+            format.extension(),
+            path.display()
+        )));
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let tmp = tmp_sibling(path);
+    match format {
+        ExportFormat::Csv => write_csv(data, &tmp)?,
+        ExportFormat::Json => write_json(data, &tmp)?,
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(ExportOutcome {
+        path: path.to_path_buf(),
+        filename,
+        rows: data.len(),
+    })
+}
+
+/// 按「另存为」请求导出单个标的（`export_symbol_to_file` 命令的实现体）
+///
+/// 格式串解析、标的校验、取数、落盘都在框架层；`dest` 是前端经原生对话框拿到的
+/// 用户自选路径（含文件名与后缀）。未知格式/空标的在写盘前拒绝，不留残留文件。
+pub fn export_symbol_request(
+    symbol: &str,
+    format_raw: &str,
+    dest: &Path,
+) -> DesktopResult<ExportOutcome> {
+    let format = ExportFormat::parse(format_raw)?;
+    if symbol.trim().is_empty() {
+        return Err(DesktopError::InvalidInput("symbol 不能为空".to_string()));
+    }
+    let series = crate::market::synthetic_series(symbol, crate::market::DEFAULT_BARS);
+    export_to_file(&series, dest, format)
 }
 
 /// 可选字段的空值表示（CSV 无 null，用空单元格）
@@ -347,5 +431,155 @@ mod tests {
         )
         .expect_err("应失败");
         assert_eq!(err.kind(), "io");
+    }
+
+    // —— L113 原生「另存为」链路（显式路径导出） ——
+
+    #[test]
+    fn to_file_csv_writes_parseable_file_at_explicit_path() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("picked-600519.csv");
+        let outcome = export_to_file(&series(6), &dest, ExportFormat::Csv).expect("显式路径导出");
+
+        assert_eq!(outcome.filename, "picked-600519.csv");
+        assert_eq!(outcome.path, dest);
+        assert_eq!(outcome.rows, 6);
+        let mut reader = csv::Reader::from_path(&dest).expect("读取 CSV");
+        let rows: Vec<_> = reader.records().map(|r| r.expect("记录")).collect();
+        assert_eq!(rows.len(), 6);
+        assert_eq!(&rows[0][0], "600519");
+    }
+
+    #[test]
+    fn to_file_accepts_uppercase_extension() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("picked.CSV");
+        // 后缀大小写不敏感
+        let outcome = export_to_file(&series(3), &dest, ExportFormat::Csv).expect("大写后缀应接受");
+        assert_eq!(outcome.rows, 3);
+        assert!(dest.is_file());
+    }
+
+    #[test]
+    fn to_file_rejects_extension_mismatch_and_writes_nothing() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("picked.json");
+        let err = export_to_file(&series(3), &dest, ExportFormat::Csv).expect_err("后缀不符");
+        assert_eq!(err.kind(), "invalid_input");
+        assert!(err.to_string().contains(".csv"), "实际: {err}");
+        assert!(!dest.exists(), "拒绝时不应落文件");
+        assert_eq!(
+            std::fs::read_dir(tmp.path()).expect("列目录").count(),
+            0,
+            "拒绝时不应留临时文件"
+        );
+    }
+
+    #[test]
+    fn to_file_rejects_missing_filename() {
+        let err =
+            export_to_file(&series(1), Path::new(""), ExportFormat::Csv).expect_err("空路径应拒绝");
+        assert_eq!(err.kind(), "invalid_input");
+    }
+
+    #[test]
+    fn to_file_rejects_empty_series() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("empty.csv");
+        let err = export_to_file(&[], &dest, ExportFormat::Csv).expect_err("空序列应拒绝");
+        assert_eq!(err.kind(), "invalid_input");
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn to_file_creates_missing_parent_dirs_and_leaves_no_tmp() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("nested/deeper/picked.json");
+        let outcome = export_to_file(&series(2), &dest, ExportFormat::Json).expect("应自建父目录");
+        assert_eq!(outcome.rows, 2);
+        let parsed: Vec<MarketData> =
+            serde_json::from_str(&std::fs::read_to_string(&dest).expect("读 JSON"))
+                .expect("解析 JSON");
+        assert_eq!(parsed.len(), 2);
+        let leftovers: Vec<_> = std::fs::read_dir(dest.parent().expect("父目录"))
+            .expect("列目录")
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            leftovers,
+            vec!["picked.json".to_string()],
+            "临时文件应已被 rename 消耗，残留: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn to_file_overwrites_previous_export() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("picked.csv");
+        export_to_file(&series(2), &dest, ExportFormat::Csv).expect("首次导出");
+        export_to_file(&series(5), &dest, ExportFormat::Csv).expect("覆盖导出");
+
+        let mut reader = csv::Reader::from_path(&dest).expect("读取 CSV");
+        let rows: Vec<_> = reader.records().map(|r| r.expect("记录")).collect();
+        assert_eq!(rows.len(), 5, "覆盖后应为新内容");
+    }
+
+    #[test]
+    fn to_file_reports_io_error_for_unwritable_target() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        // 目标是已存在的目录（且后缀与格式一致，绕过前置校验）：
+        // rename 会失败，错误应映射为 io
+        let dest = tmp.path().join("picked.json");
+        std::fs::create_dir(&dest).expect("建占位目录");
+        let err = export_to_file(&series(1), &dest, ExportFormat::Json).expect_err("写目录应失败");
+        assert_eq!(err.kind(), "io");
+    }
+
+    #[test]
+    fn symbol_request_writes_single_symbol_file() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("save-as.csv");
+        let outcome = export_symbol_request("600519", "csv", &dest).expect("另存为请求");
+
+        assert_eq!(outcome.filename, "save-as.csv");
+        assert_eq!(outcome.rows, crate::market::DEFAULT_BARS);
+        let mut reader = csv::Reader::from_path(&dest).expect("读取 CSV");
+        let rows: Vec<_> = reader.records().map(|r| r.expect("记录")).collect();
+        assert_eq!(rows.len(), crate::market::DEFAULT_BARS);
+        assert!(rows.iter().all(|r| &r[0] == "600519"));
+    }
+
+    #[test]
+    fn symbol_request_rejects_unknown_format_before_writing() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("save-as.csv");
+        let err = export_symbol_request("600519", "xlsx", &dest).expect_err("未知格式应拒绝");
+        assert!(err.to_string().contains("xlsx"), "实际: {err}");
+        assert!(!dest.exists(), "拒绝时不应落文件");
+    }
+
+    #[test]
+    fn symbol_request_rejects_blank_symbol_before_writing() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("save-as.csv");
+        let err = export_symbol_request("  ", "csv", &dest).expect_err("空标的应拒绝");
+        assert_eq!(err.kind(), "invalid_input");
+        assert!(!dest.exists(), "拒绝时不应落文件");
+    }
+
+    #[test]
+    fn export_outcome_serializes_for_command_boundary() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("picked.json");
+        let outcome = export_to_file(&series(1), &dest, ExportFormat::Json).expect("导出");
+        // 命令返回值经 Tauri 序列化给前端：字段名即前端契约
+        let json = serde_json::to_value(&outcome).expect("序列化");
+        for key in ["path", "filename", "rows"] {
+            assert!(json.get(key).is_some(), "应含字段 {key}: {json}");
+        }
+        assert_eq!(json["rows"], 1);
+        let back: ExportOutcome = serde_json::from_value(json).expect("往返");
+        assert_eq!(back, outcome);
     }
 }

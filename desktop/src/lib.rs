@@ -14,8 +14,10 @@
 //! GUI 接线仍由 macOS 作业（`cargo test -p alpha-desktop --all-targets`）验证。
 //! 详见 docs/desktop-framework.md。
 //!
-//! 边界：本轮只落「框架」。文件系统导出与系统通知/托盘分别是 TODO L113/L114，
-//! 此处仅提供可测的纯逻辑与 IPC 契约，不接平台 API（见 [`platform`] 说明）。
+//! 边界：L112 只落「框架」。L113 原生文件集成（用户自选路径导出
+//! [`export::export_to_file`]/[`export::export_symbol_request`] + `dialog.save`
+//! 链路）与系统通知/托盘（TODO L114）中，后者仍是接口缝——此处仅提供可测的
+//! 纯逻辑与 IPC 契约，不接平台 API（见 [`platform`] 说明）。
 
 #![warn(missing_docs)]
 
@@ -39,7 +41,9 @@ pub use analysis::{analyze, analyze_request, quotes, quotes_request};
 pub use app::{app_info, AppInfo, APP_NAME};
 pub use config::{load_or_default, AppConfig, ConfigSource};
 pub use error::{DesktopError, DesktopResult};
-pub use export::{export, export_request, ExportFormat, ExportOutcome};
+pub use export::{
+    export, export_request, export_symbol_request, export_to_file, ExportFormat, ExportOutcome,
+};
 pub use ipc::{AnalyzeRequest, ExportRequest, InitPayload};
 pub use kv::FileKeyValueStore;
 pub use market::{synthetic_quote, synthetic_series, DEFAULT_BARS};

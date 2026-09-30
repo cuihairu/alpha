@@ -104,6 +104,18 @@ async fn export_data(
         .map_err(|e: DesktopError| e.to_string())
 }
 
+/// 导出单个标的到用户自选路径（L113 原生「另存为」链路：前端经 `dialog.save`
+/// 拿到路径后传入；格式解析/标的校验/后缀一致性全在框架层 `export_symbol_request`）
+#[tauri::command]
+async fn export_symbol_to_file(
+    symbol: String,
+    format: String,
+    file_path: String,
+) -> Result<crate::export::ExportOutcome, String> {
+    export::export_symbol_request(&symbol, &format, std::path::Path::new(&file_path))
+        .map_err(|e: DesktopError| e.to_string())
+}
+
 /// 应用信息
 #[tauri::command]
 async fn get_app_info(app_handle: tauri::AppHandle) -> Result<app::AppInfo, String> {
@@ -125,6 +137,7 @@ pub fn run() {
             get_real_time_quotes,
             set_price_alert,
             export_data,
+            export_symbol_to_file,
             get_app_info
         ])
         .run(tauri::generate_context!())

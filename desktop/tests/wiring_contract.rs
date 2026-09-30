@@ -103,6 +103,7 @@ fn command_bodies_have_no_business_judgement() {
         "get_real_time_quotes",
         "set_price_alert",
         "export_data",
+        "export_symbol_to_file",
         "get_app_info",
     ] {
         let body = command_body(&gui, name);
@@ -133,6 +134,7 @@ fn command_bodies_delegate_to_framework_entry_points() {
         ("get_real_time_quotes", "quotes_request"),
         ("set_price_alert", "upsert_request"),
         ("export_data", "export_request"),
+        ("export_symbol_to_file", "export_symbol_request"),
         ("get_app_info", "app_info"),
     ] {
         let body = command_body(&gui, name);
@@ -150,6 +152,7 @@ fn command_bodies_delegate_to_framework_entry_points() {
         "get_real_time_quotes",
         "set_price_alert",
         "export_data",
+        "export_symbol_to_file",
     ] {
         let body = command_body(&gui, name);
         assert!(
@@ -195,7 +198,7 @@ fn registered_commands_match_fallback_shell_invocations() {
         .collect();
     assert_eq!(
         registered.len(),
-        6,
+        7,
         "注册命令数应与前端契约一致，实际: {registered:?}"
     );
     for cmd in &registered {
@@ -247,6 +250,7 @@ fn framework_entry_points_are_exported() {
         "quotes_request",
         "upsert_request",
         "export_request",
+        "export_symbol_request",
     ] {
         assert!(
             lib.contains(entry),
@@ -311,6 +315,7 @@ fn shell_commands_have_framework_entry_points() {
         "get_app_info",
         "get_real_time_quotes",
         "analyze_symbol",
+        "export_symbol_to_file",
     ] {
         assert!(
             shell.contains(&format!("invoke(\"{cmd}\"")),
@@ -318,4 +323,21 @@ fn shell_commands_have_framework_entry_points() {
         );
     }
     let _ = Path::new("/");
+}
+
+/// L113 原生文件集成：导出必须走系统「另存为」对话框拿路径（`dialog.save`），
+/// 而不是把用户路径写死在前端——保存位置由用户在对话框里定
+#[test]
+fn shell_export_uses_native_save_dialog() {
+    let shell =
+        std::fs::read_to_string(crate_dir().join(tauri_dist_dir()).join("desktop-shell.js"))
+            .expect("读兜底壳");
+    assert!(
+        shell.contains("dialog.save"),
+        "兜底壳导出应经原生另存为对话框拿路径"
+    );
+    assert!(
+        shell.contains("file_path"),
+        "兜底壳应把对话框返回的路径按 file_path 传给 Rust 命令"
+    );
 }
