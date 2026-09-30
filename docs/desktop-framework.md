@@ -163,11 +163,25 @@ is_empty found for unit type ()`。
 **不能覆盖的**：链接与启动窗口仍然需要真实 WebKitGTK（或 CI 的 macOS 作业，那里
 WKWebView 内置）。假 `.pc` 只让类型系统与 lint 在 Linux 上干活。
 
-顺带修掉一个真实缺陷：为了在 Linux 上编 gui 特性，暴露出锁文件里
-`zbus 5.11.0` 配 `zbus_macros 5.19.0` 的上游 semver 破坏（宏 5.19 生成的代码引用
-zbus 5.11 里不存在的 `DispatchResult2`）。`zbus` 是 tauri 仅 Linux/BSD 的依赖，
-macOS CI 从不编译它，所以这处锁文件腐烂此前对 CI 不可见，却让 Linux 上任何
-`cargo build`（默认带 gui 特性）失败。已把 `zbus_macros` 钉到 `5.11.0`。
+顺带修掉一个真实缺陷：为了在 Linux 上编 gui 特性，暴露出上游的 semver 破坏。
+依赖链是 `tauri` → `notify-rust 4`（声明 `zbus = "5"`，**仅 Linux/BSD**）→
+`zbus 5.11.0`（再声明 `zbus_macros = "^5.11.0"`，caret）。caret 区间允许解析到
+`zbus_macros 5.19.0`，而 5.19 的 `#[interface]` / `DBusError` 宏生成的代码引用
+zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` 本体就报
+9 个错误（`E0425` / `E0433` / `E0599`）——已实测复现，不是推测。
+
+处理办法与理由：
+
+* 不能靠锁文件兜底：本仓 `.gitignore` 忽略 `Cargo.lock`（库惯例），CI 每次全新解析；
+* 因此在 `desktop/Cargo.toml` 里加一个**代码不引用**的 optional 直接依赖
+  `zbus-macros-pin = { package = "zbus_macros", version = "=5.11.0" }`（挂 `gui` 特性），
+  把这条链钉在已知可编译的组合上；
+* 代价要认：zbus 本身也被锁在这条链上。`cargo update -p zbus --precise 5.19.0`
+  会在**解析期**硬失败（zbus 5.19 要求 `zbus_macros ^5.19.0`），想升级得先解钉版
+  ——这是有意的：响亮的解析失败好过只有 Linux 能撞上的静默编译失败。
+
+这个坑对 macOS CI 天然不可见（`zbus` 是 Linux/BSD 专属依赖，macOS 作业从不编译
+它），所以只能靠 Linux 上的 `[5/5]` 和上面的钉版兜住。
 
 ## 5. 本轮不做的（留给后续 TODO）
 
