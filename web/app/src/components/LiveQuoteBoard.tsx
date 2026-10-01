@@ -4,7 +4,7 @@ import { changePct, type LiveQuote } from '../lib/liveFeed'
 import { fmtPrice, sma } from '../lib/indicators'
 
 /** 默认符号集：复用演示样本的代码/名称/基准价（模拟盘锚价同源） */
-const DEFAULT_SYMBOLS = demoQuotes.map((q) => ({
+export const DEFAULT_SYMBOLS = demoQuotes.map((q) => ({
   symbol: q.symbol,
   name: q.name,
   base: q.price,
@@ -25,9 +25,14 @@ function updateTime(q: LiveQuote): string {
  * （A股口径红涨绿跌，与 QuoteTable 一致），SMA(5) 滚动窗口由
  * 纯 TS 指标（口径对齐 packages/core calculate_sma）现场计算。
  * feed 地址可用 `?feedWs=ws://host:port/ws` 覆盖。
+ * L508：符号集可由活动工作区驱动（未传时用演示默认集）。
  */
-export function LiveQuoteBoard() {
-  const { quotes, source, seq } = useLiveQuotes(DEFAULT_SYMBOLS)
+export function LiveQuoteBoard({
+  symbols,
+}: {
+  symbols?: Array<{ symbol: string; name?: string; base: number }>
+}) {
+  const { quotes, source, seq } = useLiveQuotes(symbols ?? DEFAULT_SYMBOLS)
 
   return (
     <div>

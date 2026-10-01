@@ -228,3 +228,115 @@ textarea {
   animation: flash-down-kf 0.8s ease-out;
   color: #27ae60;
 }
+
+/* ── L508 多标签页工作区 ─────────────────────────────── */
+.workspace-bar {
+  margin: 12px 0;
+}
+.workspace-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.workspace-tab {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+  overflow: hidden;
+}
+.workspace-tab-active {
+  border-color: var(--accent, #2980b9);
+  background: var(--bg-soft);
+}
+.workspace-tab-name {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.workspace-tab-close {
+  border: none;
+  background: transparent;
+  padding: 4px 6px;
+  cursor: pointer;
+  color: var(--fg-muted);
+  font: inherit;
+}
+.workspace-tab-close:hover {
+  color: #c0392b;
+}
+.workspace-add {
+  border: 1px dashed var(--border);
+  background: transparent;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--fg-muted);
+}
+.workspace-new input,
+.workspace-name input {
+  padding: 3px 8px;
+  font: inherit;
+}
+.workspace-detail {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 8px 12px;
+}
+.workspace-name {
+  font-weight: 600;
+}
+.workspace-rename {
+  margin-left: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--fg-muted);
+  text-decoration: underline;
+}
+.workspace-symbols {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.workspace-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1px 8px;
+  font-size: 13px;
+}
+.workspace-chip button {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--fg-muted);
+  font: inherit;
+  padding: 0 2px;
+}
+.workspace-chip button:hover {
+  color: #c0392b;
+}
+.workspace-symbol-input {
+  width: 14em;
+  padding: 3px 8px;
+  font: inherit;
+}
+.workspace-error {
+  font-size: 12px;
+  color: #c0392b;
+}
