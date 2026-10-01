@@ -1,7 +1,7 @@
 {
   "build": {
-    "beforeBuildCommand": "cd ../web && npm run build",
-    "beforeDevCommand": "cd ../web && npm start",
+    "beforeBuildCommand": "cd web && npm run build",
+    "beforeDevCommand": "cd web && npm start",
     "devPath": "http://localhost:8080",
     "distDir": "../web/dist",
     "withGlobalTauri": true
@@ -94,8 +94,7 @@
         "transparent": false,
         "decorations": true,
         "alwaysOnTop": false,
-        "skipTaskbar": false,
-        "theme": "System"
+        "skipTaskbar": false
       }
     ],
     "systemTray": {
