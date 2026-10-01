@@ -1,5 +1,8 @@
 # Rust
 /target/
+# 包级 target（workspace 统一在根 /target/ 构建；显式传 PGO_DIR 等参数
+# 会在包目录下生成中间产物——L455 实测出现过 packages/protocols/target/）
+packages/*/target/
 Cargo.lock
 
 # IDE
