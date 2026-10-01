@@ -36,6 +36,15 @@ wasm = ["chrono/wasmbind", "uuid/js"]
 # 仅测试（platform 适配层参考实现的 #[tokio::test]）；不影响 lib/wasm 构建
 tokio = { workspace = true, features = ["macros", "rt"] }
 
+# 性能基准（L492/L495）：criterion 套件 + --save-baseline 基线比对回归；
+# default-features 关掉 plotters/gnuplot（CI 无绘图依赖，数字输出即够）
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+# 基准入口（harness = false：criterion 自带 main）
+[[bench]]
+name = "indicators_bench"
+harness = false
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }

@@ -489,7 +489,7 @@
 
 ## 🧪 质量保证与测试
 - [ ] 建立单元测试、集成测试和端到端测试体系
-- [ ] 开发性能基准测试和回归测试套件
+- [x] 开发性能基准测试和回归测试套件——criterion 基准套件 `packages/core/benches/indicators_bench.rs` 三组 8 项：热路径指标（SMA/EMA/RSI/Bollinger/MACD @10k 根，Elements 吞吐标注）、形态识别（K 线形态 + zigzag find_swings @10k）、优化引擎（2×3 网格 grid_search @1k——寻优编排开销代表面）；价格序列确定性 LCG 游走（种子 42，同 simd.rs 测试口径，无 rand 依赖可复现）；dev-dep criterion 0.5 关 default-features（无 plotters/gnuplot，CI 零绘图依赖）；`cargo bench -p alpha-core --bench indicators_bench` 实测 8 项全跑通（SMA 10k ≈70µs / find_swings 10k ≈32µs / grid_search ≈202µs）；lib 自带 bench 目标与 criterion 参数不兼容的坑以 `--bench` 定向解决；clippy --all-targets（含 bench）0 警告、全 crate 124 测试通过。回归检测面归 L495（--save-baseline 比对本套件）（✅ 2026-10-02）
 - [ ] 实现基于 Proptest 的模糊测试和属性验证
 - [ ] 构建代码覆盖率报告和质量度量
 - [ ] 开发自动化性能回归检测系统
