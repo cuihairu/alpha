@@ -173,3 +173,58 @@ textarea {
     padding: 5px 8px;
   }
 }
+
+/* L499 实时行情：连接状态 pill + 价格跳变闪烁（key 重挂载重放动画） */
+.live-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+}
+.live-pill-connecting {
+  color: var(--fg-muted);
+}
+.live-pill-feed {
+  color: #fff;
+  background: #27ae60;
+  border-color: #27ae60;
+}
+.live-pill-simulated {
+  color: var(--fg);
+  background: var(--bg-soft);
+}
+.live-seq {
+  margin-left: 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.live-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+@keyframes flash-up-kf {
+  from {
+    background: rgba(192, 57, 43, 0.35);
+  }
+  to {
+    background: transparent;
+  }
+}
+@keyframes flash-down-kf {
+  from {
+    background: rgba(39, 174, 96, 0.35);
+  }
+  to {
+    background: transparent;
+  }
+}
+.flash-up {
+  animation: flash-up-kf 0.8s ease-out;
+  color: #c0392b;
+}
+.flash-down {
+  animation: flash-down-kf 0.8s ease-out;
+  color: #27ae60;
+}
