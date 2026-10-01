@@ -51,6 +51,7 @@ uuid = { workspace = true }
 # 内部包
 alpha-core = { workspace = true }
 alpha-protocols = { workspace = true }
+alpha-storage = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

@@ -1,258 +1,214 @@
-//! 缓存层实现
+//! 分布式缓存（L446）：Redis 上的 JSON cache-aside 面。
+//!
+//! 与 [`crate::RedisKvStorage`]（通用字节 KV）分层：本模块面向「读多写少的
+//! 热点对象」——类型化 get/set、get_or_load 旁路装载、命中/未命中计数。
 
-use super::StorageBackend;
+use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
 use alpha_core::errors::{AlphaError, AlphaResult};
-use serde::{de::DeserializeOwned, Serialize};
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use redis::AsyncCommands;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
-/// 缓存条目
-#[derive(Debug)]
-struct CacheEntry<T> {
-    value: T,
-    expires_at: Option<Instant>,
+/// 缓存键 = 命名空间前缀 + 业务键（拼接口径纯函数化，单测锁定）
+pub fn cache_key(prefix: &str, key: &str) -> String {
+    format!("{prefix}{key}")
 }
 
-impl<T> CacheEntry<T> {
-    fn new(value: T, ttl: Option<Duration>) -> Self {
-        Self {
-            value,
-            expires_at: ttl.map(|duration| Instant::now() + duration),
-        }
-    }
-
-    fn is_expired(&self) -> bool {
-        self.expires_at
-            .map(|expires_at| Instant::now() > expires_at)
-            .unwrap_or(false)
-    }
+#[derive(Clone)]
+pub struct DistributedCache {
+    conn: redis::aio::ConnectionManager,
+    prefix: String,
+    default_ttl: Duration,
+    hits: Arc<AtomicU64>,
+    misses: Arc<AtomicU64>,
 }
 
-/// 内存缓存
-#[derive(Debug)]
-pub struct MemoryCache<T> {
-    data: RwLock<std::collections::HashMap<String, CacheEntry<T>>>,
-    default_ttl: Option<Duration>,
-    max_size: usize,
-}
+impl DistributedCache {
+    pub async fn connect(
+        connection_string: &str,
+        prefix: &str,
+        default_ttl: Duration,
+    ) -> AlphaResult<Self> {
+        let client = redis::Client::open(connection_string)
+            .map_err(|e| AlphaError::ConfigurationError(format!("invalid redis URL: {e}")))?;
+        let conn = client
+            .get_connection_manager()
+            .await
+            .map_err(|e| AlphaError::StorageError(format!("redis connect failed: {e}")))?;
 
-impl<T> MemoryCache<T>
-where
-    T: Clone + Send + Sync + 'static,
-{
-    /// 创建新的缓存实例
-    pub fn new() -> Self {
-        Self {
-            data: RwLock::new(std::collections::HashMap::new()),
-            default_ttl: None,
-            max_size: 1000,
-        }
+        Ok(Self {
+            conn,
+            prefix: prefix.to_string(),
+            default_ttl,
+            hits: Arc::new(AtomicU64::new(0)),
+            misses: Arc::new(AtomicU64::new(0)),
+        })
     }
 
-    /// 创建带 TTL 的缓存实例
-    pub fn with_ttl(ttl: Duration) -> Self {
-        Self {
-            data: RwLock::new(std::collections::HashMap::new()),
-            default_ttl: Some(ttl),
-            max_size: 1000,
-        }
-    }
-
-    /// 创建带 TTL 和最大大小的缓存实例
-    pub fn with_config(ttl: Option<Duration>, max_size: usize) -> Self {
-        Self {
-            data: RwLock::new(std::collections::HashMap::new()),
-            default_ttl: ttl,
-            max_size,
-        }
-    }
-
-    /// 设置缓存值
-    pub async fn set(&self, key: &str, value: T, ttl: Option<Duration>) -> AlphaResult<()> {
-        let ttl = ttl.or(self.default_ttl);
-        let entry = CacheEntry::new(value, ttl);
-
-        let mut data = self.data.write().await;
-
-        // 如果缓存已满，删除最旧的条目
-        if data.len() >= self.max_size {
-            // 简单策略：移除第一个条目
-            // 在实际应用中，可以使用 LRU 等更智能的策略
-            if let Some(first_key) = data.keys().next().cloned() {
-                data.remove(&first_key);
+    /// 类型化读取：键不存在 → `Ok(None)`；存在但反序列化失败 → 错误（脏数据不静默吞）。
+    pub async fn get_json<T: DeserializeOwned>(&self, key: &str) -> AlphaResult<Option<T>> {
+        let mut conn = self.conn.clone();
+        let raw: Option<String> = conn
+            .get(cache_key(&self.prefix, key))
+            .await
+            .map_err(|e| AlphaError::StorageError(format!("cache GET failed: {e}")))?;
+        match raw {
+            Some(s) => {
+                self.hits.fetch_add(1, Ordering::Relaxed);
+                serde_json::from_str(&s)
+                    .map(Some)
+                    .map_err(|e| AlphaError::StorageError(format!("cache 值反序列化失败: {e}")))
             }
-        }
-
-        data.insert(key.to_string(), entry);
-        Ok(())
-    }
-
-    /// 获取缓存值
-    pub async fn get(&self, key: &str) -> AlphaResult<Option<T>> {
-        let mut data = self.data.write().await;
-
-        match data.get(key) {
-            Some(entry) if !entry.is_expired() => {
-                Ok(Some(entry.value.clone()))
-            }
-            Some(_) => {
-                // 过期了，删除条目
-                data.remove(key);
+            None => {
+                self.misses.fetch_add(1, Ordering::Relaxed);
                 Ok(None)
             }
-            None => Ok(None),
         }
     }
 
-    /// 删除缓存值
-    pub async fn delete(&self, key: &str) -> AlphaResult<bool> {
-        let mut data = self.data.write().await;
-        Ok(data.remove(key).is_some())
-    }
-
-    /// 检查键是否存在且未过期
-    pub async fn exists(&self, key: &str) -> AlphaResult<bool> {
-        let mut data = self.data.write().await;
-
-        match data.get(key) {
-            Some(entry) => {
-                if entry.is_expired() {
-                    data.remove(key);
-                    Ok(false)
-                } else {
-                    Ok(true)
-                }
-            }
-            None => Ok(false),
-        }
-    }
-
-    /// 清理过期的条目
-    pub async fn cleanup_expired(&self) -> AlphaResult<usize> {
-        let mut data = self.data.write().await;
-        let initial_count = data.len();
-
-        data.retain(|_, entry| !entry.is_expired());
-
-        Ok(initial_count - data.len())
-    }
-
-    /// 清空所有缓存
-    pub async fn clear(&self) -> AlphaResult<()> {
-        let mut data = self.data.write().await;
-        data.clear();
+    /// 类型化写入：ttl 缺省用 connect 时的 default_ttl。
+    pub async fn set_json<T: Serialize>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl: Option<Duration>,
+    ) -> AlphaResult<()> {
+        let mut conn = self.conn.clone();
+        let payload = serde_json::to_string(value)
+            .map_err(|e| AlphaError::StorageError(format!("cache 值序列化失败: {e}")))?;
+        let ttl = ttl.unwrap_or(self.default_ttl);
+        conn.set_ex::<_, _, ()>(cache_key(&self.prefix, key), payload, ttl.as_secs())
+            .await
+            .map_err(|e| AlphaError::StorageError(format!("cache SETEX failed: {e}")))?;
         Ok(())
     }
 
-    /// 获取缓存大小
-    pub async fn size(&self) -> AlphaResult<usize> {
-        let data = self.data.read().await;
-        Ok(data.len())
+    pub async fn delete(&self, key: &str) -> AlphaResult<bool> {
+        let mut conn = self.conn.clone();
+        let deleted: u64 = conn
+            .del(cache_key(&self.prefix, key))
+            .await
+            .map_err(|e| AlphaError::StorageError(format!("cache DEL failed: {e}")))?;
+        Ok(deleted > 0)
     }
-}
 
-impl<T> Default for MemoryCache<T>
-where
-    T: Clone + Send + Sync + 'static,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait::async_trait]
-impl StorageBackend for MemoryCache<String> {
-    type Error = Box<dyn std::error::Error + Send + Sync>;
-
-    async fn store<U>(&self, key: &str, value: &U) -> AlphaResult<()>
+    /// cache-aside 装载：命中即返回；未命中执行 `load`、回填（ttl 缺省）后返回。
+    /// 装载失败不写缓存（坏值不入湖），错误原样上抛。
+    pub async fn get_or_load<T, F, Fut>(
+        &self,
+        key: &str,
+        ttl: Option<Duration>,
+        load: F,
+    ) -> AlphaResult<T>
     where
-        U: serde::Serialize + Send + Sync,
+        T: DeserializeOwned + Serialize,
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = AlphaResult<T>>,
     {
-        let serialized = serde_json::to_string(value)
-            .map_err(|e| AlphaError::SerializationError(e.to_string()))?;
-
-        self.set(key, serialized, None).await
-    }
-
-    async fn retrieve<U>(&self, key: &str) -> AlphaResult<Option<U>>
-    where
-        U: for<'de> serde::Deserialize<'de> + Send + Sync,
-    {
-        match self.get(key).await? {
-            Some(serialized) => {
-                let value: U = serde_json::from_str(&serialized)
-                    .map_err(|e| AlphaError::SerializationError(e.to_string()))?;
-                Ok(Some(value))
-            }
-            None => Ok(None),
+        if let Some(cached) = self.get_json::<T>(key).await? {
+            return Ok(cached);
         }
+        let value = load().await?;
+        self.set_json(key, &value, ttl).await?;
+        Ok(value)
     }
 
-    async fn delete(&self, key: &str) -> AlphaResult<bool> {
-        MemoryCache::delete(self, key).await
+    pub fn hits(&self) -> u64 {
+        self.hits.load(Ordering::Relaxed)
     }
 
-    async fn exists(&self, key: &str) -> AlphaResult<bool> {
-        MemoryCache::exists(self, key).await
-    }
-
-    async fn list_keys(&self, prefix: &str) -> AlphaResult<Vec<String>> {
-        let data = self.data.read().await;
-        let keys: Vec<String> = data
-            .keys()
-            .filter(|key| key.starts_with(prefix))
-            .cloned()
-            .collect();
-
-        Ok(keys)
-    }
-
-    async fn clear(&self) -> AlphaResult<()> {
-        MemoryCache::clear(self).await
+    pub fn misses(&self) -> u64 {
+        self.misses.load(Ordering::Relaxed)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+    use serde::{Deserialize, Serialize};
 
+    #[test]
+    fn cache_key_concatenates_prefix_and_biz_key() {
+        assert_eq!(
+            cache_key("alpha:cache:", "quote:600519"),
+            "alpha:cache:quote:600519"
+        );
+        assert_eq!(cache_key("", "k"), "k");
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    struct Quote {
+        symbol: String,
+        price: f64,
+    }
+
+    fn redis_url() -> Option<String> {
+        std::env::var("REDIS_TEST_URL").ok()
+    }
+
+    /// 集成（REDIS_TEST_URL 门控）：roundtrip / get_or_load 单次装载 / 删除 / 计数
     #[tokio::test]
-    async fn test_cache_basic_operations() {
-        let cache: MemoryCache<String> = MemoryCache::new();
+    async fn cache_roundtrip_and_aside_loading() -> AlphaResult<()> {
+        let Some(url) = redis_url() else {
+            return Ok(());
+        };
+        let prefix = format!("alpha:test:cache:{}:", uuid::Uuid::new_v4());
+        let cache = DistributedCache::connect(&url, &prefix, Duration::from_secs(60)).await?;
 
-        cache.set("key1", "value1".to_string(), None).await.unwrap();
-        assert_eq!(cache.get("key1").await.unwrap(), Some("value1".to_string()));
+        let quote = Quote {
+            symbol: "600519".into(),
+            price: 90.5,
+        };
+        // 未命中：键不存在 → None 且 miss 计数 +1
+        assert_eq!(cache.get_json::<Quote>("quote:600519").await?, None);
+        assert_eq!(cache.misses(), 1);
 
-        cache.delete("key1").await.unwrap();
-        assert_eq!(cache.get("key1").await.unwrap(), None);
+        cache.set_json("quote:600519", &quote, None).await?;
+        assert_eq!(cache.get_json::<Quote>("quote:600519").await?, Some(quote));
+        assert_eq!(cache.hits(), 1);
+
+        // cache-aside：loader 只在未命中时执行；回填后第二次读取命中缓存值
+        // （loader 产出哨兵值——若被调用，断言即失败，无需外部计数）
+        let first = Quote {
+            symbol: "000001".into(),
+            price: 10.2,
+        };
+        let v = cache
+            .get_or_load("quote:000001", None, || {
+                let loaded = first.clone();
+                async move { Ok::<_, AlphaError>(loaded) }
+            })
+            .await?;
+        assert_eq!(v.symbol, "000001");
+        let v2 = cache
+            .get_or_load("quote:000001", None, || async {
+                Ok::<_, AlphaError>(Quote {
+                    symbol: "SHOULD_NOT_LOAD".into(),
+                    price: -1.0,
+                })
+            })
+            .await?;
+        assert_eq!(v2, v, "第二次读取应命中缓存而非 loader 哨兵值");
+
+        assert!(cache.delete("quote:600519").await?);
+        assert_eq!(cache.get_json::<Quote>("quote:600519").await?, None);
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_cache_ttl() {
-        let cache: MemoryCache<String> = MemoryCache::with_ttl(Duration::from_millis(100));
-
-        cache.set("key1", "value1".to_string(), None).await.unwrap();
-        assert_eq!(cache.get("key1").await.unwrap(), Some("value1".to_string()));
-
-        // 等待过期
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        assert_eq!(cache.get("key1").await.unwrap(), None);
-    }
-
-    #[tokio::test]
-    async fn test_cache_custom_ttl() {
-        let cache: MemoryCache<String> = MemoryCache::with_ttl(Duration::from_millis(100));
-
-        // 使用自定义 TTL
-        cache.set("key1", "value1".to_string(), Some(Duration::from_millis(200))).await.unwrap();
-
-        // 默认 TTL 应该过期
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        assert_eq!(cache.get("key1").await.unwrap(), Some("value1".to_string()));
-
-        // 自定义 TTL 应该过期
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert_eq!(cache.get("key1").await.unwrap(), None);
+    async fn connect_rejects_invalid_url() {
+        if redis_url().is_some() {
+            return;
+        }
+        assert!(
+            DistributedCache::connect("redis://127.0.0.1:1", "p:", Duration::from_secs(1))
+                .await
+                .is_err()
+        );
     }
 }

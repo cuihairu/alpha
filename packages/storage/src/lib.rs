@@ -2,12 +2,14 @@
 //!
 //! 提供统一的数据存储抽象层，支持多种存储后端
 
+pub mod cache;
 pub mod clickhouse;
 pub mod cloud;
 pub mod dal;
 pub mod disk_kv;
 pub mod memory;
 pub mod postgres_kv;
+pub mod rate_limit;
 pub mod redis_kv;
 pub mod redis_streams;
 pub mod timescale;
@@ -16,12 +18,14 @@ pub mod timeseries;
 use alpha_core::errors::AlphaResult;
 
 // 重新导出主要类型
+pub use cache::*;
 pub use clickhouse::*;
 pub use cloud::*;
 pub use dal::*;
 pub use disk_kv::*;
 pub use memory::*;
 pub use postgres_kv::*;
+pub use rate_limit::*;
 pub use redis_kv::*;
 pub use redis_streams::*;
 pub use timescale::*;

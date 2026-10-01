@@ -12,7 +12,7 @@ use axum::{
         ws::{CloseFrame as WsCloseFrame, Message as WsMessage, WebSocket, WebSocketUpgrade},
         Path, State,
     },
-    http::{HeaderMap, HeaderValue, Method, StatusCode, Uri},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     middleware,
     response::{IntoResponse, Json, Response},
     routing::{any, get},
@@ -21,6 +21,8 @@ use axum::{
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
+
+use alpha_storage::{RateDecision, RedisRateLimiter};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
@@ -68,6 +70,14 @@ struct Args {
     #[arg(long, default_value = "http://127.0.0.1:8083")]
     collector_url: String,
 
+    /// Redis 限流地址（env ALPHA_GATEWAY_RATE_LIMIT_URL 优先；空=关闭 /api 限流）
+    #[arg(long, default_value = "")]
+    rate_limit_url: String,
+
+    /// 每 IP 每分钟 /api 配额（Redis 限流开启时生效）
+    #[arg(long, default_value_t = 120)]
+    rate_limit_per_minute: u32,
+
     /// 日志级别
     #[arg(short, long, default_value = "info")]
     log_level: String,
@@ -85,6 +95,10 @@ struct GatewayState {
     data_engine_url: String,
     realtime_url: String,
     collector_url: String,
+    /// Redis 限流器（None = 限流关闭）
+    rate_limiter: Option<RedisRateLimiter>,
+    /// 每 IP 每分钟 /api 配额
+    rate_limit_per_minute: u32,
 }
 
 /// 健康检查响应
@@ -120,6 +134,19 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting Alpha Finance API Gateway");
 
+    // 限流：配置了 URL 才启用；连接失败直接退出（fail-fast，不带病启动）
+    let rate_limit_url = resolve_url("ALPHA_GATEWAY_RATE_LIMIT_URL", &args.rate_limit_url);
+    let rate_limiter = if rate_limit_url.is_empty() {
+        tracing::info!("rate limit disabled (no --rate-limit-url)");
+        None
+    } else {
+        Some(
+            RedisRateLimiter::connect(&rate_limit_url, "alpha:ratelimit:")
+                .await
+                .map_err(|e| anyhow::anyhow!("rate limiter connect failed: {e}"))?,
+        )
+    };
+
     let state = GatewayState {
         client: reqwest::Client::builder()
             .timeout(Duration::from_secs(PROXY_TIMEOUT_SECS))
@@ -127,6 +154,8 @@ async fn main() -> anyhow::Result<()> {
         data_engine_url: resolve_url("ALPHA_GATEWAY_DATA_ENGINE_URL", &args.data_engine_url),
         realtime_url: resolve_url("ALPHA_GATEWAY_REALTIME_URL", &args.realtime_url),
         collector_url: resolve_url("ALPHA_GATEWAY_COLLECTOR_URL", &args.collector_url),
+        rate_limiter,
+        rate_limit_per_minute: args.rate_limit_per_minute,
     };
 
     let app = build_router(state);
@@ -141,11 +170,19 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn build_router(state: GatewayState) -> Router {
+    // /api 子路由：限流中间件只包 REST 反代面（健康检查与 WS 不占配额）
+    let api =
+        Router::new()
+            .route("/v1/*path", any(api_proxy))
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit_middleware,
+            ));
+
     Router::new()
         // 健康检查：真实探测三个上游
         .route("/health", get(health_check))
-        // REST 反代：/api/v1/<path> → data-engine /<path>（透传方法/查询/头/体）
-        .route("/api/v1/*path", any(api_proxy))
+        .nest("/api", api)
         // WebSocket 反代：/ws 与 /ws/<path> → real-time-feed
         .route("/ws", get(ws_proxy_root))
         .route("/ws/*path", get(ws_proxy))
@@ -162,6 +199,82 @@ fn build_router(state: GatewayState) -> Router {
                 .layer(middleware::from_fn(request_logger)),
         )
         .with_state(state)
+}
+
+/// 客户端标识（限流主体）：X-Forwarded-For 首段 → X-Real-IP → "anonymous"。
+/// 反代链路下前者由边缘代理注入，最贴近真实来源。
+fn client_identity(headers: &HeaderMap) -> String {
+    let first_forwarded = |value: &HeaderValue| {
+        value
+            .to_str()
+            .ok()
+            .and_then(|s| s.split(',').next())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    headers
+        .get("x-forwarded-for")
+        .and_then(first_forwarded)
+        .or_else(|| headers.get("x-real-ip").and_then(first_forwarded))
+        .unwrap_or_else(|| "anonymous".to_string())
+}
+
+/// 429 响应：Retry-After（窗口重置秒）+ X-RateLimit-Remaining: 0，JSON 错误体。
+fn rate_limit_rejection(decision: &RateDecision) -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [
+            (
+                header::RETRY_AFTER,
+                HeaderValue::from(decision.reset_after_secs),
+            ),
+            (
+                header::HeaderName::from_static("x-ratelimit-remaining"),
+                HeaderValue::from_static("0"),
+            ),
+        ],
+        Json(serde_json::json!({
+            "success": false,
+            "error": "rate limit exceeded",
+            "retry_after_secs": decision.reset_after_secs,
+        })),
+    )
+        .into_response()
+}
+
+/// /api 限流中间件：未启用直接放行；Redis 故障 fail-open（告警放行，
+/// 缓存/限流组件不可用不应拖垮网关主链路）。
+async fn rate_limit_middleware(
+    State(state): State<GatewayState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Some(limiter) = state.rate_limiter.as_ref() else {
+        return next.run(req).await;
+    };
+
+    let subject = client_identity(req.headers());
+    let decision = match limiter
+        .check(
+            &subject,
+            state.rate_limit_per_minute,
+            Duration::from_secs(60),
+        )
+        .await
+    {
+        Ok(d) => d,
+        Err(err) => {
+            tracing::warn!(%subject, %err, "rate limiter unavailable, failing open");
+            return next.run(req).await;
+        }
+    };
+
+    if decision.allowed {
+        next.run(req).await
+    } else {
+        tracing::warn!(%subject, "rate limit exceeded");
+        rate_limit_rejection(&decision)
+    }
 }
 
 /// 健康检查端点：真实探测上游 /health（data-engine 与 real-time-feed 任一不可达
@@ -486,7 +599,97 @@ mod tests {
             data_engine_url,
             realtime_url,
             collector_url: "http://127.0.0.1:1".to_string(),
+            rate_limiter: None,
+            rate_limit_per_minute: 120,
         }
+    }
+
+    #[test]
+    fn client_identity_prefers_forwarded_then_real_ip_then_anonymous() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(client_identity(&headers), "anonymous");
+
+        headers.insert("x-real-ip", "203.0.113.7".parse().unwrap());
+        assert_eq!(client_identity(&headers), "203.0.113.7");
+
+        headers.insert("x-forwarded-for", "198.51.100.9, 10.0.0.1".parse().unwrap());
+        assert_eq!(client_identity(&headers), "198.51.100.9", "取首段");
+    }
+
+    #[test]
+    fn rate_limit_rejection_sets_429_with_retry_after() {
+        let response = rate_limit_rejection(&RateDecision {
+            allowed: false,
+            remaining: 0,
+            reset_after_secs: 60,
+        });
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let headers = response.headers();
+        assert_eq!(headers.get("retry-after").unwrap(), "60");
+        assert_eq!(headers.get("x-ratelimit-remaining").unwrap(), "0");
+    }
+
+    /// 集成（REDIS_TEST_URL 门控）：配额内放行、超限 429 且带 Retry-After
+    #[tokio::test]
+    async fn api_rate_limit_enforced_when_limiter_configured() {
+        let Some(url) = std::env::var("REDIS_TEST_URL").ok() else {
+            return;
+        };
+        // 独立前缀避免与其他运行互相污染
+        let limiter =
+            RedisRateLimiter::connect(&url, &format!("alpha:test:gw:{}:", uuid::Uuid::new_v4()))
+                .await
+                .unwrap();
+
+        let upstream = spawn_upstream().await;
+        let mut state = test_state(upstream, "http://127.0.0.1:1".to_string());
+        state.rate_limiter = Some(limiter);
+        state.rate_limit_per_minute = 2;
+        let app = build_router(state);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/api/v1/stocks/600519/history");
+        for i in 1..=2 {
+            let resp = client
+                .post(&url)
+                .header("content-type", "application/json")
+                .body("{}")
+                .send()
+                .await
+                .unwrap();
+            assert!(
+                resp.status().is_success(),
+                "第 {i} 个请求在配额内应放行（上游可达）"
+            );
+        }
+
+        let third = client
+            .post(&url)
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(third.status().as_u16(), 429, "超限应拒绝");
+        assert_eq!(third.headers().get("retry-after").unwrap(), "60");
+
+        // 限流面之外不受影响：健康检查不占配额（走到网关处理器而非 429）
+        let health = client
+            .get(format!("http://{addr}/health"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            health.status().as_u16(),
+            200,
+            "健康检查不应被 /api 限流拦截"
+        );
     }
 
     /// 在临时端口起一个带 /health、/echo 路由的上游 axum 服务，返回其基地址。
