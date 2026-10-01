@@ -16,6 +16,7 @@ pub mod memory;
 pub mod models;
 pub mod optimize;
 pub mod parallel;
+pub mod patterns;
 pub mod platform;
 pub mod risk;
 #[cfg(feature = "std")]
