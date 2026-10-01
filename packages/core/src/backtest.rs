@@ -223,9 +223,10 @@ fn max_drawdown(equity_curve: &[f64]) -> f64 {
     max_dd
 }
 
-/// 年化夏普（日频假设；窗口 < 2 个收益样本时返回 0）
+/// 年化夏普（日频假设；样本标准差需 ≥ 2 个收益样本，不足返回 0——
+/// 2 点净值只有 1 个收益，方差分母 n-1 = 0 会产 NaN 污染寻优排序）
 fn annualized_sharpe(equity_curve: &[f64]) -> f64 {
-    if equity_curve.len() < 2 {
+    if equity_curve.len() < 3 {
         return 0.0;
     }
     let returns: Vec<f64> = equity_curve
