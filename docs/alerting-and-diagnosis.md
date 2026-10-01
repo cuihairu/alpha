@@ -1,0 +1,81 @@
+# 实时告警与智能故障诊断（TODO L464）
+
+口径：**工程项**——Prometheus 告警规则 + Alertmanager 路由 +
+Webhook 多渠道分发 + 诊断引擎纯函数库。Jaeger OTLP 全量 span
+导出仍登记不实现（见 docs/distributed-tracing.md 登记边界）。
+
+## 1. 链路
+
+```
+四服务 /metrics → Prometheus（rules 评估）→ Alertmanager（分组/抑制/路由）
+    → alert-webhook :8080（/alerts、/alerts/critical）
+    → 钉钉/企微/Slack/PagerDuty（env 注入缺失则仅日志）+ 结构化日志 → Loki
+```
+
+## 2. 规则（config/alpha-alerts.yml，8 条）
+
+| 告警 | 数据源（埋点位置） |
+|---|---|
+| GatewayRateLimitExceeded | gateway `alpha_gateway_rate_limit_total{mode="denied"}`（L446） |
+| GatewayUpstreamUnhealthy | gateway `alpha_gateway_service_health{upstream=…}`（L459/L464） |
+| GatewayErrorRateHigh | gateway `alpha_gateway_requests_total{method,status}`（L459） |
+| DataEngineQueryLatencyHigh | data-engine `alpha_dataengine_query_duration_seconds` histogram（L464） |
+| DataEngineMemoryPressure | data-engine `alpha_dataengine_memory_bytes{mode}` gauge，Linux /proc（L464） |
+| RealtimeFeedConnectionLoss | realtime `alpha_realtime_feed_connected` gauge（L464） |
+| RealtimeFeedMessageGap | realtime `alpha_realtime_messages_total` counter（L464） |
+| PrometheusTargetDown | Prometheus 自带 `up == 0`（无需业务埋点） |
+
+硬教训（已修，勿回退）：
+
+1. 健康 gauge 按 **`upstream`** 标签分桶——Prometheus 抓取会用 target 的
+   `job` 标签覆盖指标自报的同名标签（`honor_labels` 默认 false），规则写
+   `{job="data-engine"}` 永远匹配不上（见网关 `probe_service` 注释）。
+2. `memory_bytes{mode="used"}/{mode="total"}` 两序列 mode 值不同，直接相除
+   向量匹配失败——必须 `/ on()` 空标签匹配。
+3. 规则只引用已真实埋点的指标：初版含 Prometheus/Loki/alloc/SIMD 六条
+   幻影规则（无任何 emitter），已删除。Loki 健康看 Grafana 数据源，
+   TrackingAllocator 趋势看 `profile.sh`，SIMD 降级看启动日志——三者进
+   指标体系是后续项，本单只在诊断引擎知识库留规则槽位。
+
+## 3. Alertmanager（config/alertmanager.yml）
+
+- 根路由按 `(alertname, job, severity)` 分组；`critical` 双投
+  critical-webhook（`continue: true`，1h 重复）；
+- `GatewayRateLimitExceeded` 同 job 10 分钟只通知一次（限流风暴天然高频）；
+- `severity: info` 进 `null` 接收器只记录；
+- 抑制三条：上游挂→屏蔽其 scrape 派生告警；内存压力→屏蔽查询延迟；
+  连接中断→屏蔽消息间隔（因果方向：源在上、派生在下）。
+- 内网 webhook 无需认证：配置里不写空 `basic_auth`/`bearer_token`
+  （空用户名反而使 `amtool check-config` 报 invalid）；`templates` 段
+  在模板文件落盘前不写（指向不存在路径 alertmanager 拒绝启动）。
+
+## 4. Webhook（services/alert-webhook，随 workspace 门禁）
+
+- Axum 三路由：`/health`、`/alerts`、`/alerts/critical`（与 alertmanager
+  两 receiver URL 逐字对齐）；渠道 env 缺失只告警日志不阻断启动；
+  分发 `tokio::spawn` 并行、单渠道失败不影响其他渠道。
+- 反序列化兼容：Alertmanager 原生 `externalURL`/`generatorURL`
+  （URL 全大写，`rename_all = "camelCase"` 推导不上，必须显式
+  `rename`）；`generatorURL` 缺失默认空串（代理裁剪不整批 400）。
+- Label 取值走 `label_or` helper——`unwrap_or(&"...".to_string())`
+  借用函数内临时值（E0716/E0515），是本文件最高频的编译坑。
+
+## 5. 诊断引擎（packages/storage/src/diagnosis.rs + tools/diagnose）
+
+- `DiagnosisEngine` 纯函数库（零 IO）：告警指纹+时间窗口输入，
+  规则知识库（`DiagnosisRule`：告警通配/必需指标异常/日志模式/
+  追踪特征/根因分类/基础置信分/修复动作）匹配 → `DiagnosisReport`
+  （根因评估+去重排序动作+平均置信分）。
+- 查询执行（Prometheus/Loki/Jaeger 拉数）归调用方
+  （webhook/CLI/定时任务），引擎只做判定——可单测、无 tuple。
+- CLI：`cargo run -p alpha-diagnose -- --help`（随 workspace 成员）。
+
+## 6. 非交互假设（自行判定，已注明）
+
+1. 通知渠道只做到 Webhook 转发层；短信/电话升级链归运维侧。
+2. `repeat_interval` 默认 4h（critical 1h）：告警风暴与打扰度的折中，
+   随 on-call 制度调。
+3. 诊断引擎知识库首批规则覆盖 8 条 Prometheus 告警；新故障模式
+   按 `DiagnosisRule` 结构增量登记，置信分人工复核。
+4. alert-webhook 用 reqwest 0.12（需 rustls-tls），与网关的 0.11
+   并存——服务独立构建，版本不强制统一。

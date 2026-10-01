@@ -1,0 +1,20 @@
+[package]
+name = "alpha-alert-webhook"
+version.workspace = true
+edition.workspace = true
+description = "Alertmanager Webhook receiver with multi-channel notification forwarding"
+license.workspace = true
+
+[dependencies]
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+# 独立版本：workspace 内其余服务用 reqwest 0.11，此服务需 rustls-tls 走 0.12
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }

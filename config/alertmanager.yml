@@ -1,0 +1,82 @@
+# Alertmanager 配置（L464 实时告警）：告警路由、分组、抑制、多渠道通知
+# 部署位置：docker-compose.yml 新增 alertmanager 服务，Prometheus 通过 remote_write 或 alerting 指向
+# 通知渠道：Webhook（默认，可对接钉钉/企业微信/Slack/PagerDuty/Email 等）
+
+global:
+  resolve_timeout: 5m
+  # HTTP 客户端公共设置
+  http_config:
+    follow_redirects: true
+    enable_http2: true
+
+# 路由树：根路由按 severity 分发，关键告警直达高优先级渠道
+route:
+  group_by: ['alertname', 'job', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default-webhook'
+  routes:
+    # 关键告警：限流、连接中断、上游全挂 → 立即通知、不分组抑制
+    - match:
+        severity: critical
+      receiver: 'critical-webhook'
+      continue: true
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1h
+
+    # 告警风暴抑制：同一 job 同类告警 10 分钟内只通知一次
+    - match:
+        alertname: "GatewayRateLimitExceeded"
+      receiver: 'default-webhook'
+      group_by: ['job']
+      group_interval: 10m
+      repeat_interval: 2h
+
+    # info 级仅记录不推送（如 SIMD 降级）
+    - match:
+        severity: info
+      receiver: 'null'
+      continue: false
+
+# 抑制规则：上游挂了时屏蔽下游派生告警（避免风暴）
+inhibit_rules:
+  # 网关检测到上游不可达时，抑制该上游自身的 scrape 失败告警
+  - source_match:
+      alertname: 'GatewayUpstreamUnhealthy'
+    target_match_re:
+      alertname: 'PrometheusScrapeFailure|PrometheusTargetDown'
+    equal: ['job']
+
+  # 数据引擎内存压力时，抑制查询延迟告警（因果关联）
+  - source_match:
+      alertname: 'DataEngineMemoryPressure'
+    target_match:
+      alertname: 'DataEngineQueryLatencyHigh'
+    equal: ['job']
+
+  # 实时行情连接中断时，抑制消息间隔告警
+  - source_match:
+      alertname: 'RealtimeFeedConnectionLoss'
+    target_match:
+      alertname: 'RealtimeFeedMessageGap'
+    equal: ['job']
+
+# 接收器定义（auth 块缺失即匿名：内网 webhook 无需认证，
+# 空 username/password 反而会在 alertmanager config-check 报 invalid）
+receivers:
+  # 默认 Webhook（统一入口，外部可挂钉钉/企业微信/Slack/自建告警平台）
+  - name: 'default-webhook'
+    webhook_configs:
+      - url: 'http://alertmanager-webhook:8080/alerts'
+        send_resolved: true
+
+  # 关键告警专用 Webhook（可配更激进的重试/升级策略）
+  - name: 'critical-webhook'
+    webhook_configs:
+      - url: 'http://alertmanager-webhook:8080/alerts/critical'
+        send_resolved: true
+
+  # 空接收器：info 级静默
+  - name: 'null'

@@ -2,9 +2,14 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alertmanager 告警转发（L464）
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 rule_files:
-  # - "first_rules.yml"
-  # - "second_rules.yml"
+  - "alpha-alerts.yml"
 
 scrape_configs:
   - job_name: 'prometheus'

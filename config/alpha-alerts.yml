@@ -1,0 +1,105 @@
+groups:
+  - name: alpha-finance-alerts
+    interval: 30s
+    rules:
+
+      # ===== 网关层告警 =====
+      - alert: GatewayRateLimitExceeded
+        expr: rate(alpha_gateway_rate_limit_total{mode="denied"}[5m]) > 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "API 网关限流触发"
+          description: "检测到 API 请求被限流拒绝。最近 5 分钟内拒绝率>0，请检查客户端请求频率或配额设置。"
+          runbook: "docs/alerting-and-diagnosis.md#gatewayratelimitexceeded"
+
+      - alert: GatewayUpstreamUnhealthy
+        # 注意：health gauge 按 `upstream` 标签分桶（job 标签会被抓取覆盖，
+        # 见 api-gateway probe_service 注释），规则必须用 upstream 而非 job。
+        expr: |
+          alpha_gateway_service_health{upstream="data-engine"} == 0 or
+          alpha_gateway_service_health{upstream="real-time-feed"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "上游服务不可达"
+          description: "网关发现 data-engine 或 real-time-feed 服务状态不健康。"
+          runbook: "docs/alerting-and-diagnosis.md#gatewayupstreamunhealthy"
+
+      - alert: GatewayErrorRateHigh
+        expr: |
+          (
+            rate(alpha_gateway_requests_total{status=~"5.."}[5m])
+            /
+            rate(alpha_gateway_requests_total[5m])
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "网关 HTTP 5xx 错误率过高"
+          description: "近 5 分钟网关 5xx 错误率超过 5%（无流量时两侧均为空向量，规则静默不误报）。"
+          runbook: "docs/alerting-and-diagnosis.md#gatewayerrorratehigh"
+
+      # ===== 数据引擎告警 =====
+      - alert: DataEngineQueryLatencyHigh
+        expr: histogram_quantile(0.95, rate(alpha_dataengine_query_duration_seconds_bucket[5m])) > 2
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据引擎查询延迟升高"
+          description: "95% 查询延迟超过 2 秒。"
+          runbook: "docs/alerting-and-diagnosis.md#dataenginequerylatencyhigh"
+
+      - alert: DataEngineMemoryPressure
+        # used/total 两序列 mode 标签值不同，直接相除无法按标签对齐，
+        # 须用 on() 空标签匹配做标量式除法。
+        expr: |
+          (
+            alpha_dataengine_memory_bytes{mode="used"}
+            / on()
+            alpha_dataengine_memory_bytes{mode="total"}
+          ) * 100 > 85
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据引擎内存使用率过高"
+          description: "数据引擎内存使用率超过 85%（仅 Linux /proc 打点，非 Linux 无数据静默）。"
+          runbook: "docs/alerting-and-diagnosis.md#dataenginememorypressure"
+
+      # ===== 实时行情告警 =====
+      - alert: RealtimeFeedConnectionLoss
+        expr: alpha_realtime_feed_connected == 0
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "实时行情连接中断"
+          description: "实时行情 feed 与网关的 WebSocket 连接已中断。"
+          runbook: "docs/alerting-and-diagnosis.md#realtimefeedconnectionloss"
+
+      - alert: RealtimeFeedMessageGap
+        expr: |
+          sum(rate(alpha_realtime_messages_total[1m])) < 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "实时行情消息吞吐过低"
+          description: "近 1 分钟实时行情消息频率低于 1 msg/s（连接中断由 ConnectionLoss 覆盖，本规则只看存活不断流）。"
+          runbook: "docs/alerting-and-diagnosis.md#realtimefeedmessagegap"
+
+      # ===== Prometheus 自身（标准 up 指标，无需业务埋点） =====
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus 抓取目标离线"
+          description: "Prometheus 超过 2 分钟抓不到目标（{{$labels.job}}/{{$labels.instance}}）。"
+          runbook: "docs/alerting-and-diagnosis.md#prometheustargetdown"

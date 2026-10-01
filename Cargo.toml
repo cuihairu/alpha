@@ -10,6 +10,7 @@ members = [
     "services/data-engine",
     "services/real-time-feed",
     "services/collector",
+    "services/alert-webhook",
 
     # 前端应用
     "wasm-analyzer",
