@@ -85,6 +85,9 @@
 * 断言必须有信息量：`assert!(true)` 式空断言等于没有测试（review 即删）。
 * 二进制行为变更后须用重建的二进制做进程级冒烟（`cargo test` 不重编 bin target，
   先 `cargo build -p <svc>`——历史上多次踩坑）。
+* 跨服务端到端冒烟 = `scripts/check-e2e.sh`（TODO L469）：真实进程拉起四服务，断言
+  聚合健康三上游 / REST 反代 + x-trace-id 回填 / WS 反代握手 / gateway 业务指标在位；
+  Redis 前置（`E2E_REDIS_URL` 可覆写）、端口 env 可覆写、失败自动倾倒服务日志。
 
 ## 9. 注释与文档
 
@@ -113,11 +116,17 @@ scripts/check-cross-platform.sh
 # 全量测试（Redis 门控测试需本机 Redis；无则自跳过）
 REDIS_TEST_URL=redis://127.0.0.1:6379 \
   cargo test --workspace --all-targets --exclude alpha-desktop
+
+# 端到端跨服务冒烟（构建四服务 + 真实进程链路断言；需本地 Redis）
+scripts/check-e2e.sh
 ```
 
 CI（.github/workflows/ci.yml）：`lint` 作业 = §11 前两命令；
 `test` 作业 = 作业内 Redis service + `protobuf-compiler` 安装后跑全量测试；
 `wasm` 作业 = `scripts/check-cross-platform.sh` + wasm-pack 构建；
+`build` 作业 = 五目标多平台并行构建（fail-fast=false 互不遮蔽，作业内注释即设计说明）；
+`e2e` 作业 = Redis 启动 + `scripts/check-e2e.sh`（Linux/macOS 矩阵；Windows 运行期
+缺 Redis 简单获取途径，其编译面由 `build` 覆盖，运行期矩阵归 TODO L469 后续登记）；
 `security` 作业 = cargo audit（**报告型**，`continue-on-error: true` 不阻塞——
 现存 8 个 cargo 依赖漏洞属依赖升级债，另行立项，避免长期红灯淹没真信号）。
 

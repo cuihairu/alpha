@@ -179,6 +179,45 @@ jobs:
       - name: 构建 workspace（含测试目标编译）
         run: cargo build --workspace --all-targets --exclude alpha-desktop --target ${{ matrix.target }}
 
+  # 端到端跨服务冒烟（TODO L469）：真实进程四服务链路（聚合健康/REST+WS 反代/trace-id/业务指标）。
+  # Windows 运行期缺 Redis 简单获取途径（windows runner 默认 Windows 容器），其编译面由 build 矩阵覆盖，
+  # 运行期 e2e 先行 Linux/macOS；跨平台运行期矩阵归后续（登记见 TODO L469 标注）
+  e2e:
+    name: E2E（${{ matrix.os }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 protobuf-compiler（Linux）
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: 安装 protobuf-compiler（macOS）
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+
+      # e2e 依赖 Redis（data-engine/real-time-feed 启动即连）
+      - name: 启动 Redis（Linux，docker）
+        if: runner.os == 'Linux'
+        run: docker run -d --name e2e-redis -p 6379:6379 redis:7-alpine
+
+      - name: 启动 Redis（macOS，brew）
+        if: runner.os == 'macOS'
+        run: brew install redis && redis-server --daemonize yes
+
+      - name: 运行端到端冒烟
+        run: scripts/check-e2e.sh
+
   security:
     name: 安全审计（报告型，不阻塞）
     runs-on: ubuntu-latest
