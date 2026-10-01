@@ -130,6 +130,57 @@ ws_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
 [ "$ws_code" = "101" ] || fail "WS 反代握手非 101（got=$ws_code）"
 echo "✅ WS 反代：/ws 握手 101"
 
+# --- 断言 3b：WS 消息级契约——版本化同步 Resync 回帧（L491 统筹补深） ---
+# L469 登记的缺口「未含行情消息级 WS 载荷断言」的最小闭环：连上 /ws 后发
+# Subscribe（登记订阅）+ Resync（from_seq=0 丢帧恢复），契约保证「无论通道
+# 是否有数据都必须回帧」（Full 快照或 Error），超时静默 = 协议破坏。
+# 数据面注入（XADD 行情 → 广播 Delta 断言）依赖 envelope 解析链，留待
+# 数据面 e2e 加深时接（见 docs/testing.md §边界）。
+WS_SCRIPT="$(mktemp /tmp/ws_resync_XXXX.mjs)"
+cat >"$WS_SCRIPT" <<'EOF'
+const url = process.argv[2];
+const ws = new WebSocket(url);
+const timeout = setTimeout(() => {
+  console.error('❌ WS 消息级：5s 内未收到任何回帧（Resync 静默 = 协议破坏）');
+  process.exit(1);
+}, 5000);
+const fail = (msg) => { clearTimeout(timeout); console.error(`❌ WS 消息级：${msg}`); process.exit(1); };
+ws.onopen = () => {
+  // 线上帧型 = serde variant 原名 PascalCase（无 rename，实测探针锁定）：
+  // {"type":"Resync",...} / {"type":"Sync",...}——小写会静默不进分支
+  ws.send(JSON.stringify({ type: 'Subscribe', id: 'e2e-l491', channels: ['real_time_quotes'], symbols: ['600519'] }));
+  ws.send(JSON.stringify({ type: 'Resync', channel: 'real_time_quotes', from_seq: 0 }));
+};
+const seen = [];
+ws.onmessage = (ev) => {
+  let frame;
+  try { frame = JSON.parse(ev.data); } catch { fail(`非 JSON 帧: ${String(ev.data).slice(0, 80)}`); return; }
+  seen.push(frame.type);
+  if (frame.type === 'Sync') {
+    // SyncMessage 契约：channel 回显 + seq 数值 + op ∈ {full, delta} + data 在位
+    if (frame.channel !== 'real_time_quotes') fail(`sync.channel 未回显: ${frame.channel}`);
+    if (typeof frame.seq !== 'number') fail(`sync.seq 非数值: ${frame.seq}`);
+    if (!['full', 'delta'].includes(frame.op)) fail(`sync.op 非法: ${frame.op}`);
+    if (frame.data === undefined) fail('sync.data 缺失');
+    clearTimeout(timeout);
+    console.log(`✅ WS 消息级：Resync → ${frame.op} 快照回帧（seq=${frame.seq}，全程帧型: ${seen.join(',')})`);
+    process.exit(0);
+  }
+  if (frame.type === 'Error') {
+    // 通道不存在等：契约允许 Error 回帧（必须显式拒绝而非静默）
+    if (typeof frame.code !== 'number' || typeof frame.message !== 'string') fail('error 帧缺 code/message');
+    clearTimeout(timeout);
+    console.log(`✅ WS 消息级：Resync → 显式 Error 回帧（code=${frame.code}，全程帧型: ${seen.join(',')})`);
+    process.exit(0);
+  }
+  // 其他帧型（Connected/Ping 等）：继续等 Sync/Error
+};
+ws.onerror = () => fail('连接错误');
+EOF
+node "$WS_SCRIPT" "ws://127.0.0.1:$GW_PORT/ws" || fail "WS 消息级 Resync 契约断言失败"
+rm -f "$WS_SCRIPT"
+echo "✅ WS 消息级：版本化同步 Resync 回帧契约成立"
+
 # --- 断言 4：gateway /metrics 暴露业务指标（跨服务调用已发生之后） ---
 gw_metrics="$(curl -s --max-time 5 "http://127.0.0.1:$GW_PORT/metrics")"
 grep -q '^alpha_gateway_requests_total' <<<"$gw_metrics" \
