@@ -9,7 +9,7 @@
     "dev": "node server.js",
     "build": "npm run build:wasm && npm run build:prod",
     "build:wasm": "cd ../wasm-analyzer && wasm-pack build --target web --out-dir ../web/pkg",
-    "build:prod": "npm run prepare:vendors && mkdir -p dist && cp -r *.html *.css *.js server.js pkg/ vendor/ dist/ && cp dist/index.html dist/app.html",
+    "build:prod": "npm run prepare:vendors && mkdir -p dist && cp -r *.html *.css *.js server.js pkg/ vendor/ dist/ && cp dist/index.html dist/app.html && node scripts/optimize-dist.mjs dist",
     "prepare:vendors": "node scripts/prepare-vendors.mjs",
     "clean": "rm -rf pkg/ node_modules/ vendor/ dist/",
     "install:wasm-pack": "curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh",

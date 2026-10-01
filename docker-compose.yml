@@ -256,6 +256,21 @@ services:
       - alpha-network
     restart: unless-stopped
 
+  # Web 静态资源源站（L515）：serve web/dist 指纹产物，预压缩体 + 缓存头
+  # 由挂载的 nginx 配置下发；CDN 在其前缘回源（docs/web-cdn.md）。
+  # 上线顺序：cd web && npm run build（产 dist/）→ compose up web-origin
+  web-origin:
+    image: nginx:1.27-alpine
+    container_name: alpha-web-origin
+    ports:
+      - '8088:80'
+    volumes:
+      - ./web/dist:/usr/share/nginx/html:ro
+      - ./config/nginx/web-origin.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
 volumes:
   timescaledb_data:
   clickhouse_data:
