@@ -84,6 +84,13 @@ web/app/                    Vite + React 18 + TypeScript（独立工程，不动
 与既有四道 Rust 门禁并存：`check-lint.sh` / 全仓测试 / `check-cross-platform.sh`
 / `check-desktop.sh` 语义均不变（本单 Rust 零改动，复跑实证 0 失败）。
 
+CI 侧观察（登记，非阻塞）：`web/app` 引入 npm 依赖后，GitHub 托管的
+**Dependabot Updates** 作业（平台生成；仓内 `.github/workflows/` 无此文件、
+无接缝可改）开始对 npm 生态跑 security 更新扫描，其自有 `Run Dependabot`
+步骤失败（伴随 `GITHUB_REGISTRIES_PROXY` 解析警告、npm registry 代理阶段
+中断）——平台侧问题，**非必需作业**、不阻塞合并，与「安全审计（报告型）」
+同族登记观察，仓内不为其改门禁。
+
 ## 6. Desktop / Mobile 接入边界（本单 ③，只登记不实现）
 
 - **Desktop（Tauri 1.5，已落地）**：现 `tauri.conf.json` 以 `web/dist` 为
