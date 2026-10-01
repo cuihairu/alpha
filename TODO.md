@@ -448,7 +448,7 @@
 - [x] 构建数据压缩和列式存储优化算法：packages/storage/columnar.rs（纯函数算法层、零 IO，行组尺寸与 zstd 级别实测调优归 lake writer 落地沿 L445 §9 边界）。编码选择器 `choose_encoding` 决策矩阵（单调列→Delta 优先如 timestamp；基数 ≤1/4→Dictionary 如 symbol/exchange；其余 Plain；Rle 留显式指定口）+ 压缩比估算 `estimate_ratio`（统一 8B/值可比口径）。三种核心编码实现均往返可逆且 serde 可序列化（清单/调度侧直接消费）：Delta（首值+差分+显式 len 区分空列与单值列——`[0]` 单元素列不得误判空）、RLE（值+游程对）、Dictionary（去重值表+索引向量，出现顺序字典）。测试 4 项锁定决策矩阵边界（distinct×4==len 恰中 Dictionary、单元素列不走 Delta）、三编码往返、空列语义、估算数值（150 值 2 游程 50x、5ms 步长时间戳 Delta>3x）（✅ 2026-10-02）
 
 ## ⚡ 性能优化工程
-- [ ] 实现 Rust 零拷贝数据处理和内存池管理
+- [x] 实现 Rust 零拷贝数据处理和内存池管理：packages/core/memory.rs（沿 hybrid_cache 线程惯例 std::sync::Mutex + 中毒 map_err）。内存池侧 `BufferPool`：`Vec<u8>` 缓冲 acquire/release 复用（池空或容量不足才新分配），防膨胀双阈值回收（单缓冲超 max_capacity 直接丢弃、空闲数达 max_idle 拒收），AtomicU64 命中统计 + reuse_ratio 复用率面；`PooledBuffer` Deref/DerefMut + Drop 自动归还（中毒池宁可漏回收不可 drop 内 panic）。零拷贝侧 `QuoteFrame`：32 字节定长行情帧（symbol[6]+pad[2]+price f64+volume f64+timestamp i64，LE）解码视图——symbol `core::str::from_utf8` 直接借用输入缓冲、标量 from_le_bytes 逐字节构造无对齐要求，全程零堆分配；`encode_frame_into` 配合池化缓冲消除高频编码路径分配，构成「解码借用/编码复用」闭环。测试 4 项：复用命中率与清零语义、双阈值回收（超容量不回收/同时持有 4 还 2 池满裁剪）、全字段往返（2^-2 精确小数逐位验证）、坏长度/坏 symbol/空 symbol/超长 symbol 拒绝矩阵（✅ 2026-10-02）
 - [ ] 开发 SIMD 优化的向量化计算算法
 - [ ] 构建多核并行计算引擎（Rayon + Web Workers）
 - [ ] 实现智能预取和后台数据同步机制
