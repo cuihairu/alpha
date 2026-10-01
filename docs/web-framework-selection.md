@@ -76,7 +76,7 @@ web/app/                    Vite + React 18 + TypeScript（独立工程，不动
 
 新脚本 `scripts/check-web.sh`，接入 CI `wasm` 作业（ubuntu-latest 自带 node）：
 
-1. **旧演示页在场守门**（行为不回退：五文件在场 + `node --check` 语法冒烟）
+1. **旧演示页在场守门**（行为不回退：六文件在场 + `node --check` 语法冒烟）
 2. `npm ci`（lockfile 锁定）
 3. `tsc --noEmit` 类型检查 + `vitest run` 单测
 4. `vite build` 产物构建
