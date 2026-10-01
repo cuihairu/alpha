@@ -72,6 +72,14 @@
     "security": {
       "csp": "default-src 'self'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' ws: wss: http://localhost:*"
     },
+    "updater": {
+      "active": false,
+      "dialog": true,
+      "pubkey": "",
+      "endpoints": [
+        "https://releases.alpha.finance.example/tauri/{{target}}/{{current_version}}"
+      ]
+    },
     "windows": [
       {
         "title": "Alpha Finance - 金融数据分析平台",

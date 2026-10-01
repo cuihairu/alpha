@@ -232,3 +232,23 @@ fn dev_path_and_dist_dir_are_distinct() {
         "distDir 应是相对 crate 根的路径: {dist}"
     );
 }
+
+#[test]
+fn updater_registered_but_inert() {
+    // L519：自动更新通道先登记 schema（endpoint 模板 + dialog 语义），
+    // 激活归发布流水线（L470）：翻真需 pubkey（minisign 公钥入 conf、
+    // 私钥进 CI secret）+ tauri 依赖补 "updater" feature + endpoint 就绪。
+    // active 在此必须保持 false——真值而无 pubkey 会让 gui 构建期直接失败。
+    let config = load_config();
+    let updater = &config.tauri.updater;
+    assert!(!updater.active, "发布流水线接入前 updater 必须保持 inert");
+    assert!(
+        updater.endpoints.iter().flatten().any(|e| {
+            // Url 解析会把路径里的 `{}` 规范化为 %7B/%7D——tauri v1 updater
+            // 运行时对原始与百分号编码两种形态都做占位符替换，契约两边都认
+            let template = e.to_string().replace("%7B", "{").replace("%7D", "}");
+            template.contains("{{target}}") && template.contains("{{current_version}}")
+        }),
+        "endpoint 模板须含 {{{{target}}}}/{{{{current_version}}}} 占位符"
+    );
+}
