@@ -5,12 +5,24 @@
  */
 
 :root {
+  color-scheme: light;
   --fg: #1f2d3d;
   --fg-muted: #6b7a8d;
   --accent: #2980b9;
   --border: #d8e0e8;
   --bg: #ffffff;
   --bg-soft: #f5f7fa;
+}
+
+/* 深色令牌（L432）：data-theme='dark' 由 ThemeToggle 写入（system 档经 JS 解析后同样落到具体值） */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --fg: #d8e0e8;
+  --fg-muted: #8a99a8;
+  --accent: #3d9be9;
+  --border: #2c3540;
+  --bg: #14181d;
+  --bg-soft: #1d232a;
 }
 
 * {
@@ -34,6 +46,19 @@ main {
 
 h1 {
   font-size: 22px;
+  margin: 8px 0;
+}
+
+/* 页头：标题 + 主题切换同行，窄屏自动换行 */
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  justify-content: space-between;
+}
+
+.site-header h1 {
   margin: 8px 0;
 }
 

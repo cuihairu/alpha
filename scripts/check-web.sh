@@ -26,7 +26,8 @@ for f in web/app/package.json web/app/package-lock.json web/app/index.html \
          web/app/src/components/QuoteTable.tsx web/app/src/components/IndicatorPanel.tsx \
          web/app/src/components/PriceChart.tsx web/app/src/components/SqlWorkbench.tsx \
          web/app/src/components/ResultGrid.tsx web/app/src/components/WasmProbe.tsx \
-         web/app/src/styles.css \
+         web/app/src/styles.css web/app/src/lib/theme.ts \
+         web/app/src/components/ThemeToggle.tsx \
          web/app/vite.config.ts; do
   if [ ! -f "$f" ]; then
     echo "缺失骨架文件: $f"
@@ -47,6 +48,9 @@ grep -q 'name="viewport"' web/app/index.html || { echo "index.html 缺 viewport 
 grep -q 'styles.css' web/app/src/main.tsx || { echo "main.tsx 未挂载 styles.css"; exit 1; }
 grep -q '@media (max-width: 720px)' web/app/src/styles.css || { echo "styles.css 缺移动断点"; exit 1; }
 grep -q '@media (max-width: 1024px)' web/app/src/styles.css || { echo "styles.css 缺平板断点"; exit 1; }
+# 主题系统两要素（L432）：深色令牌块 + 三态偏好持久化键
+grep -q "data-theme='dark'" web/app/src/styles.css || { echo "styles.css 缺深色令牌"; exit 1; }
+grep -q 'THEME_STORAGE_KEY' web/app/src/lib/theme.ts || { echo "theme.ts 缺持久化键"; exit 1; }
 
 echo "--- [3/4] 依赖安装（npm ci，lockfile 锁定）"
 cd web/app
