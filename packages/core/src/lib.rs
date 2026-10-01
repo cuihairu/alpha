@@ -13,6 +13,7 @@ pub mod memory;
 pub mod models;
 pub mod parallel;
 pub mod platform;
+pub mod simd;
 pub mod streaming;
 pub mod sync;
 pub mod utils;

@@ -449,7 +449,7 @@
 
 ## ⚡ 性能优化工程
 - [x] 实现 Rust 零拷贝数据处理和内存池管理：packages/core/memory.rs（沿 hybrid_cache 线程惯例 std::sync::Mutex + 中毒 map_err）。内存池侧 `BufferPool`：`Vec<u8>` 缓冲 acquire/release 复用（池空或容量不足才新分配），防膨胀双阈值回收（单缓冲超 max_capacity 直接丢弃、空闲数达 max_idle 拒收），AtomicU64 命中统计 + reuse_ratio 复用率面；`PooledBuffer` Deref/DerefMut + Drop 自动归还（中毒池宁可漏回收不可 drop 内 panic）。零拷贝侧 `QuoteFrame`：32 字节定长行情帧（symbol[6]+pad[2]+price f64+volume f64+timestamp i64，LE）解码视图——symbol `core::str::from_utf8` 直接借用输入缓冲、标量 from_le_bytes 逐字节构造无对齐要求，全程零堆分配；`encode_frame_into` 配合池化缓冲消除高频编码路径分配，构成「解码借用/编码复用」闭环。测试 4 项：复用命中率与清零语义、双阈值回收（超容量不回收/同时持有 4 还 2 池满裁剪）、全字段往返（2^-2 精确小数逐位验证）、坏长度/坏 symbol/空 symbol/超长 symbol 拒绝矩阵（✅ 2026-10-02）
-- [ ] 开发 SIMD 优化的向量化计算算法
+- [x] 开发 SIMD 优化的向量化计算算法：packages/core/simd.rs。语义设计「显式 SIMD 与 portable lane 分解同数学语义」：4 lane 部分和（元素按下标 i%4 累入独立 lane、水平归约 (l0+l2)+(l1+l3)）——x86_64 运行时检测 AVX2 后走 `_mm256_add_pd`/`_mm256_mul_pd` 4-f64 向量路（`#[target_feature]` + unsafe 限定于 loadu/storeu/算术），其余平台（wasm32/aarch64/无 AVX2 主机）走 `sum_lane_reference`/`dot_lane_reference` 纯 Rust 同序实现（LLVM 自动向量化兜底），cfg(target_arch) 保证非 x86_64 目标整体剔除内建代码。关键修正：AVX2 尾部余数必须按 lane 分配（remainder[j] 全局下标 4k+j → lane j，与 lane 参考 i%4 对齐）——初版顺序累加 total 因浮点结合序差异破坏位级一致（len=7 实测 ULP 级偏差暴露）。min/max 只走 portable（x86 MINPD 与 f64::min 的 NaN 语义不同，不引入指令级差异）。测试 4 项：跨长度位级一致（含 0/1/3/5/7/13 尾部路径）、与顺序和相对容差 <1e-9、长度不等拒绝+空切片 0.0、NaN 忽略语义（✅ 2026-10-02）
 - [ ] 构建多核并行计算引擎（Rayon + Web Workers）
 - [ ] 实现智能预取和后台数据同步机制
 - [ ] 开发基于 LLVM Profile 的编译优化
