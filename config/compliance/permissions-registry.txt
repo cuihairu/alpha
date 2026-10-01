@@ -17,11 +17,11 @@ tauri:fs # 本地工作区数据文件读写（限用户经 dialog 显式选择�
 tauri:path # 路径解析（fs/dialog 的配套只读能力）
 tauri:notification # 行情告警本地通知（L337 推送决策面的桌面侧形态）
 tauri:globalShortcut # 全局快捷键唤起主窗口（桌面效率特性）
+android:android.permission.USE_BIOMETRIC # L512 生物识别门（androidx.biometric 必需的 normal 权限，安装期授予；门密钥绑定每次认证，docs/mobile-privacy.md）
 
 [planned]
 android:android.permission.INTERNET # api-gateway 真实数据接入时加入（现骨架全本地，见 AndroidManifest 头注释）
 android:android.permission.POST_NOTIFICATIONS # Android 13+ 运行时申请；L337 推送落地时加入
-android:android.permission.USE_BIOMETRIC # L512 生物识别认证落地时加入（normal 权限，安装期授予）
 ios:push-entitlement # APNs 推送 entitlement（iOS 目录属 L119 交付面不动，仅登记边界）
 ios:NSFaceIDUsageDescription # FaceID 用途声明，L512 落地时随 Info.plist 登记
 web:Notification # PWA 通知（L506）：须用户手势触发授权，拒绝则降级站内告警

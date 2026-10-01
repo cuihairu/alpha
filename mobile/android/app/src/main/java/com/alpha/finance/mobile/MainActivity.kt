@@ -1,10 +1,11 @@
 package com.alpha.finance.mobile
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
@@ -23,14 +25,17 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.launch
 
 /**
@@ -43,23 +48,75 @@ import kotlinx.coroutines.launch
  * [refreshWithManualSync]）、长按行情行（→ `analyze`）、双击状态头（折叠
  * api_url 详情行，local-only）。手势编排只在 [Gestures.kt]，本文件只做
  * Compose modifier 挂接与状态应用。
+ *
+ * 隐私接线（L512，docs/mobile-privacy.md）：FLAG_SECURE 防截屏/最近任务
+ * 缩略图；生物识别门 [GateLayer]（设置 opt-in + 设备能力可用才激活），
+ * 退后台即重锁（[onStop] → [GateStateMachine.onBackground]）。基类为
+ * FragmentActivity——androidx.biometric 要求（ComponentActivity 的父类，
+ * Compose setContent 不受影响）。
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private val bridge = AlphaBridge(
         symbols = listOf("600519", "000001"),
         // Android 模拟器约定：10.0.2.2 = 宿主机回环（骨架期仅作配置槽展示）
         apiUrl = "http://10.0.2.2:8080",
     )
 
+    private val gate = GateStateMachine(PrivacySettings())
+    private val gateView = mutableStateOf(LockState.Unlocked to 0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        val settings = PrivacySettingsStore(SharedPreferencesKeyValueStore(this)).load()
+        gate.updateSettings(settings)
+        gateView.value = gate.state to gate.failedAttempts
+        // 防截屏/最近任务缩略图（隐私开关默认开；用户可关）
+        if (settings.screenshotShield) {
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE,
+            )
+        }
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme(colorScheme = lightColorScheme()) {
                 Surface(Modifier.fillMaxSize()) {
-                    MarketScreen(bridge)
+                    GateLayer(
+                        gate = gate,
+                        view = gateView,
+                        settings = settings,
+                        capabilities = AndroidBiometricCapabilities(this),
+                        onRequestUnlock = { requestUnlock() },
+                    ) {
+                        MarketScreen(bridge)
+                    }
                 }
             }
         }
+    }
+
+    /** 退后台即锁：状态机迁移 + Compose 镜像同步 */
+    override fun onStop() {
+        gate.onBackground()
+        gateView.value = gate.state to gate.failedAttempts
+        super.onStop()
+    }
+
+    /** 生物识别解锁流：认证成功/失败都同步 Compose 镜像（失败累计计数） */
+    private fun requestUnlock() {
+        promptBiometricGate(
+            activity = this,
+            title = "解锁 Alpha Mobile",
+            subtitle = "使用生物识别解锁行情与离线数据",
+            negativeText = "取消",
+            onSuccess = { _ ->
+                gate.onAuthSuccess()
+                gateView.value = gate.state to gate.failedAttempts
+            },
+            onFailure = { _ ->
+                gate.onAuthFailure()
+                gateView.value = gate.state to gate.failedAttempts
+            },
+        )
     }
 
     override fun onDestroy() {
@@ -170,6 +227,60 @@ fun MarketScreen(bridge: AlphaBridge) {
                     "置信度 ${result.confidence} · 波动率 ${result.riskMetrics.volatility}",
                 fontSize = 12.sp,
             )
+        }
+    }
+}
+
+/**
+ * 门覆盖层（L512）：仅在「设置开启 + 设备生物识别可用 + 状态机为锁」时
+ * 渲染锁屏，否则直出内容。能力不可用（无硬件/未录入）时门不激活——
+ * 不把用户锁在门外，缺省安全由静态加密承担（docs/mobile-privacy.md §3）。
+ * `view` 为 Activity 侧 Compose 镜像（认证回调与 onStop 同步进来）。
+ */
+@Composable
+fun GateLayer(
+    gate: GateStateMachine,
+    view: State<Pair<LockState, Int>>,
+    settings: PrivacySettings,
+    capabilities: BiometricCapabilities,
+    onRequestUnlock: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val available = remember { capabilities.canAuthenticate() }
+    val gateActive = settings.biometricEnabled && available == GateAvailability.Available
+    val (state, failed) = view.value
+    if (!gateActive || state == LockState.Unlocked) {
+        content()
+    } else {
+        LockScreen(failedAttempts = failed, onUnlock = onRequestUnlock)
+    }
+}
+
+@Composable
+fun LockScreen(failedAttempts: Int, onUnlock: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Alpha Mobile 已锁定", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "生物识别解锁以查看行情与离线数据",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.secondary,
+        )
+        if (failedAttempts > 0) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "连续失败 $failedAttempts 次",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = onUnlock) {
+            Text("生物识别解锁")
         }
     }
 }

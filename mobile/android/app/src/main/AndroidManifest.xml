@@ -2,6 +2,9 @@
 <!-- L301：最小清单——单 Activity（Compose）+ 无网络权限（骨架期 FFI 全本地，
      演示数据由 Rust 侧生成；api-gateway 接入与 INTERNET 权限归后续 TODO） -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- L512 生物识别门：androidx.biometric 的 normal 权限（安装期授予，
+         无运行时弹窗），注册表 [allow] 段有对应条目 -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <application
         android:label="@string/app_name"
         android:supportsRtl="true"

@@ -95,6 +95,9 @@ dependencies {
 
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.9.3")
+    // L512 生物识别门：androidx.biometric（API 26/27 兼容层 + 28+ 框架
+    // BiometricPrompt；要求 FragmentActivity 基类，MainActivity 已换）
+    implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
