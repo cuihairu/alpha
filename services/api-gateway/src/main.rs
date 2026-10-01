@@ -353,6 +353,18 @@ fn is_hop_by_hop(name: &str) -> bool {
         .any(|h| name.eq_ignore_ascii_case(h))
 }
 
+/// Trace-ID 决策（L460，纯函数）：入站带非空 X-Trace-Id → 原样沿用
+/// （跨服务传播同链路）；缺失/空 → 生成 `tr-<uuid>`（网关为链路起点）。
+fn resolve_trace_id(headers: &HeaderMap) -> String {
+    headers
+        .get("x-trace-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("tr-{}", uuid::Uuid::new_v4()))
+}
+
 fn bad_gateway(message: String) -> Response {
     (
         StatusCode::BAD_GATEWAY,
@@ -392,27 +404,33 @@ async fn api_proxy(
     };
 
     let mut request = state.client.request(upstream_method, &upstream_url);
+    // trace-id 统一在循环后注入（避免入站已有头时 reqwest 追加成双值）
+    let trace_id = resolve_trace_id(&headers);
     for (name, value) in headers.iter() {
-        if is_hop_by_hop(name.as_str()) {
+        if is_hop_by_hop(name.as_str()) || name == "x-trace-id" {
             continue;
         }
         if let Ok(value_str) = value.to_str() {
             request = request.header(name.as_str(), value_str);
         }
     }
+    request = request.header("x-trace-id", &trace_id);
     if !body.is_empty() {
         request = request.body(body.to_vec());
     }
 
-    tracing::info!("Proxying {} {} → {}", method, original_uri, upstream_url);
+    tracing::info!(trace_id = %trace_id, "Proxying {} {} → {}", method, original_uri, upstream_url);
 
     match request.send().await {
         Ok(upstream) => {
             let status =
                 StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let mut builder = Response::builder().status(status);
+            // 响应回填 trace-id：客户端/前端可关联日志与后续请求
+            let mut builder = Response::builder()
+                .status(status)
+                .header("x-trace-id", &trace_id);
             for (name, value) in upstream.headers() {
-                if is_hop_by_hop(name.as_str()) {
+                if is_hop_by_hop(name.as_str()) || name == "x-trace-id" {
                     continue;
                 }
                 if let Ok(header_value) = HeaderValue::from_bytes(value.as_bytes()) {
@@ -621,6 +639,71 @@ mod tests {
             // 并行测试会冲突）；render 走本 recorder 快照
             metrics: PrometheusBuilder::new().build_recorder().handle(),
         }
+    }
+
+    #[test]
+    fn resolve_trace_id_propagates_or_generates() {
+        let mut headers = HeaderMap::new();
+        let generated = resolve_trace_id(&headers);
+        assert!(
+            generated.starts_with("tr-"),
+            "缺失时生成 tr- 前缀: {generated}"
+        );
+
+        headers.insert("x-trace-id", "t-123".parse().unwrap());
+        assert_eq!(resolve_trace_id(&headers), "t-123", "入站非空原样沿用");
+
+        headers.insert("x-trace-id", "   ".parse().unwrap());
+        assert!(
+            resolve_trace_id(&headers).starts_with("tr-"),
+            "空白值视同缺失"
+        );
+    }
+
+    /// trace-id 贯穿（L460）：入站带 → 响应原样回填；不带 → 生成并回填
+    #[tokio::test]
+    async fn api_proxy_propagates_trace_id_in_response() {
+        let upstream = spawn_upstream().await;
+        let app = build_router(test_state(upstream, "http://127.0.0.1:1".to_string()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/api/v1/stocks/600519/history");
+        let body_fn = || {
+            reqwest::Client::new()
+                .post(&url)
+                .header("content-type", "application/json")
+                .body("{}")
+        };
+
+        let with_id = client
+            .post(&url)
+            .header("x-trace-id", "t-123")
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            with_id.headers().get("x-trace-id").unwrap(),
+            "t-123",
+            "入站 trace-id 应原样回填"
+        );
+
+        let without_id = body_fn().send().await.unwrap();
+        let generated = without_id
+            .headers()
+            .get("x-trace-id")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(
+            generated.starts_with("tr-"),
+            "缺失时应生成并回填: {generated}"
+        );
     }
 
     #[test]

@@ -457,7 +457,7 @@
 
 ## 🔍 监控与可观测性
 - [x] 集成 Prometheus + Grafana + Loki 全链路监控：服务侧四服务统一 /metrics 面（config/prometheus.yml 既定 scrape 目标终于有了真实端点）——api-gateway/data-engine/real-time-feed/collector 全部接 metrics-exporter-prometheus 0.13（metrics 0.21 workspace）：gateway/data-engine 把 `PrometheusHandle` 入共享 state（collector/realtime-feed 无状态路由直读进程级 handle），`global_metrics_handle()` OnceLock 模式解决 install_recorder 每进程一次与并行测试冲突（首个调用者 install 全局接管 metrics 宏、后续复用渲染；collector 既有 CollectorMetrics 宏指标自动入面）；gateway 带 /metrics 端点测试（200 + text/plain 协议头，空 recorder 空快照语义注明）。基础设施侧：docker-compose 补 Loki（tsdb/filesystem 单机、168h 保留）+ Promtail（docker SD 按 `alpha-` 容器名过滤、容器名→job 标签与 Prometheus 命名对齐）+ Grafana provisioning 落盘（datasources.yml：Prometheus+Loki 双数据源；dashboards provider + alpha-services-overview 仪表盘：四服务 up 统计/抓取时延/Loki 日志面）——修复原 compose 挂载 `./config/grafana/provisioning` 目录不存在导致容器起不来的既有缺陷。全部配置经 compose config + YAML/JSON 解析验证（✅ 2026-10-02）
-- [ ] 开发分布式追踪系统（tracing + Jaeger）
+- [x] 开发分布式追踪系统（tracing + Jaeger）：gateway trace-id 贯穿链路落地 + docs/distributed-tracing.md（Jaeger OTLP 登记边界沿 L445 设计项先例）。贯穿契约：入站非空 `X-Trace-Id` 原样沿用（跨服务/客户端重试串同链路）、缺失/空白生成 `tr-<uuid>`（网关即链路起点）、转发上游统一在透传循环后注入（避免 reqwest 追加成双值、入站已有头跳过）、响应回填供前端关联报障；`resolve_trace_id` 纯函数三态单测 + 集成测试双请求锁定（带 t-123 原样回填/不带生成 tr- 回填）；`tracing::info!(trace_id=...)` 结构化字段入日志。Loki 关联可用：LogQL `{job=~"alpha-.*"} |= "<trace-id>"` 串联 gateway→data-engine→collector（Promtail 侧 L459 已就绪）。Jaeger OTLP 全量 span 导出登记不实现：依赖坐标（opentelemetry/otlp/tracing-opentelemetry 版本对齐）、`tracing_opentelemetry::layer()` 叠加路径、`tr-<uuid>` 与 W3C traceparent 并存映射、`parentbased_traceidratio` 10% 采样（行情 QPS 下全量不可承受）均已登记（✅ 2026-10-02）
 - [x] 实现基于 Metrics 的性能指标收集
 - [x] 构建健康检查和服务依赖监控
 - [ ] 开发 Rust 专用的内存安全监控工具
