@@ -40,6 +40,9 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 # default-features 关掉 plotters/gnuplot（CI 无绘图依赖，数字输出即够）
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 
+# 属性验证（L493）：跨实现数学不变量的随机穷打（tests/proptest_invariants.rs）
+proptest = "1.5"
+
 # 基准入口（harness = false：criterion 自带 main）
 [[bench]]
 name = "indicators_bench"
