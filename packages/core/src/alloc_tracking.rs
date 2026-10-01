@@ -9,6 +9,12 @@
 //!
 //! 性能分析（perf/tokio-console 封装）见 `scripts/profile.sh` 与
 //! `docs/memory-profiling.md`。
+//!
+//! 舱位豁免（L463 安全审计）：本模块是 alpha-core 两个 `#![allow(unsafe_code)]`
+//! 豁免点之一（`GlobalAlloc` 契约），`lib.rs` 的 `#![deny(unsafe_code)]` 下
+//! 新增 unsafe 仅限此处且需同步核对 [`crate::safety_audit`] 预算。
+
+#![allow(unsafe_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};

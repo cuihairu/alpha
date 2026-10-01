@@ -12,9 +12,15 @@
 //! lane 参考实现锁定位级等价；与严格顺序 naive 求和的差异仅在
 //! 浮点结合序（相对误差 ULP 级，容差断言）。
 //!
+//! 舱位豁免（L463 安全审计）：本模块是 alpha-core 两个 `#![allow(unsafe_code)]`
+//! 豁免点之一（target_feature intrinsics），`lib.rs` 的 `#![deny(unsafe_code)]`
+//! 下新增 unsafe 仅限此处且需同步核对 [`crate::safety_audit`] 预算。
+//!
 //! NaN 语义：加法/乘法 NaN 传播与标量一致，安全；比较类运算
 //! （min/max）x86 SIMD 指令与 `f64::min` 的 NaN 行为不同，
 //! 故 [`min_max_f64`] 只用 portable lane 分解，不引入指令级语义差异。
+
+#![allow(unsafe_code)]
 
 /// 4 lane 部分和的 portable 参考实现（SIMD 路径的语义基准，
 /// 同时是无 AVX2 平台的实际执行体）

@@ -3,6 +3,7 @@
 //! 提供所有平台共享的数据模型、算法和工具函数
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![deny(unsafe_code)]
 
 pub mod alloc_tracking;
 pub mod analytics;
@@ -14,6 +15,8 @@ pub mod memory;
 pub mod models;
 pub mod parallel;
 pub mod platform;
+#[cfg(feature = "std")]
+pub mod safety_audit;
 pub mod simd;
 pub mod streaming;
 pub mod sync;
