@@ -1,0 +1,59 @@
+name: Coverage
+
+# L494 代码覆盖率报告：llvm-cov 行/函数汇总 + lcov artifact。
+# 不设阈值（凑数测试反噬质量），报告产出供趋势观察；单独作业不挡常规 CI。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/**'
+      - 'services/**'
+      - 'scripts/check-coverage.sh'
+      - '.github/workflows/coverage.yml'
+  pull_request:
+    paths:
+      - 'packages/**'
+      - 'services/**'
+      - 'scripts/check-coverage.sh'
+      - '.github/workflows/coverage.yml'
+  schedule:
+    - cron: '41 4 * * 1'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Coverage (llvm-cov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: 安装 protobuf-compiler
+        # workspace 依赖图含 alpha-protocols（默认 grpc 特性），build.rs 需要 protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+
+      - name: 安装 cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: 覆盖率门禁（汇总 + lcov）
+        run: scripts/check-coverage.sh
+
+      - name: 上传 lcov 报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov.info
+          path: target/coverage/lcov.info
