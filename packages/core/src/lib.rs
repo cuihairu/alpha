@@ -8,6 +8,7 @@
 pub mod alloc_tracking;
 pub mod analytics;
 pub mod backtest;
+pub mod diagnosis;
 pub mod errors;
 pub mod hybrid_cache;
 pub mod indicators;

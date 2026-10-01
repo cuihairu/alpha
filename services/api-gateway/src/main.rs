@@ -281,8 +281,11 @@ async fn rate_limit_middleware(
     };
 
     if decision.allowed {
+        // L464：放行/拒绝双模计数（GatewayRateLimitExceeded 规则读 mode="denied"）
+        metrics::counter!("alpha_gateway_rate_limit_total", "mode" => "allowed").increment(1);
         next.run(req).await
     } else {
+        metrics::counter!("alpha_gateway_rate_limit_total", "mode" => "denied").increment(1);
         tracing::warn!(%subject, "rate limit exceeded");
         rate_limit_rejection(&decision)
     }
@@ -328,7 +331,7 @@ async fn probe_service(client: &reqwest::Client, name: &str, base_url: &str) -> 
         .await;
     let response_time_ms = start.elapsed().as_millis();
 
-    match result {
+    let status = match result {
         Ok(resp) if resp.status().is_success() => ServiceStatus {
             name: name.to_string(),
             status: "healthy".to_string(),
@@ -344,7 +347,17 @@ async fn probe_service(client: &reqwest::Client, name: &str, base_url: &str) -> 
             status: format!("unreachable: {err}"),
             response_time_ms,
         },
-    }
+    };
+
+    // L464 上游健康 gauge（GatewayUpstreamUnhealthy 数据源）。label 名用
+    // `upstream` 而非 `job`：抓取时 Prometheus 会用 target 的 job 标签
+    // 覆盖指标自报的同名标签（honor_labels 默认 false），job 口径会失真。
+    metrics::gauge!(
+        "alpha_gateway_service_health",
+        "upstream" => name.to_string()
+    )
+    .set(if status.status == "healthy" { 1.0 } else { 0.0 });
+    status
 }
 
 fn is_hop_by_hop(name: &str) -> bool {
@@ -605,6 +618,16 @@ async fn request_logger(
     let response = next.run(req).await;
     let duration = start.elapsed();
 
+    // L464 业务指标：请求数按方法/状态分桶（alpha-alerts 的 5xx 错误率规则数据源）。
+    // metrics 0.22 链式语法（0.21 的内联 value 形态与 exporter 0.13 依赖的
+    // 0.22 全局 slot 错位，见根 Cargo.toml 版本统一说明）
+    metrics::counter!(
+        "alpha_gateway_requests_total",
+        "method" => method.as_str().to_string(),
+        "status" => response.status().as_u16().to_string()
+    )
+    .increment(1);
+
     tracing::info!(
         "Request: {} {} - Status: {} - Duration: {:?}",
         method,
@@ -624,6 +647,20 @@ mod tests {
         routing::get as test_get,
     };
 
+    /// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
+    /// install 全局接管 metrics 宏，后续并行测试复用同一句柄渲染；
+    /// 与 data-engine/collector 的 global_metrics_handle 同款惯例）
+    fn global_metrics_handle() -> PrometheusHandle {
+        static HANDLE: std::sync::OnceLock<PrometheusHandle> = std::sync::OnceLock::new();
+        HANDLE
+            .get_or_init(|| {
+                PrometheusBuilder::new()
+                    .install_recorder()
+                    .unwrap_or_else(|_| PrometheusBuilder::new().build_recorder().handle())
+            })
+            .clone()
+    }
+
     fn test_state(data_engine_url: String, realtime_url: String) -> GatewayState {
         GatewayState {
             client: reqwest::Client::builder()
@@ -637,7 +674,7 @@ mod tests {
             rate_limit_per_minute: 120,
             // build_recorder 不占全局 install（install_recorder 每进程一次，
             // 并行测试会冲突）；render 走本 recorder 快照
-            metrics: PrometheusBuilder::new().build_recorder().handle(),
+            metrics: global_metrics_handle(),
         }
     }
 
@@ -731,7 +768,16 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let response = reqwest::Client::new()
+        let client = reqwest::Client::new();
+        // 触发请求计数（request_logger）与上游探测 gauge（probe_service）注册
+        let health = client
+            .get(format!("http://{addr}/health"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(health.status().as_u16(), 200);
+
+        let response = client
             .get(format!("http://{addr}/metrics"))
             .send()
             .await
@@ -747,9 +793,19 @@ mod tests {
             "Prometheus 文本协议 content-type 应为 text/plain"
         );
         let body = response.text().await.unwrap();
-        // 空 recorder 的 render 为空串（Prometheus 接受空快照）；
-        // 服务运行后此处即 metrics 宏注册的全部指标
-        let _ = body;
+        // L464 契约：业务指标随 handler 执行注册进全局 recorder 并对外暴露
+        assert!(
+            body.contains("alpha_gateway_requests_total"),
+            "应暴露请求计数指标（5xx 错误率规则数据源）:\n{body}"
+        );
+        assert!(
+            body.contains("alpha_gateway_service_health"),
+            "应暴露上游健康 gauge（GatewayUpstreamUnhealthy 数据源）:\n{body}"
+        );
+        assert!(
+            body.contains("upstream=\"data-engine\""),
+            "健康 gauge 应按 upstream 标签分桶（job 标签会被抓取覆盖）:\n{body}"
+        );
     }
 
     #[test]
@@ -825,6 +881,25 @@ mod tests {
             health.status().as_u16(),
             200,
             "健康检查不应被 /api 限流拦截"
+        );
+
+        // L464 指标契约：放行/拒绝计数已发生，/metrics 应暴露 rate_limit_total
+        // （GatewayRateLimitExceeded 规则的 mode="denied" 数据源）
+        let metrics_body = client
+            .get(format!("http://{addr}/metrics"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(
+            metrics_body.contains("alpha_gateway_rate_limit_total"),
+            "限流计数指标应暴露:\n{metrics_body}"
+        );
+        assert!(
+            metrics_body.contains("mode=\"denied\""),
+            "拒绝计数应带 mode=denied 标签:\n{metrics_body}"
         );
     }
 

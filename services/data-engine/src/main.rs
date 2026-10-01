@@ -895,6 +895,25 @@ async fn export_realtime_quotes_parquet(
     Ok(response)
 }
 
+/// 进程 RSS 与系统总内存（L464 `alpha_dataengine_memory_bytes` 数据源）。
+/// Linux-only：/proc 不可得（macOS/Windows）返回 None——不打点即可，
+/// 告警规则与诊断引擎对缺数据口径均为跳过而非误报。
+fn process_and_system_memory_bytes() -> Option<(u64, u64)> {
+    let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let rss_pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let total_kb: u64 = meminfo
+        .lines()
+        .find_map(|l| l.strip_prefix("MemTotal:"))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    // 页大小按 4096 计（x86_64/aarch64 Linux 主流配置；告警阈值是比率口径，
+    // 页大小偏差只整体缩放 RSS，不改变趋势判读）
+    Some((rss_pages * 4096, total_kb * 1024))
+}
+
 /// 执行 SQL 查询
 #[tracing::instrument(skip(state, request))]
 async fn execute_query(
@@ -920,6 +939,16 @@ async fn execute_query(
 
     let execution_time_ms = start.elapsed().as_millis() as u64;
     let rows: usize = results.iter().map(|batch| batch.num_rows()).sum();
+
+    // L464 业务指标：查询耗时直方图（DataEngineQueryLatencyHigh p95 数据源）
+    metrics::histogram!("alpha_dataengine_query_duration_seconds")
+        .record(execution_time_ms as f64 / 1000.0);
+    // 进程 RSS / 系统总内存（DataEngineMemoryPressure 数据源；Linux /proc，
+    // 非 Linux 平台不打点——规则侧无数据自动跳过，不会误报）
+    if let Some((used, total)) = process_and_system_memory_bytes() {
+        metrics::gauge!("alpha_dataengine_memory_bytes", "mode" => "used").set(used as f64);
+        metrics::gauge!("alpha_dataengine_memory_bytes", "mode" => "total").set(total as f64);
+    }
 
     let data = record_batches_to_json(&results)
         .map_err(|err| ApiErrorResponse::internal(err.to_string()))?;

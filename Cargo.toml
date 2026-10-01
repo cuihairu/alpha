@@ -21,7 +21,8 @@ members = [
     "mobile",
 
     # 开发工具
-    "tools/build-tools"
+    "tools/build-tools",
+    "tools/diagnose"
 ]
 
 exclude = [
@@ -111,7 +112,7 @@ tokio-test = "0.4"
 proptest = "1.4"
 
 # 性能监控
-metrics = "0.21"
+metrics = "0.22"
 prometheus = "0.13"
 
 # 内部包引用

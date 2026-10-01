@@ -442,6 +442,10 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
         .await;
     let consumer = format!("rtf-{}", uuid::Uuid::new_v4());
 
+    // L464 行情摄入连接状态（RealtimeFeedConnectionLoss 数据源）：
+    // Redis Stream 连建成功即视为已连接，轮询失败置 0、恢复置 1
+    metrics::gauge!("alpha_realtime_feed_connected").set(1.0);
+
     let (min_idle_ms, sweep_secs, max_delivery) = claim_sweep_config();
     let sweeper_state = app_state.clone();
     let sweeper_queue = queue.clone();
@@ -460,13 +464,20 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
                 )
                 .await;
             let result = match normalized_result {
-                Ok(result) if !result.is_empty() => result,
+                Ok(result) if !result.is_empty() => {
+                    metrics::gauge!("alpha_realtime_feed_connected").set(1.0);
+                    result
+                }
                 _ => match loop_queue
                     .read_group(QUOTES_STREAM, REALTIME_GROUP, &consumer, 20, 1000)
                     .await
                 {
-                    Ok(result) => result,
+                    Ok(result) => {
+                        metrics::gauge!("alpha_realtime_feed_connected").set(1.0);
+                        result
+                    }
                     Err(err) => {
+                        metrics::gauge!("alpha_realtime_feed_connected").set(0.0);
                         tracing::warn!("Failed to poll Redis stream: {}", err);
                         continue;
                     }
@@ -477,6 +488,8 @@ async fn start_stream_consumer(app_state: Arc<AppState>) -> anyhow::Result<()> {
                 quarantine_invalid(&loop_queue, &invalid).await;
             }
             for message in result.messages {
+                // L464 消息吞吐计数（RealtimeFeedMessageGap 的 rate 数据源）
+                metrics::counter!("alpha_realtime_messages_total").increment(1);
                 process_realtime_message(&loop_state, &loop_queue, &message).await;
             }
         }
