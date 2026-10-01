@@ -42,8 +42,12 @@ Yew/Leptos 是从零自研。
   **已按本定论改写为 React 组件化路线并落地**（L428 轮：QuoteTable /
   IndicatorPanel / WasmProbe 组件拆分 + SMA/EMA 指标分析面板，指标纯 TS 口径
   对齐 packages/core），不引入 Yew/Leptos。
-- **TODO L429**（图表库 D3 + Canvas）：React 路线下候选 lightweight-charts /
-  ECharts，D3 作底层备选；选型到 L429 执行时再定。
+- **TODO L429**（图表库 D3 + Canvas）：✅ **已定论 lightweight-charts 5.2 并落地**
+  （TradingView 出品金融图表库：Canvas 原生渲染 + 增量重绘/缩放虚拟化内建，
+  gzip 增量 ~57KB；K 线组件 PriceChart + SMA 叠加线 + 确定性合成行情数据源）。
+  D3 定位为**底层可视化原语**（scale/shape 拼装需自建渲染循环与交互），与
+  「集成高性能图表库」目标不符，不直接引入；ECharts 对行情主图过重（gzip
+  ~300KB+）落备选。TODO 原文「D3.js」按此定论解释落实。
 - **wasm 引擎消费**：维持 `wasm-analyzer` → `web/pkg/`（wasm-pack, target web）
   现模式，React 侧经动态 import 探针接缝（`web/app/src/App.tsx`），**不**把
   UI 构建卷进 Rust workspace 门禁（`check-cross-platform.sh` 四步语义不变）。
