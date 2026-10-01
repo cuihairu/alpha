@@ -24,6 +24,8 @@ use serde::Serialize;
 
 use alpha_storage::{RateDecision, RedisRateLimiter};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+
+mod auth;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
@@ -79,6 +81,26 @@ struct Args {
     #[arg(long, default_value_t = 120)]
     rate_limit_per_minute: u32,
 
+    /// 认证模式：off（默认，直通）| jwt（/api 强制 Bearer 校验；env ALPHA_GATEWAY_AUTH_MODE 优先）
+    #[arg(long, default_value = "off")]
+    auth_mode: String,
+
+    /// JWT HS256 共享 secret（jwt 模式必填；env ALPHA_GATEWAY_AUTH_SECRET 优先，空=拒绝启动）
+    #[arg(long, default_value = "")]
+    auth_secret: String,
+
+    /// OIDC 期望签发者（空=跳过 iss 校验；env ALPHA_GATEWAY_AUTH_ISSUER 优先）
+    #[arg(long, default_value = "")]
+    auth_issuer: String,
+
+    /// OIDC 期望受众（空=跳过 aud 校验；env ALPHA_GATEWAY_AUTH_AUDIENCE 优先）
+    #[arg(long, default_value = "")]
+    auth_audience: String,
+
+    /// /auth/token bootstrap 签发口令（空=关闭该端点；env ALPHA_GATEWAY_AUTH_PROVISION_KEY 优先）
+    #[arg(long, default_value = "")]
+    auth_provision_key: String,
+
     /// 日志级别
     #[arg(short, long, default_value = "info")]
     log_level: String,
@@ -100,6 +122,8 @@ struct GatewayState {
     rate_limiter: Option<RedisRateLimiter>,
     /// 每 IP 每分钟 /api 配额
     rate_limit_per_minute: u32,
+    /// 认证配置（Off = 零行为变化直通）
+    auth: auth::AuthConfig,
     /// Prometheus 指标渲染句柄（/metrics）
     metrics: PrometheusHandle,
 }
@@ -165,6 +189,22 @@ async fn main() -> anyhow::Result<()> {
         rate_limiter,
         rate_limit_per_minute: args.rate_limit_per_minute,
         metrics,
+        auth: {
+            let mode =
+                auth::AuthMode::parse(&resolve_url("ALPHA_GATEWAY_AUTH_MODE", &args.auth_mode));
+            let secret = resolve_url("ALPHA_GATEWAY_AUTH_SECRET", &args.auth_secret);
+            if mode == auth::AuthMode::JwtRequired && secret.is_empty() {
+                anyhow::bail!("auth mode is jwt but no secret configured (set --auth-secret or ALPHA_GATEWAY_AUTH_SECRET)");
+            }
+            let mut cfg = auth::AuthConfig::disabled();
+            cfg.mode = mode;
+            cfg.secret = secret;
+            cfg.expected_issuer = resolve_url("ALPHA_GATEWAY_AUTH_ISSUER", &args.auth_issuer);
+            cfg.expected_audience = resolve_url("ALPHA_GATEWAY_AUTH_AUDIENCE", &args.auth_audience);
+            cfg.provision_key =
+                resolve_url("ALPHA_GATEWAY_AUTH_PROVISION_KEY", &args.auth_provision_key);
+            cfg
+        },
     };
 
     let app = build_router(state);
@@ -179,20 +219,27 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn build_router(state: GatewayState) -> Router {
-    // /api 子路由：限流中间件只包 REST 反代面（健康检查与 WS 不占配额）
-    let api =
-        Router::new()
-            .route("/v1/*path", any(api_proxy))
-            .layer(middleware::from_fn_with_state(
-                state.clone(),
-                rate_limit_middleware,
-            ));
+    // /api 子路由：认证 + 限流中间件只包 REST 反代面（健康检查、指标、WS 与
+    // /auth/token 不占配额不鉴权）。layer 注册顺序注意：后注册先执行——auth
+    // 在 rate-limit 之后注册 → 先执行，未鉴权请求不消耗限流配额。
+    let api = Router::new()
+        .route("/v1/*path", any(api_proxy))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
 
     Router::new()
         // 健康检查：真实探测三个上游
         .route("/health", get(health_check))
         // Prometheus 抓取端点（scrape 配置见 config/prometheus.yml）
         .route("/metrics", get(metrics_endpoint))
+        // bootstrap 签发端点（provision_key 为空时 503 关闭，见函数注释）
+        .route("/auth/token", axum::routing::post(provision_token))
         .nest("/api", api)
         // WebSocket 反代：/ws 与 /ws/<path> → real-time-feed
         .route("/ws", get(ws_proxy_root))
@@ -291,6 +338,128 @@ async fn rate_limit_middleware(
     }
 }
 
+/// /api 认证中间件（L483）：Off 直接放行；JwtRequired 强制 Bearer 校验。
+/// 本增量走自签路径（HS256 + 启动期非空 secret）；`verify_oidc_token`
+///（auth.rs，单测覆盖）是 OIDC IdP 路径的校验核——JWKS 拉取接线
+///（--auth-jwks-url 定时刷新）归下一增量，本单不引入后台刷新任务。
+/// 认证失败一律 fail-closed（与限流 fail-open 方向相反：限流器坏了可以放，
+/// 认不出来是谁绝不能放）。401 不区分“缺头/坏签/过期”，防用户枚举。
+async fn auth_middleware(
+    State(state): State<GatewayState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if state.auth.mode == auth::AuthMode::Off {
+        return next.run(req).await;
+    }
+
+    let Some(token) = auth::extract_bearer(req.headers()) else {
+        return unauthorized();
+    };
+    match auth::verify_token(&state.auth.secret, &token) {
+        Ok(claims) => {
+            metrics::counter!("alpha_gateway_auth_total", "mode" => "allowed").increment(1);
+            tracing::debug!(sub = %claims.sub, "authenticated");
+            next.run(req).await
+        }
+        Err(_) => {
+            metrics::counter!("alpha_gateway_auth_total", "mode" => "denied").increment(1);
+            unauthorized()
+        }
+    }
+}
+
+/// bootstrap 签发端点（L483）：`POST /auth/token` + `X-Provision-Key` 头。
+/// 生产形态是 OIDC IdP 的授权码/设备流，本端点只是“无 IdP 环境下能跑通
+/// 签发→校验闭环”的最小签发器：provision_key 为空 → 503 关闭（默认关闭，
+/// 不扩大攻击面）；scope 默认空；ttl 上限 24h（防一次性签出长期票据）。
+async fn provision_token(
+    State(state): State<GatewayState>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    if state.auth.provision_key.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "success": false,
+                "error": "token provisioning disabled",
+            })),
+        )
+            .into_response();
+    }
+    let ok = headers
+        .get("x-provision-key")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|k| k == state.auth.provision_key);
+    if !ok {
+        return unauthorized();
+    }
+    let sub = body
+        .get("sub")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if sub.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "success": false,
+                "error": "sub is required",
+            })),
+        )
+            .into_response();
+    }
+    let ttl_secs = body
+        .get("ttl_secs")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(3600)
+        .min(86_400);
+    let scope = body
+        .get("scope")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    match auth::create_token(
+        &state.auth.secret,
+        sub,
+        scope,
+        Duration::from_secs(ttl_secs),
+    ) {
+        Ok(token) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "access_token": token,
+                "token_type": "Bearer",
+                "expires_in": ttl_secs,
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "success": false,
+                "error": e.to_string(),
+            })),
+        )
+            .into_response(),
+    }
+}
+/// 401 响应：WWW-Authenticate 头 + 最小 JSON 错误体（不泄露过期/伪造区分）
+fn unauthorized() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(
+            header::WWW_AUTHENTICATE,
+            HeaderValue::from_static("Bearer realm=\"alpha-api\""),
+        )],
+        Json(serde_json::json!({
+            "success": false,
+            "error": "unauthorized",
+        })),
+    )
+        .into_response()
+}
 /// Prometheus 抓取端点：渲染全局 metrics recorder 的文本快照
 async fn metrics_endpoint(State(state): State<GatewayState>) -> String {
     state.metrics.render()
@@ -672,6 +841,7 @@ mod tests {
             collector_url: "http://127.0.0.1:1".to_string(),
             rate_limiter: None,
             rate_limit_per_minute: 120,
+            auth: auth::AuthConfig::disabled(),
             // build_recorder 不占全局 install（install_recorder 每进程一次，
             // 并行测试会冲突）；render 走本 recorder 快照
             metrics: global_metrics_handle(),
@@ -741,6 +911,119 @@ mod tests {
             generated.starts_with("tr-"),
             "缺失时应生成并回填: {generated}"
         );
+    }
+
+    /// 认证中间件（L483）：jwt 模式无 token → 401；合法 token → 放行；
+    /// /health 与 /auth/token 不鉴权
+    #[tokio::test]
+    async fn api_auth_enforced_in_jwt_mode() {
+        let upstream = spawn_upstream().await;
+        let mut state = test_state(upstream, "http://127.0.0.1:1".to_string());
+        state.auth = auth::AuthConfig {
+            mode: auth::AuthMode::JwtRequired,
+            secret: "test-secret".to_string(),
+            expected_issuer: String::new(),
+            expected_audience: String::new(),
+            provision_key: "provision-test-key".to_string(),
+        };
+        let app = build_router(state);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let api_url = format!("http://{addr}/api/v1/stocks/600519/history");
+
+        // 无 token → 401 + WWW-Authenticate
+        let denied = client
+            .post(&api_url)
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status().as_u16(), 401);
+        assert!(
+            denied
+                .headers()
+                .get("www-authenticate")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .starts_with("Bearer"),
+            "401 应带 WWW-Authenticate: Bearer"
+        );
+
+        // 错 secret 签的 → 401（不区分原因）
+        let bad = client
+            .post(&api_url)
+            .bearer_auth(
+                auth::create_token("wrong-secret", "mallory", "", Duration::from_secs(60)).unwrap(),
+            )
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bad.status().as_u16(), 401);
+
+        // /auth/token 签发 → 持票放行 200
+        let provisioned: serde_json::Value = client
+            .post(format!("http://{addr}/auth/token"))
+            .header("x-provision-key", "provision-test-key")
+            .header("content-type", "application/json")
+            .body(r#"{"sub":"alice","scope":"read:quotes"}"#)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(provisioned["success"], true);
+        let token = provisioned["access_token"].as_str().unwrap();
+
+        let allowed = client
+            .post(&api_url)
+            .bearer_auth(token)
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(allowed.status().as_u16(), 200, "合法 token 应放行");
+
+        // /health 在 jwt 模式下仍公开（探活不能要求先登录）
+        let health = client
+            .get(format!("http://{addr}/health"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(health.status().as_u16(), 200);
+    }
+
+    /// provision_key 为空 → /auth/token 503 关闭（默认不扩大攻击面）
+    #[tokio::test]
+    async fn provision_token_disabled_without_key() {
+        let app = build_router(test_state(
+            "http://127.0.0.1:1".to_string(),
+            "http://127.0.0.1:1".to_string(),
+        ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let resp = reqwest::Client::new()
+            .post(format!("http://{addr}/auth/token"))
+            .header("content-type", "application/json")
+            .body(r#"{"sub":"alice"}"#)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 503);
     }
 
     #[test]
