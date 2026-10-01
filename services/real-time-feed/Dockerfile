@@ -1,9 +1,12 @@
-FROM rust:1.75-slim as builder
+# 构建工具链与 workspace 实测版本对齐（rustc 1.98.1，Docker Hub 现行最新；更低版本解析不了新 edition 的传递依赖）
+FROM rust:1.98.1-slim-bookworm AS builder
 
-# 安装必要的系统依赖
+# 安装必要的系统依赖（protobuf-compiler：alpha-protocols 默认 grpc 跑 tonic-build 代码生成；g++：clickhouse cityhash 等 C/C++ 依赖，rust:slim 默认无）
 RUN apt-get update && apt-get install -y \
     pkg-config \
+    g++ \
     libssl-dev \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 # 设置工作目录
@@ -15,8 +18,8 @@ COPY . .
 # 构建实时数据流服务
 RUN cargo build --release -p alpha-real-time-feed
 
-# 运行时镜像
-FROM debian:bullseye-slim
+# 运行时镜像（bookworm 与 rust:1.98.1-slim-bookworm 构建环境同基底：glibc 向下不兼容，bullseye 会缺符号）
+FROM debian:bookworm-slim
 
 # 安装运行时依赖
 RUN apt-get update && apt-get install -y \

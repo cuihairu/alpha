@@ -1,8 +1,10 @@
-FROM rust:1.75-slim as builder
+# 构建工具链与 workspace 实测版本对齐（rustc 1.98.1，Docker Hub 现行最新；不依赖 alpha-protocols，无需 protoc）
+FROM rust:1.98.1-slim-bookworm AS builder
 
-# 安装必要的系统依赖
+# 安装必要的系统依赖（g++：clickhouse cityhash 等 C/C++ 依赖，rust:slim 默认无）
 RUN apt-get update && apt-get install -y \
     pkg-config \
+    g++ \
     libssl-dev \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -16,8 +18,8 @@ COPY . .
 # 构建数据采集服务
 RUN cargo build --release -p alpha-collector
 
-# 运行时镜像
-FROM debian:bullseye-slim
+# 运行时镜像（bookworm 与 rust:1.98.1-slim-bookworm 构建环境同基底：glibc 向下不兼容，bullseye 会缺符号）
+FROM debian:bookworm-slim
 
 # 安装运行时依赖
 RUN apt-get update && apt-get install -y \
