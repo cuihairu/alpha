@@ -45,6 +45,26 @@ export function sma(prices: number[], period: number): number[] {
   return out
 }
 
+/**
+ * 指数移动平均（口径同 Rust 侧 `calculate_ema`，L428 分析面板）：
+ *   ① 空输入返回空数组；② 输出与输入等长（无前导占位——ema[0] 即 prices[0]）；
+ *   ③ multiplier = 2 / (period + 1)，递推值按 4 位小数取整。
+ * Rust 不校验 period（usize 语义），此处忠实镜像：非法周期由 UI 控件域约束（2..=30）。
+ */
+export function ema(prices: number[], period: number): number[] {
+  if (prices.length === 0) return []
+  const multiplier = 2 / (period + 1)
+  const out = new Array<number>(prices.length).fill(0)
+  out[0] = prices[0] ?? 0
+  for (let i = 1; i < prices.length; i++) {
+    out[i] = roundTo(
+      (((prices[i] ?? 0) - (out[i - 1] ?? 0)) * multiplier + (out[i - 1] ?? 0)),
+      SMA_PRECISION,
+    )
+  }
+  return out
+}
+
 /** 价格格式化：两位小数（行情展示口径，与 wasm 引擎精度无关，仅用于 UI 呈现）。 */
 export function fmtPrice(v: number): string {
   return v.toFixed(2)

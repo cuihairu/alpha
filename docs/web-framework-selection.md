@@ -38,9 +38,10 @@ Yew/Leptos 是从零自研。
   任何文件——旧演示页（`index.html`/`app.js`/`wasm-demo.html`/`server.js`）
   行为零回退，并由 `scripts/check-web.sh` 第 1 步在场守门 + `node --check`
   语法冒烟兜底。
-- **TODO L428**（「基于 Yew/Leptos 开发 Web 端组件化数据分析界面」）：按本
-  定论**重定 scope 为 React 组件化路线**执行（复用 `web/app/` 骨架），不再
-  引入 Yew/Leptos。L428 条目本身的改写归后续轮次（本单一次只做 L427）。
+- **TODO L428**（「基于 Yew/Leptos 开发 Web 端组件化数据分析界面」）：✅
+  **已按本定论改写为 React 组件化路线并落地**（L428 轮：QuoteTable /
+  IndicatorPanel / WasmProbe 组件拆分 + SMA/EMA 指标分析面板，指标纯 TS 口径
+  对齐 packages/core），不引入 Yew/Leptos。
 - **TODO L429**（图表库 D3 + Canvas）：React 路线下候选 lightweight-charts /
   ECharts，D3 作底层备选；选型到 L429 执行时再定。
 - **wasm 引擎消费**：维持 `wasm-analyzer` → `web/pkg/`（wasm-pack, target web）
@@ -109,8 +110,9 @@ CI 侧观察（登记，非阻塞）：`web/app` 引入 npm 依赖后，GitHub �
 
 1. 记账行号 L427（沿 TODO 行号；行号漂移不作编号依据）。
 2. React 18.3 锁版本（非 19）：骨架期生态稳定优先（§4）。
-3. vitest 用 node 环境跑纯函数单测（不引 jsdom）：骨架期测试门禁聚焦逻辑
-   与构建，DOM 渲染测试随 L428 组件化一起引入。
+3. vitest 用 node 环境跑纯函数单测（不引 jsdom）：测试门禁到量即可（功能
+   优先）——L428 组件化以「纯函数契约测试 + tsc 严格类型 + 构建门禁」覆盖，
+   DOM 渲染测试（testing-library）留交互复杂化后再引入。
 4. `web/app/` 独立 npm 工程（不复用 `web/package.json`）：旧演示页依赖图
    （duckdb-wasm/vendor 脚本）零污染，两工程演进互不牵制。
 5. CI 挂在既有 `wasm` 作业尾部（runner 自带 node，免新增作业/矩阵改动）。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fmtPrice, sma } from './indicators'
+import { ema, fmtPrice, sma } from './indicators'
 
 /**
  * 契约锚点：与 `packages/core/src/indicators.rs` 的 `calculate_sma` 同口径
@@ -54,5 +54,28 @@ describe('fmtPrice', () => {
     expect(fmtPrice(90.5)).toBe('90.50')
     expect(fmtPrice(1234.567)).toBe('1234.57')
     expect(fmtPrice(0)).toBe('0.00')
+  })
+})
+
+describe('ema（口径对齐 Rust calculate_ema）', () => {
+  it('递推样本：[1..5] period 3（m=0.5）→ [1, 1.5, 2.25, 3.125, 4.0625]', () => {
+    expect(ema([1, 2, 3, 4, 5], 3)).toEqual([1, 1.5, 2.25, 3.125, 4.0625])
+  })
+
+  it('空输入返回空数组；输出与输入等长（无前导占位，ema[0]=prices[0]）', () => {
+    expect(ema([], 3)).toEqual([])
+    const out = ema([2, 4, 6], 2)
+    expect(out).toHaveLength(3)
+    expect(out[0]).toBe(2)
+  })
+
+  it('period=1 时 multiplier=1：EMA 逐位等于原序列（4 位取整内）', () => {
+    expect(ema([10.5, 11.2, 9.8], 1)).toEqual([10.5, 11.2, 9.8])
+  })
+
+  it('4 位小数取整：构造 5 位小数递推值验证精度', () => {
+    // [1,1,1,1] period 2 → m=2/3: ema1=(1-1)*m+1=1, ema2 同 → 全 1；换 [0,1,1]:
+    // ema1 = (1-0)*(2/3)+0 = 0.6667（取整）；ema2 = (1-0.6667)*(2/3)+0.6667 = 0.8889
+    expect(ema([0, 1, 1], 2)).toEqual([0, 0.6667, 0.8889])
   })
 })

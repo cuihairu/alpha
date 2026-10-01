@@ -22,6 +22,8 @@ node --check web/demo-data.js
 echo "--- [2/4] React 骨架工程结构在场"
 for f in web/app/package.json web/app/package-lock.json web/app/index.html \
          web/app/src/main.tsx web/app/src/App.tsx web/app/src/lib/indicators.ts \
+         web/app/src/components/QuoteTable.tsx web/app/src/components/IndicatorPanel.tsx \
+         web/app/src/components/WasmProbe.tsx \
          web/app/vite.config.ts; do
   if [ ! -f "$f" ]; then
     echo "缺失骨架文件: $f"
