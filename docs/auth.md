@@ -48,7 +48,23 @@ Bearer`，不区分过期/伪造/缺头（防用户枚举）。
 归前端 + IdP（Keycloak/Auth0），网关只做资源侧校验——网关不存会话、
 不签发刷新令牌。
 
-## 5. 非交互假设
+## 6. RBAC（L484）
+
+角色三档：`viewer`（空 roles 旧票据亦然——只读 GET/HEAD/OPTIONS）、
+`operator`（写方法 POST/PUT/DELETE）、`admin`（全通）。
+
+- 判定 `authorize(claims, method, path)` 纯函数（单测矩阵锁定）；
+  401 管“你是谁”，403（`{error:"forbidden: insufficient role"}`）管
+  “你能干什么”——客户端据此区分重登还是找管理员加角色。
+- `/auth/token` 接受 `roles: [...]` 原样写入票据：provision_key 即
+  root bootstrap，能调签发口令就能授任意角色——该口令保管等级必须
+  高于所授最高角色（生产由 IdP 的用户目录替代此口令）。
+- `path` 维度预留：当前 /api 下无写危险端点，方法级已满足最小权限；
+  逐端点矩阵（如 /query 限 analyst）待出现第一个危险写端点时再立。
+- 指标 `auth_total{mode="forbidden"}` 与 allowed/denied 同源，
+  可直接告警“403 突增 = 越权探测”。
+
+## 7. 非交互假设
 
 1. 生产 secret 经 env/secret 卷注入，绝不进 repo（compose 占位符为空）。
 2. scope 本单只透传不断言；细粒度 RBAC 归 L484。

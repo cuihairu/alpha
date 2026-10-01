@@ -358,6 +358,13 @@ async fn auth_middleware(
     };
     match auth::verify_token(&state.auth.secret, &token) {
         Ok(claims) => {
+            // L484：认证之后做 RBAC（401 管“你是谁”，403 管“你能干什么”）
+            let method = req.method().to_string();
+            let path = req.uri().path().to_string();
+            if !auth::authorize(&claims, &method, &path) {
+                metrics::counter!("alpha_gateway_auth_total", "mode" => "forbidden").increment(1);
+                return forbidden();
+            }
             metrics::counter!("alpha_gateway_auth_total", "mode" => "allowed").increment(1);
             tracing::debug!(sub = %claims.sub, "authenticated");
             next.run(req).await
@@ -419,12 +426,35 @@ async fn provision_token(
         .get("scope")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    match auth::create_token(
-        &state.auth.secret,
-        sub,
-        scope,
-        Duration::from_secs(ttl_secs),
-    ) {
+    // L484：roles 原样写入票据（provision_key 保管等级须高于所授最高角色）
+    let roles: Vec<String> = body
+        .get("roles")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    // 空 roles 走无角色签发（viewer 只读语义）；非空原样写入
+    let minted = if roles.is_empty() {
+        auth::create_token(
+            &state.auth.secret,
+            sub,
+            scope,
+            Duration::from_secs(ttl_secs),
+        )
+    } else {
+        auth::create_token_with_roles(
+            &state.auth.secret,
+            sub,
+            scope,
+            &roles,
+            Duration::from_secs(ttl_secs),
+        )
+    };
+    match minted {
         Ok(token) => (
             StatusCode::OK,
             Json(serde_json::json!({
@@ -456,6 +486,17 @@ fn unauthorized() -> Response {
         Json(serde_json::json!({
             "success": false,
             "error": "unauthorized",
+        })),
+    )
+        .into_response()
+}
+/// 403 响应：已认证但角色不足（与 401 区分：401=重登/换票，403=找管理员加角色）
+fn forbidden() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "success": false,
+            "error": "forbidden: insufficient role",
         })),
     )
         .into_response()
@@ -969,12 +1010,12 @@ mod tests {
             .unwrap();
         assert_eq!(bad.status().as_u16(), 401);
 
-        // /auth/token 签发 → 持票放行 200
+        // /auth/token 签发（operator 角色）→ 持票放行 200
         let provisioned: serde_json::Value = client
             .post(format!("http://{addr}/auth/token"))
             .header("x-provision-key", "provision-test-key")
             .header("content-type", "application/json")
-            .body(r#"{"sub":"alice","scope":"read:quotes"}"#)
+            .body(r#"{"sub":"alice","scope":"read:quotes","roles":["operator"]}"#)
             .send()
             .await
             .unwrap()
@@ -993,6 +1034,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(allowed.status().as_u16(), 200, "合法 token 应放行");
+
+        // L484：无角色票据 POST → 403（viewer 只读）
+        let viewer_token =
+            auth::create_token("test-secret", "mallory", "", Duration::from_secs(60)).unwrap();
+        let forbidden_resp = client
+            .post(&api_url)
+            .bearer_auth(viewer_token)
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(forbidden_resp.status().as_u16(), 403);
+        let payload: serde_json::Value = forbidden_resp.json().await.unwrap();
+        assert_eq!(payload["success"], false);
 
         // /health 在 jwt 模式下仍公开（探活不能要求先登录）
         let health = client

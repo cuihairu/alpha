@@ -481,7 +481,7 @@
 
 ## 🔒 安全与合规
 - [x] 实现 JWT + OAuth 2.0 身份认证系统：网关 auth.rs（Claims 自签 HS256 签发/校验 + OIDC kid 选键校验核 + JWKS 拉取，exp 必需/自签 leeway 0/401 不区分原因，7 单测）+ 中间件接线（--auth-mode off|jwt 默认 off 零行为变化；jwt + 空 secret 启动 fail-fast；auth 后注册先执行、不消耗限流配额；/health /metrics /ws /auth/token 公开）+ POST /auth/token bootstrap 签发（X-Provision-Key，空 key 默认 503 关闭，ttl 上限 24h）+ auth_total allowed/denied 指标。设计文档 docs/auth.md。边界：OIDC JWKS 定时刷新 + 授权码浏览器侧归 IdP/前端（下一增量）；scope 透传不断言（L484 RBAC）；WS 握手鉴权未做；刷新令牌生产走 IdP（✅ 2026-10-02）
-- [ ] 开发基于 RBAC 的细粒度权限控制
+- [x] 开发基于 RBAC 的细粒度权限控制：Claims 增 roles（空=viewer 兼容旧票据）+ authorize 纯函数（admin 全通/读任意已认证/写需 operator，path 维度预留）+ 中间件 401 后接 403（forbidden 体可区分重登与加角色）+ /auth/token 透传 roles（provision_key=root 口径注明）+ forbidden 指标。单测矩阵（空/operator/admin/未知角色 × 读写）+ 集成 403。docs/auth.md §6。边界：逐端点矩阵待首个危险写端点（✅ 2026-10-02）
 - [ ] 实现端到端数据加密（传输 + 存储）
 - [ ] 构建防爬虫、DDoS 和 API 限流保护
 - [ ] 开发安全审计日志和异常行为检测

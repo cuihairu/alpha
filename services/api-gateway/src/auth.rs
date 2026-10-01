@@ -14,15 +14,24 @@ use alpha_core::errors::{AlphaError, AlphaResult};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
-/// 访问令牌声明（自签与 OIDC 统一子集：sub/exp/iat/scope）
+/// 访问令牌声明（自签与 OIDC 统一子集：sub/exp/iat/scope/roles）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     #[serde(default)]
     pub scope: String,
+    /// 角色（RBAC，L484）：`viewer` 只读 GET，`operator` 可写，
+    /// `admin` 全通。缺失（旧票据）= 空 = viewer 语义。
+    #[serde(default)]
+    pub roles: Vec<String>,
     pub iat: i64,
     pub exp: i64,
 }
+
+/// 角色常量（provision 口径与 authorize 判定共用，避免字符串散落；
+/// viewer = 无特殊角色（空 roles 旧票据），故无常量，见 authorize）
+pub const ROLE_OPERATOR: &str = "operator";
+pub const ROLE_ADMIN: &str = "admin";
 
 /// 认证模式：Off 直接放行（默认，零行为变化）；JwtRequired 强制 Bearer 校验
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,12 +85,26 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-/// 自签发 token（HS256）：`ttl` 后过期
+/// 自签发 token（HS256）：`ttl` 后过期（roles 为空 = viewer 只读语义）
 pub fn create_token(secret: &str, sub: &str, scope: &str, ttl: Duration) -> AlphaResult<String> {
+    create_token_with_roles(secret, sub, scope, &[], ttl)
+}
+
+/// 自签发 token（带角色）：provision 端点用；roles 原样写入声明
+/// （provision_key 即 root bootstrap——能调签发口令就能授任意角色，
+/// 该口令的保管等级必须高于所授最高角色，见 docs/auth.md）。
+pub fn create_token_with_roles(
+    secret: &str,
+    sub: &str,
+    scope: &str,
+    roles: &[String],
+    ttl: Duration,
+) -> AlphaResult<String> {
     let now = now_unix();
     let claims = Claims {
         sub: sub.to_string(),
         scope: scope.to_string(),
+        roles: roles.to_vec(),
         iat: now,
         exp: now + ttl.as_secs() as i64,
     };
@@ -110,6 +133,19 @@ pub fn verify_token(secret: &str, token: &str) -> AlphaResult<Claims> {
     .map_err(|_| AlphaError::AuthenticationError("invalid or expired token".to_string()))
 }
 
+/// RBAC 判定（L484，纯函数）：admin 全通；读方法（GET/HEAD/OPTIONS）
+/// 任意已认证身份可进（含空 roles 旧票据 = viewer）；写方法需 operator+。
+/// `path` 维度预留（逐端点矩阵归后续：当前 /api 下无写危险端点，
+/// 方法级已满足最小权限，见 docs/auth.md）。
+pub fn authorize(claims: &Claims, method: &str, _path: &str) -> bool {
+    if claims.roles.iter().any(|r| r == ROLE_ADMIN) {
+        return true;
+    }
+    match method {
+        "GET" | "HEAD" | "OPTIONS" => true,
+        _ => claims.roles.iter().any(|r| r == ROLE_OPERATOR),
+    }
+}
 /// 从 Authorization 头提取 Bearer token（大小写不敏感 scheme，无头/格式错 → None）
 pub fn extract_bearer(headers: &axum::http::HeaderMap) -> Option<String> {
     headers
@@ -264,6 +300,38 @@ mod tests {
     }
 
     #[test]
+    fn authorize_role_matrix() {
+        let claims_of = |roles: &[&str]| Claims {
+            sub: "u".into(),
+            scope: "".into(),
+            roles: roles.iter().map(ToString::to_string).collect(),
+            iat: 0,
+            exp: 0,
+        };
+
+        // 空 roles 旧票据 = viewer：GET 通、POST 拒
+        let viewer = claims_of(&[]);
+        assert!(authorize(&viewer, "GET", "/api/v1/stocks/600519/history"));
+        assert!(authorize(&viewer, "HEAD", "/x"));
+        assert!(!authorize(&viewer, "POST", "/api/v1/query"));
+
+        // operator：写通
+        let op = claims_of(&[ROLE_OPERATOR]);
+        assert!(authorize(&op, "POST", "/api/v1/query"));
+        assert!(authorize(&op, "DELETE", "/api/v1/x"));
+
+        // admin：全通（含未知方法）
+        let admin = claims_of(&[ROLE_ADMIN]);
+        assert!(authorize(&admin, "POST", "/anything"));
+        assert!(authorize(&admin, "BREW", "/anything"));
+
+        // 未知角色不提权
+        let strange = claims_of(&["superuser"]);
+        assert!(authorize(&strange, "GET", "/x"));
+        assert!(!authorize(&strange, "POST", "/x"));
+    }
+
+    #[test]
     fn oidc_kid_routing_and_issuer_checks() {
         use jsonwebtoken::EncodingKey;
 
@@ -276,6 +344,7 @@ mod tests {
             &Claims {
                 sub: "carol".into(),
                 scope: "".into(),
+                roles: vec![],
                 iat: now_unix(),
                 exp: now_unix() + 300,
             },
