@@ -1,0 +1,30 @@
+# Promtail（L459）：docker 服务发现采集 alpha-* 容器 stdout/stderr → Loki
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /positions/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+        # 只采集本 compose 网络（alpha- 前缀容器）
+        filters:
+          - name: name
+            values: ["alpha-"]
+    relabel_configs:
+      # 容器名（alpha-api-gateway 等）→ job 标签，与 Prometheus job 命名对齐
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: job
+      - source_labels: ["__meta_docker_container_log_stream"]
+        target_label: stream
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container

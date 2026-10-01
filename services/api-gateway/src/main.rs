@@ -23,6 +23,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 
 use alpha_storage::{RateDecision, RedisRateLimiter};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
@@ -99,6 +100,8 @@ struct GatewayState {
     rate_limiter: Option<RedisRateLimiter>,
     /// 每 IP 每分钟 /api 配额
     rate_limit_per_minute: u32,
+    /// Prometheus 指标渲染句柄（/metrics）
+    metrics: PrometheusHandle,
 }
 
 /// 健康检查响应
@@ -134,6 +137,11 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting Alpha Finance API Gateway");
 
+    // Prometheus 指标：install_recorder 全局接管 metrics 宏；/metrics 暴露
+    let metrics = PrometheusBuilder::new()
+        .install_recorder()
+        .map_err(|e| anyhow::anyhow!("metrics recorder install failed: {e}"))?;
+
     // 限流：配置了 URL 才启用；连接失败直接退出（fail-fast，不带病启动）
     let rate_limit_url = resolve_url("ALPHA_GATEWAY_RATE_LIMIT_URL", &args.rate_limit_url);
     let rate_limiter = if rate_limit_url.is_empty() {
@@ -156,6 +164,7 @@ async fn main() -> anyhow::Result<()> {
         collector_url: resolve_url("ALPHA_GATEWAY_COLLECTOR_URL", &args.collector_url),
         rate_limiter,
         rate_limit_per_minute: args.rate_limit_per_minute,
+        metrics,
     };
 
     let app = build_router(state);
@@ -182,6 +191,8 @@ fn build_router(state: GatewayState) -> Router {
     Router::new()
         // 健康检查：真实探测三个上游
         .route("/health", get(health_check))
+        // Prometheus 抓取端点（scrape 配置见 config/prometheus.yml）
+        .route("/metrics", get(metrics_endpoint))
         .nest("/api", api)
         // WebSocket 反代：/ws 与 /ws/<path> → real-time-feed
         .route("/ws", get(ws_proxy_root))
@@ -275,6 +286,11 @@ async fn rate_limit_middleware(
         tracing::warn!(%subject, "rate limit exceeded");
         rate_limit_rejection(&decision)
     }
+}
+
+/// Prometheus 抓取端点：渲染全局 metrics recorder 的文本快照
+async fn metrics_endpoint(State(state): State<GatewayState>) -> String {
+    state.metrics.render()
 }
 
 /// 健康检查端点：真实探测上游 /health（data-engine 与 real-time-feed 任一不可达
@@ -601,6 +617,9 @@ mod tests {
             collector_url: "http://127.0.0.1:1".to_string(),
             rate_limiter: None,
             rate_limit_per_minute: 120,
+            // build_recorder 不占全局 install（install_recorder 每进程一次，
+            // 并行测试会冲突）；render 走本 recorder 快照
+            metrics: PrometheusBuilder::new().build_recorder().handle(),
         }
     }
 
@@ -614,6 +633,40 @@ mod tests {
 
         headers.insert("x-forwarded-for", "198.51.100.9, 10.0.0.1".parse().unwrap());
         assert_eq!(client_identity(&headers), "198.51.100.9", "取首段");
+    }
+
+    /// /metrics 端点（L459）：Prometheus 文本格式就绪，Prometheus 抓取契约
+    #[tokio::test]
+    async fn metrics_endpoint_serves_prometheus_text() {
+        let app = build_router(test_state(
+            "http://127.0.0.1:1".to_string(),
+            "http://127.0.0.1:1".to_string(),
+        ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/metrics"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        assert!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .starts_with("text/plain"),
+            "Prometheus 文本协议 content-type 应为 text/plain"
+        );
+        let body = response.text().await.unwrap();
+        // 空 recorder 的 render 为空串（Prometheus 接受空快照）；
+        // 服务运行后此处即 metrics 宏注册的全部指标
+        let _ = body;
     }
 
     #[test]

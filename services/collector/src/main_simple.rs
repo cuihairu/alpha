@@ -24,6 +24,7 @@ use axum::{
     Router,
 };
 use chrono::{DateTime, Utc};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use tokio::{
@@ -726,10 +727,23 @@ path = "main.rs"
     }
 }
 
+/// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
+/// install 全局接管 metrics 宏，后续复用渲染；CollectorMetrics 的宏指标
+/// 由此进入 /metrics）
+fn global_metrics_handle() -> &'static PrometheusHandle {
+    static HANDLE: std::sync::OnceLock<PrometheusHandle> = std::sync::OnceLock::new();
+    HANDLE.get_or_init(|| {
+        PrometheusBuilder::new()
+            .install_recorder()
+            .unwrap_or_else(|_| PrometheusBuilder::new().build_recorder().handle())
+    })
+}
+
 /// 构建路由
 pub fn build_router(collector: Arc<SimpleCollector>) -> Router {
     Router::new()
         .route("/health", get(health_check))
+        .route("/metrics", get(metrics_endpoint))
         .route("/tasks", post(submit_task))
         .route("/tasks/:id", get(get_task_status))
         .route("/tasks", get(list_tasks))
@@ -746,6 +760,11 @@ async fn request_log_middleware(request: axum::http::Request<Body>, next: Next) 
     let uri = request.uri().to_string();
     debug!("{} {}", method, uri);
     next.run(request).await
+}
+
+/// Prometheus 抓取端点（L459）：全局 recorder 快照渲染
+async fn metrics_endpoint() -> String {
+    global_metrics_handle().render()
 }
 
 /// 健康检查端点

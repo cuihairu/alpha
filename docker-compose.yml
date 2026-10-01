@@ -171,6 +171,35 @@ services:
       - alpha-network
     restart: unless-stopped
 
+  # Loki 日志聚合（L459 全链路监控：Promtail 采集容器日志 → Loki 存储 → Grafana 查询）
+  loki:
+    image: grafana/loki:latest
+    container_name: alpha-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./config/loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
+  # Promtail：容器日志采集（docker 服务发现 → push Loki）
+  promtail:
+    image: grafana/promtail:latest
+    container_name: alpha-promtail
+    volumes:
+      - ./config/promtail/promtail-config.yml:/etc/promtail/config.yml
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_positions:/positions
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    networks:
+      - alpha-network
+    restart: unless-stopped
+
   # Grafana 仪表板
   grafana:
     image: grafana/grafana:latest
@@ -181,9 +210,12 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - grafana_data:/var/lib/grafana
+      # provisioning：数据源（Prometheus + Loki）与预置仪表盘随容器启动自动注册
       - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
+      - loki
     networks:
       - alpha-network
     restart: unless-stopped
@@ -194,6 +226,8 @@ volumes:
   clickhouse_logs:
   redis_data:
   prometheus_data:
+  loki_data:
+  promtail_positions:
   grafana_data:
 
 networks:

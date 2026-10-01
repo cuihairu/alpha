@@ -39,6 +39,7 @@ use datafusion::{
     datasource::MemTable,
     prelude::SessionContext,
 };
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde::{Deserialize, Serialize};
 use std::time::Duration as StdDuration;
 use tokio::{
@@ -175,6 +176,19 @@ struct AppState {
     indicators: TechnicalIndicators,
     analysis: AnalysisEngine,
     config: Arc<AppConfig>,
+    /// Prometheus 指标渲染句柄（/metrics）
+    metrics: PrometheusHandle,
+}
+
+/// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
+/// install 全局接管 metrics 宏，后续（并行测试）复用同一句柄渲染）
+fn global_metrics_handle() -> &'static PrometheusHandle {
+    static HANDLE: std::sync::OnceLock<PrometheusHandle> = std::sync::OnceLock::new();
+    HANDLE.get_or_init(|| {
+        PrometheusBuilder::new()
+            .install_recorder()
+            .unwrap_or_else(|_| PrometheusBuilder::new().build_recorder().handle())
+    })
 }
 
 impl AppState {
@@ -193,6 +207,7 @@ impl AppState {
             indicators: TechnicalIndicators::new(),
             analysis: AnalysisEngine::new(),
             config,
+            metrics: global_metrics_handle().clone(),
         }
     }
 
@@ -336,6 +351,7 @@ fn build_router(state: Arc<AppState>) -> Router {
 
     let mut router = Router::new()
         .route("/health", get(health_check))
+        .route("/metrics", get(metrics_endpoint))
         .route("/query", post(execute_query))
         .route("/clickhouse/exports", get(list_clickhouse_exports))
         .route("/clickhouse/export.parquet", get(get_clickhouse_export_parquet))
@@ -689,6 +705,11 @@ fn normalized_payload(envelope: &StreamEnvelope, market_data: &MarketData) -> se
     }
 
     serde_json::Value::Object(payload)
+}
+
+/// Prometheus 抓取端点：渲染 metrics recorder 文本快照
+async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> String {
+    state.metrics.render()
 }
 
 /// 健康检查
@@ -1909,6 +1930,7 @@ mod tests {
             indicators: TechnicalIndicators::new(),
             analysis: AnalysisEngine::new(),
             config: test_config(),
+            metrics: global_metrics_handle().clone(),
         });
 
         let symbol = format!("E2E-{}", uuid::Uuid::new_v4());

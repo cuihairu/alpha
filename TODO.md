@@ -456,7 +456,7 @@
 - [x] 构建内存泄漏检测和性能分析工具：packages/core/alloc_tracking.rs + scripts/profile.sh + docs/memory-profiling.md。**TrackingAllocator**：包装 System 的计数分配器（累计/存活分配数、存活字节、峰值字节，全 AtomicU64 零锁）——服务 `#[global_allocator]` 全局启用或测试直接调 GlobalAlloc 方法配对验证；`has_unreleased()` 判读语义分层（测试=泄漏 / 长驻服务看趋势），peak 单调不回退（宽松序「不低估」取向并注明）、reset 供压测轮次复位。**profile.sh**：perf record（`-g --call-graph dwarf`）/report/top 三模式封装，release 栈可读性注明 debuginfo 要求。文档：判读方法、登记项（tokio-console 带 tokio_unstable 构建条件 / valgrind 兜底 / heaptrack）、边界（wasm32 不走——JS 堆画像归 DevTools；不做每分配栈回溯；全局分配器注册互斥）。测试 3 项修复并发污染（共享 static 计数 + reset 互相清账 → 每测试局部实例隔离）（✅ 2026-10-02）
 
 ## 🔍 监控与可观测性
-- [ ] 集成 Prometheus + Grafana + Loki 全链路监控
+- [x] 集成 Prometheus + Grafana + Loki 全链路监控：服务侧四服务统一 /metrics 面（config/prometheus.yml 既定 scrape 目标终于有了真实端点）——api-gateway/data-engine/real-time-feed/collector 全部接 metrics-exporter-prometheus 0.13（metrics 0.21 workspace）：gateway/data-engine 把 `PrometheusHandle` 入共享 state（collector/realtime-feed 无状态路由直读进程级 handle），`global_metrics_handle()` OnceLock 模式解决 install_recorder 每进程一次与并行测试冲突（首个调用者 install 全局接管 metrics 宏、后续复用渲染；collector 既有 CollectorMetrics 宏指标自动入面）；gateway 带 /metrics 端点测试（200 + text/plain 协议头，空 recorder 空快照语义注明）。基础设施侧：docker-compose 补 Loki（tsdb/filesystem 单机、168h 保留）+ Promtail（docker SD 按 `alpha-` 容器名过滤、容器名→job 标签与 Prometheus 命名对齐）+ Grafana provisioning 落盘（datasources.yml：Prometheus+Loki 双数据源；dashboards provider + alpha-services-overview 仪表盘：四服务 up 统计/抓取时延/Loki 日志面）——修复原 compose 挂载 `./config/grafana/provisioning` 目录不存在导致容器起不来的既有缺陷。全部配置经 compose config + YAML/JSON 解析验证（✅ 2026-10-02）
 - [ ] 开发分布式追踪系统（tracing + Jaeger）
 - [x] 实现基于 Metrics 的性能指标收集
 - [x] 构建健康检查和服务依赖监控

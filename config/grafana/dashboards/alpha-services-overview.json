@@ -1,0 +1,60 @@
+{
+  "title": "Alpha 服务总览",
+  "uid": "alpha-overview",
+  "tags": ["alpha", "overview"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "服务存活（up，scrape 10s）",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": null },
+      "targets": [
+        {
+          "expr": "up{job=~\"api-gateway|data-engine|real-time-feed|collector\"}",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "UP", "color": "green" }, "0": { "text": "DOWN", "color": "red" } } }
+          ],
+          "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "抓取时延（秒）",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": null },
+      "targets": [
+        {
+          "expr": "scrape_duration_seconds{job=~\"api-gateway|data-engine|real-time-feed|collector\"}",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "服务日志（Loki，按容器过滤）",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 6 },
+      "datasource": { "type": "loki", "uid": null },
+      "targets": [
+        {
+          "expr": "{job=~\"alpha-.*\"}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

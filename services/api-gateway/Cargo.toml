@@ -28,6 +28,10 @@ clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+# 指标（/metrics Prometheus 文本面）
+metrics = { workspace = true }
+metrics-exporter-prometheus = "0.13"
+
 # 时间
 chrono = { workspace = true }
 
