@@ -387,7 +387,41 @@
   冲突窗口、小屏折叠布局、异常路径占位复位均需真机观察。
   门禁：check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅ /
   check-desktop.sh [1-5/5] ✅（✅ 2026-10-01）
-- [ ] 构建移动端离线数据存储和同步机制
+- [x] 构建移动端离线数据存储和同步机制：沿「决策在核心库、执行在壳层」分层
+  （docs/mobile-offline.md）。**产品红线三条款（核心库强制，壳层绕不过）**：
+  ①授权开关默认关闭——`OfflineSyncConfig::default()` = enabled:false，未开启
+  快照生成/恢复直接 `Failed`（文案引导显式开启）；②显式开启须同时携带非空
+  数据范围（`set_offline_sync_config_json` 里 `enabled=true ∧ scopes空` = 拒绝，
+  「开启」与「明示范围」同请求绑定）；③未授权不产生同步工作项——
+  `offline_sync_delta_json` 未开启返回 `needed=false, reason=sync_disabled`。
+  **术语红线（不混用）**：备份=本地快照落盘不出设备（`Snapshot` 载荷/
+  `OfflineStore`/`backupNow`）；同步=与远端增量对齐出设备（`SyncDelta` 载荷/
+  `planSync`，骨架期只出判断不执行网络）——字段面由 JVM 测试断言互斥
+  （snapshot 含 captured_at 不含 since_fingerprint，反之亦然）。
+  Rust 决策面：mobile/src/offline.rs（DataScope 封闭枚举首期仅 Quotes/未知
+  scope serde 拒绝；OfflineManager 快照生成 scope 过滤 + L337
+  content_seq/fingerprint_of 同源指纹；restore 版本一致性校验；11 单测）+
+  state.rs FFI **只增不改**五方法（offline_sync_config_json /
+  set_offline_sync_config_json / offline_snapshot_json /
+  restore_offline_snapshot_json / offline_sync_delta_json(u64→ULong)；构造器
+  与既有九方法签名原样——L119 iOS 壳在用；+3 单测）+ lib.rs 导出。
+  Kotlin 执行面：OfflineStore.kt（KeyValueStore 接口 + InMemory 测实现 +
+  SharedPreferences 真机实现位；OfflineStore 快照单键落盘 `check(enabled)`
+  第二道防线；OfflineSyncManager 备份/同步编排，FakeGateway 可注入；
+  dataScopeSummary 明示文案「行情快照（代码、价格、成交量、买卖一档）」）+
+  AlphaBridge 五透传（implement OfflineGateway，沿 RefreshGateway 模式）+
+  绑定重生成（+118 行）。MainActivity **不自动备份**（刷新手势不偷偷落盘，
+  备份只经显式编排——契约测试守门）。测试：offline.rs 11 + state.rs 3 + JVM
+  OfflineSyncTest 7（kv 后写覆盖/往返/拒收/基线/文案/术语）+ 契约
+  android_shell_contract.rs +1 共 12 例；本机 gradle assembleDebug +
+  testDebugUnitTest 20 测实证（10 载荷 + 3 手势 + 7 离线，不进 CI 门禁）。
+  假设（文档 §8）：开关统一管备份+同步两面；首期 DataScope 仅 Quotes；
+  快照整体单键落盘（分键/条目级 diff 归后续）；无设置页（配置面+文案函数
+  就绪，UI 归后续）；restore 版本须一致（迁移归发布流水线）；mobile/ios 不动。
+  边界（§9）：SharedPreferences 持久化、设置页展示、断网恢复全链路、真实
+  远端对齐执行、快照增长分键策略留真机/后续 TODO。
+  门禁：check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅ /
+  check-desktop.sh [1-5/5] ✅（✅ 2026-10-01）
 
 ## 📊 跨平台 UI 框架开发
 - [ ] 选择和集成跨平台 UI 框架（Web: React/Vue, Desktop: Tauri, Mobile: Native）

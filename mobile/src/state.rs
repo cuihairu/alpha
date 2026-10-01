@@ -11,6 +11,7 @@
 //! 追加六个推送/同步方法（docs/mobile-push-sync.md §4）。
 
 use crate::notify::{AlertRule, LocalQueueChannel, Notifier};
+use crate::offline::{OfflineManager, OfflineSnapshot, OfflineSyncConfig};
 use crate::sync::{BackgroundSync, SyncTrigger};
 use alpha_core::analytics::AnalysisEngine;
 use alpha_core::errors::AlphaError;
@@ -65,6 +66,8 @@ pub struct MobileCore {
     notifier: Mutex<Notifier<LocalQueueChannel>>,
     /// 后台同步决策（闸门/状态/指纹，L337）
     sync: Mutex<BackgroundSync>,
+    /// 离线授权与增量决策（默认关闭，L390 红线在核心库强制）
+    offline: Mutex<OfflineManager>,
 }
 
 /// 驱动一个 future 到完成（仅骨架期使用：见模块文档与 §6 线程模型；
@@ -144,6 +147,7 @@ impl MobileCore {
             engine: AnalysisEngine::new(),
             notifier: Mutex::new(Notifier::new(LocalQueueChannel::default())),
             sync: Mutex::new(BackgroundSync::default()),
+            offline: Mutex::new(OfflineManager::default()),
         })
     }
 
@@ -272,6 +276,74 @@ impl MobileCore {
             .expect("同步决策锁")
             .mark_synced_at(chrono::Utc::now(), &quotes);
         serde_json::to_string(&status).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    // ── L390 离线数据决策面（五方法，只增不改——docs/mobile-offline.md §4）──
+    // 产品红线：授权开关默认关闭、显式开启须带数据范围、未授权不产生同步
+    // 工作项（三条款在核心库强制，壳层绕不过）。
+
+    /// 当前离线授权配置（`{enabled, scopes}`——UI 读取开关与数据范围，红线③明示面）
+    pub fn offline_sync_config_json(&self) -> String {
+        serde_json::to_string(self.offline.lock().expect("离线决策锁").config())
+            .unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// 设置离线授权配置（**唯一开启路径**）：`enabled=true` 须同时携带非空
+    /// `scopes`（红线②），未知 scope 字符串拒绝；成功返回生效配置回显
+    pub fn set_offline_sync_config_json(&self, config_json: String) -> Result<String, MobileError> {
+        let config: OfflineSyncConfig =
+            serde_json::from_str(&config_json).map_err(|e| MobileError::Failed {
+                detail: format!("离线配置解析失败（scopes 为封闭枚举）: {e}"),
+            })?;
+        let applied = self
+            .offline
+            .lock()
+            .expect("离线决策锁")
+            .set_config(config)
+            .map_err(|detail| MobileError::Failed { detail })?;
+        Self::to_json(&applied)
+    }
+
+    /// 生成本地快照（**备份面**：落盘供断网恢复，不出设备）。未开启 →
+    /// `Failed`（红线①在核心库强制，文案引导显式开启）
+    pub fn offline_snapshot_json(&self) -> Result<String, MobileError> {
+        let quotes = self.current_quotes();
+        let snapshot = self
+            .offline
+            .lock()
+            .expect("离线决策锁")
+            .snapshot_at(chrono::Utc::now(), &quotes, env!("CARGO_PKG_VERSION"))
+            .map_err(|detail| MobileError::Failed { detail })?;
+        Self::to_json(&snapshot)
+    }
+
+    /// 校验快照可恢复（授权 + 版本一致），返回待恢复条目数；落盘/读回由
+    /// 壳层 KeyValueStore 执行（后写覆盖语义沿桌面 L116 口径）
+    pub fn restore_offline_snapshot_json(&self, snapshot_json: String) -> Result<u64, MobileError> {
+        let snapshot: OfflineSnapshot =
+            serde_json::from_str(&snapshot_json).map_err(|e| MobileError::Failed {
+                detail: format!("快照结构非法: {e}"),
+            })?;
+        let count = self
+            .offline
+            .lock()
+            .expect("离线决策锁")
+            .restore_validate(&snapshot, env!("CARGO_PKG_VERSION"))
+            .map_err(|detail| MobileError::Failed { detail })?;
+        Ok(count as u64)
+    }
+
+    /// 同步增量判断（**同步面**：与远端对齐是否需要）。未授权 →
+    /// `needed=false, reason="sync_disabled"`（红线③：不产生外发工作项）；
+    /// 已授权则纯指纹比较（L337 口径，相同 `unchanged` / 不同才需要对齐）
+    pub fn offline_sync_delta_json(&self, since_fingerprint: u64) -> String {
+        let quotes = self.current_quotes();
+        let delta = self
+            .offline
+            .lock()
+            .expect("离线决策锁")
+            .delta_at(since_fingerprint, &quotes);
+        serde_json::to_string(&delta).unwrap_or_else(|_| "{}".to_string())
     }
 }
 
@@ -624,5 +696,101 @@ mod tests {
         ])))
         .expect("合法规则");
         assert_eq!(core.notifier.lock().expect("锁").rules().len(), 1);
+    }
+
+    // ── L390 离线数据 FFI（红线在核心库强制的端到端面）──
+
+    /// 红线①：默认关闭可读、未开启快照拒绝且文案引导显式开启
+    #[test]
+    fn offline_defaults_disabled_and_blocks_snapshot_via_ffi() {
+        let core = core();
+        let config: serde_json::Value =
+            serde_json::from_str(&core.offline_sync_config_json()).expect("解析");
+        assert_eq!(config["enabled"], false, "默认关闭");
+        assert_eq!(config["scopes"], serde_json::json!([]));
+
+        let err = core.offline_snapshot_json().expect_err("未开启应拒绝");
+        assert!(matches!(err, MobileError::Failed { .. }));
+        assert!(err.to_string().contains("未开启"), "文案: {err}");
+        assert!(
+            err.to_string().contains("显式开启"),
+            "文案须引导显式开启: {err}"
+        );
+    }
+
+    /// 红线②③：开启须带范围；开启后快照/恢复/增量全链路走通
+    #[test]
+    fn offline_enable_snapshot_restore_via_ffi() {
+        let core = core();
+        // 无范围开启 → 拒绝（文案含 scopes）
+        let err = core
+            .set_offline_sync_config_json(r#"{"enabled":true,"scopes":[]}"#.to_string())
+            .expect_err("无范围开启应拒绝");
+        assert!(err.to_string().contains("scopes"), "文案: {err}");
+
+        // 未知 scope → 拒绝（封闭枚举）
+        assert!(core
+            .set_offline_sync_config_json(r#"{"enabled":true,"scopes":["contacts"]}"#.to_string())
+            .is_err());
+
+        // 合法开启 → 生效配置回显（明示面）
+        let applied: serde_json::Value = serde_json::from_str(
+            &core
+                .set_offline_sync_config_json(r#"{"enabled":true,"scopes":["quotes"]}"#.to_string())
+                .expect("合法配置"),
+        )
+        .expect("解析");
+        assert_eq!(applied["enabled"], true);
+        assert_eq!(applied["scopes"], serde_json::json!(["quotes"]));
+
+        // 备份面：快照含观察列表全量条目 + 版本
+        let snapshot: serde_json::Value =
+            serde_json::from_str(&core.offline_snapshot_json().expect("已授权")).expect("解析");
+        assert_eq!(snapshot["entries"].as_array().expect("数组").len(), 2);
+        assert_eq!(snapshot["version"], env!("CARGO_PKG_VERSION"));
+        let snapshot_json = snapshot.to_string();
+
+        // 恢复：结构非法/一致各走各路；篡改版本拒绝
+        assert!(core
+            .restore_offline_snapshot_json("not json".to_string())
+            .is_err());
+        let mut tampered = snapshot.clone();
+        tampered["version"] = serde_json::json!("9.9.9");
+        assert!(
+            core.restore_offline_snapshot_json(tampered.to_string())
+                .is_err(),
+            "版本不匹配拒绝"
+        );
+        let count = core
+            .restore_offline_snapshot_json(snapshot_json)
+            .expect("一致");
+        assert_eq!(count, 2, "返回待恢复条目数");
+    }
+
+    /// 同步面增量：未授权 sync_disabled；授权后指纹比较（unchanged/needed）
+    #[test]
+    fn offline_delta_gates_on_authorization_and_fingerprint_via_ffi() {
+        let core = core();
+        let disabled: serde_json::Value =
+            serde_json::from_str(&core.offline_sync_delta_json(0)).expect("解析");
+        assert_eq!(disabled["needed"], false, "红线③：未授权不产生工作项");
+        assert_eq!(disabled["reason"], "sync_disabled");
+
+        core.set_offline_sync_config_json(r#"{"enabled":true,"scopes":["quotes"]}"#.to_string())
+            .expect("开启");
+        let snapshot: serde_json::Value =
+            serde_json::from_str(&core.offline_snapshot_json().expect("快照")).expect("解析");
+        let fingerprint = snapshot["fingerprint"].as_u64().expect("指纹");
+
+        let unchanged: serde_json::Value =
+            serde_json::from_str(&core.offline_sync_delta_json(fingerprint)).expect("解析");
+        assert_eq!(unchanged["needed"], false, "指纹相同无需对齐");
+        assert_eq!(unchanged["reason"], "unchanged");
+
+        let needed: serde_json::Value =
+            serde_json::from_str(&core.offline_sync_delta_json(0)).expect("解析");
+        assert_eq!(needed["needed"], true, "指纹变化需对齐");
+        assert!(needed.get("reason").is_none());
+        assert_eq!(needed["current_fingerprint"], fingerprint);
     }
 }

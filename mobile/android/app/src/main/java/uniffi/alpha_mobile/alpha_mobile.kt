@@ -393,10 +393,20 @@ internal interface _UniFFILib : Library {
     ): RustBuffer.ByValue
     fun uniffi_alpha_mobile_fn_method_mobilecore_mark_synced_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_offline_snapshot_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_offline_sync_config_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_offline_sync_delta_json(`ptr`: Pointer,`sinceFingerprint`: Long,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_alpha_mobile_fn_method_mobilecore_quote_json(`ptr`: Pointer,`symbol`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_restore_offline_snapshot_json(`ptr`: Pointer,`snapshotJson`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Long
     fun uniffi_alpha_mobile_fn_method_mobilecore_set_alert_rules_json(`ptr`: Pointer,`rulesJson`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Long
+    fun uniffi_alpha_mobile_fn_method_mobilecore_set_offline_sync_config_json(`ptr`: Pointer,`configJson`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_alpha_mobile_fn_method_mobilecore_status_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_alpha_mobile_fn_method_mobilecore_sync_plan_json(`ptr`: Pointer,`trigger`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
@@ -525,9 +535,19 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_alpha_mobile_checksum_method_mobilecore_mark_synced_json(
     ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_offline_snapshot_json(
+    ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_offline_sync_config_json(
+    ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_offline_sync_delta_json(
+    ): Short
     fun uniffi_alpha_mobile_checksum_method_mobilecore_quote_json(
     ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_restore_offline_snapshot_json(
+    ): Short
     fun uniffi_alpha_mobile_checksum_method_mobilecore_set_alert_rules_json(
+    ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_set_offline_sync_config_json(
     ): Short
     fun uniffi_alpha_mobile_checksum_method_mobilecore_status_json(
     ): Short
@@ -565,10 +585,25 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_mark_synced_json() != 24041.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_offline_snapshot_json() != 23906.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_offline_sync_config_json() != 42871.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_offline_sync_delta_json() != 62544.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_quote_json() != 35557.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_restore_offline_snapshot_json() != 62855.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_set_alert_rules_json() != 3009.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_set_offline_sync_config_json() != 61595.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_status_json() != 46641.toShort()) {
@@ -835,8 +870,13 @@ public interface MobileCoreInterface {
     fun `analyzeJson`(`symbol`: String): String
     fun `checkAlertsJson`(): String
     fun `markSyncedJson`(): String@Throws(MobileException::class)
+    fun `offlineSnapshotJson`(): String
+    fun `offlineSyncConfigJson`(): String
+    fun `offlineSyncDeltaJson`(`sinceFingerprint`: ULong): String@Throws(MobileException::class)
     fun `quoteJson`(`symbol`: String): String@Throws(MobileException::class)
-    fun `setAlertRulesJson`(`rulesJson`: String): ULong
+    fun `restoreOfflineSnapshotJson`(`snapshotJson`: String): ULong@Throws(MobileException::class)
+    fun `setAlertRulesJson`(`rulesJson`: String): ULong@Throws(MobileException::class)
+    fun `setOfflineSyncConfigJson`(`configJson`: String): String
     fun `statusJson`(): String@Throws(MobileException::class)
     fun `syncPlanJson`(`trigger`: String): String
     fun `syncStatusJson`(): String
@@ -902,6 +942,40 @@ class MobileCore(
         }
     
     
+    @Throws(MobileException::class)override fun `offlineSnapshotJson`(): String =
+        callWithPointer {
+    rustCallWithError(MobileException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_offline_snapshot_json(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
+    override fun `offlineSyncConfigJson`(): String =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_offline_sync_config_json(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
+    override fun `offlineSyncDeltaJson`(`sinceFingerprint`: ULong): String =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_offline_sync_delta_json(it,
+        FfiConverterULong.lower(`sinceFingerprint`),
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
+    
     @Throws(MobileException::class)override fun `quoteJson`(`symbol`: String): String =
         callWithPointer {
     rustCallWithError(MobileException) { _status ->
@@ -914,6 +988,18 @@ class MobileCore(
         }
     
     
+    @Throws(MobileException::class)override fun `restoreOfflineSnapshotJson`(`snapshotJson`: String): ULong =
+        callWithPointer {
+    rustCallWithError(MobileException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_restore_offline_snapshot_json(it,
+        FfiConverterString.lower(`snapshotJson`),
+        _status)
+}
+        }.let {
+            FfiConverterULong.lift(it)
+        }
+    
+    
     @Throws(MobileException::class)override fun `setAlertRulesJson`(`rulesJson`: String): ULong =
         callWithPointer {
     rustCallWithError(MobileException) { _status ->
@@ -923,6 +1009,18 @@ class MobileCore(
 }
         }.let {
             FfiConverterULong.lift(it)
+        }
+    
+    
+    @Throws(MobileException::class)override fun `setOfflineSyncConfigJson`(`configJson`: String): String =
+        callWithPointer {
+    rustCallWithError(MobileException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_set_offline_sync_config_json(it,
+        FfiConverterString.lower(`configJson`),
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
         }
     
     override fun `statusJson`(): String =

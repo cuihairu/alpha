@@ -115,3 +115,41 @@ data class SyncPlanPayload(
     @SerialName("interval_secs") val intervalSecs: ULong,
     val reason: String? = null,
 )
+
+// ── L390 离线数据载荷（docs/mobile-offline.md §4；术语红线：备份=Snapshot
+//    落盘不出设备，同步=SyncDelta 与远端对齐——命名与文案不混用）──
+
+/** 离线授权配置 ↔ alpha-mobile `OfflineSyncConfig`（enabled 默认 false——产品红线①） */
+@Serializable
+data class OfflineSyncConfigPayload(
+    val enabled: Boolean,
+    val scopes: List<String>,
+)
+
+/** 快照条目 ↔ alpha-mobile `OfflineEntry`（备份面最小单元） */
+@Serializable
+data class OfflineEntryPayload(
+    val key: String,
+    @SerialName("payload_json") val payloadJson: String,
+    @SerialName("content_seq") val contentSeq: ULong,
+)
+
+/** 本地快照 ↔ alpha-mobile `OfflineSnapshot`（备份面载荷；scopes 为明示数据范围） */
+@Serializable
+data class OfflineSnapshotPayload(
+    val version: String,
+    val enabled: Boolean,
+    val scopes: List<String>,
+    @SerialName("captured_at") val capturedAt: String,
+    val entries: List<OfflineEntryPayload>,
+    val fingerprint: ULong,
+)
+
+/** 增量决策 ↔ alpha-mobile `SyncDelta`（同步面载荷；needed 才允许发起对齐） */
+@Serializable
+data class SyncDeltaPayload(
+    val needed: Boolean,
+    @SerialName("since_fingerprint") val sinceFingerprint: ULong,
+    @SerialName("current_fingerprint") val currentFingerprint: ULong,
+    val reason: String? = null,
+)

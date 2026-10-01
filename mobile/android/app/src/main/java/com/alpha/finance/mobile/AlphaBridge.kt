@@ -17,7 +17,7 @@ import uniffi.alpha_mobile.MobileException
  * Kotlin 侧错误面，不 import 任何 uniffi 类型。推送/同步的平台送达与
  * WorkManager 调度接缝见 [PushSyncSeam]。
  */
-class AlphaBridge(symbols: List<String>, apiUrl: String) : AutoCloseable, RefreshGateway {
+class AlphaBridge(symbols: List<String>, apiUrl: String) : AutoCloseable, RefreshGateway, OfflineGateway {
     /** Kotlin 侧错误面：Rust 语义不在 UI 层重复实现，只做类型搬运与文案兜底 */
     sealed class Error(message: String) : Exception(message) {
         /** 观察列表外（核心库唯一业务判断的镜像） */
@@ -115,6 +115,37 @@ class AlphaBridge(symbols: List<String>, apiUrl: String) : AutoCloseable, Refres
     override suspend fun markSynced(): SyncStatusPayload = withContext(Dispatchers.IO) {
         translate { json.decodeFromString<SyncStatusPayload>(core.markSyncedJson()) }
     }
+
+    // ── L390 离线数据五透传（docs/mobile-offline.md §4；红线在 Rust 侧强制，
+    // 壳层只搬运：未开启快照 → Error.Failed，无范围开启 → Error.Failed）──
+
+    /** 当前离线授权配置（UI 读取开关与数据范围，红线③明示面） */
+    suspend fun offlineSyncConfig(): OfflineSyncConfigPayload = withContext(Dispatchers.IO) {
+        translate { json.decodeFromString(core.offlineSyncConfigJson()) }
+    }
+
+    /** 设置离线授权配置（**唯一开启路径**）；无范围开启/未知 scope 抛 [Error.Failed] */
+    suspend fun setOfflineSyncConfig(config: OfflineSyncConfigPayload): OfflineSyncConfigPayload =
+        withContext(Dispatchers.IO) {
+            val payload: String = json.encodeToString(config)
+            translate { json.decodeFromString(core.setOfflineSyncConfigJson(payload)) }
+        }
+
+    /** 生成本地快照（**备份面**：落盘不出设备）；未开启抛 [Error.Failed]（红线①） */
+    override suspend fun offlineSnapshot(): OfflineSnapshotPayload = withContext(Dispatchers.IO) {
+        translate { json.decodeFromString(core.offlineSnapshotJson()) }
+    }
+
+    /** 校验快照可恢复（授权 + 版本一致），返回待恢复条目数 */
+    suspend fun restoreOfflineSnapshot(snapshotJson: String): ULong = withContext(Dispatchers.IO) {
+        translate { core.restoreOfflineSnapshotJson(snapshotJson) }
+    }
+
+    /** 同步增量判断（**同步面**）；未授权 → `needed=false, reason=sync_disabled`（红线③） */
+    override suspend fun offlineSyncDelta(sinceFingerprint: ULong): SyncDeltaPayload =
+        withContext(Dispatchers.IO) {
+            translate { json.decodeFromString(core.offlineSyncDeltaJson(sinceFingerprint)) }
+        }
 
     /** 释放 Rust 侧 Arc；Activity 销毁时调用（泄漏面见生成绑定文档） */
     override fun close() = core.destroy()

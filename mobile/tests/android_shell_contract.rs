@@ -199,6 +199,12 @@ fn generated_bindings_expose_consumed_surface() {
             "fun `syncStatusJson`(): String",
             "fun `syncPlanJson`(`trigger`: String): String",
             "fun `markSyncedJson`(): String",
+            // L390 离线数据五方法（只增不改；红线默认关闭/开启须范围在 Rust 侧）
+            "fun `offlineSyncConfigJson`(): String",
+            "fun `setOfflineSyncConfigJson`(`configJson`: String): String",
+            "fun `offlineSnapshotJson`(): String",
+            "fun `restoreOfflineSnapshotJson`(`snapshotJson`: String): ULong",
+            "fun `offlineSyncDeltaJson`(`sinceFingerprint`: ULong): String",
             "sealed class MobileException",
             "class InvalidSymbol(",
             "class Failed(",
@@ -501,6 +507,90 @@ fn gesture_actions_bind_ui_to_bridge() {
         &test,
         &["targetBridgeMethod", "refreshWithManualSync", "@Test"],
         "GestureMappingTest.kt",
+    );
+}
+
+/// L390 离线数据红线守门（docs/mobile-offline.md §2/§5）：红线第一道防线在
+/// Rust（offline.rs 单测锁定默认关闭/开启须范围/未授权无工作项），本测试守
+/// 壳层执行面纪律——第二道防线（未授权载荷拒收）、明示文案、术语分离（备份
+/// ≠同步）、决策不外溢（不 import uniffi）、不自动落盘（备份只经显式编排）
+#[test]
+fn offline_redlines_stay_enforced() {
+    let store = read("app/src/main/java/com/alpha/finance/mobile/OfflineStore.kt");
+    assert_contains(
+        &store,
+        &[
+            "interface KeyValueStore",              // 执行面抽象（后写覆盖）
+            "class InMemoryKeyValueStore",          // JVM 测实现
+            "class SharedPreferencesKeyValueStore", // 真机实现位
+            "class OfflineStore",                   // 备份面存储
+            "check(snapshot.enabled)",              // 红线第二道防线：未授权拒收
+            "KEY_SNAPSHOT",                         // 整快照单键（桌面 L116 口径）
+            "interface OfflineGateway",             // fake 注入面（RefreshGateway 模式）
+            "class OfflineSyncManager",             // 备份/同步编排
+            "suspend fun backupNow",                // 备份=落盘，不出设备
+            "suspend fun planSync",                 // 同步=增量判断，不执行网络
+            "fun dataScopeSummary",                 // 红线③明示文案
+        ],
+        "OfflineStore.kt 红线纪律",
+    );
+
+    // 术语分离（文档 §1）：备份与同步的定义性文案必须同文件在场且互斥描述
+    for term in ["备份", "同步", "不出设备", "出设备"] {
+        assert!(
+            store.contains(term),
+            "OfflineStore.kt 缺术语定义 {term:?}（备份↔同步不得混用）"
+        );
+    }
+
+    // 纯执行面：不 import uniffi（决策在 Rust，本文件只做存储与编排）
+    let store_kt = strip_line_comments(&store);
+    assert!(
+        !store_kt.contains("import uniffi."),
+        "OfflineStore.kt 不得触碰生成绑定（决策面在 Rust 侧）"
+    );
+
+    // AlphaBridge 实现编排接口（含 RefreshGateway/OfflineGateway 双面）
+    let bridge = read("app/src/main/java/com/alpha/finance/mobile/AlphaBridge.kt");
+    assert_contains(
+        &bridge,
+        &[
+            "AutoCloseable, RefreshGateway, OfflineGateway",
+            "core.offlineSyncConfigJson()",
+            "core.setOfflineSyncConfigJson(",
+            "core.offlineSnapshotJson()",
+            "core.restoreOfflineSnapshotJson(",
+            "core.offlineSyncDeltaJson(",
+        ],
+        "AlphaBridge 离线五透传",
+    );
+
+    // 备份只经显式编排：MainActivity 不自动落盘（刷新手势不偷偷备份，文档 §5）
+    let activity = read("app/src/main/java/com/alpha/finance/mobile/MainActivity.kt");
+    assert!(
+        !activity.contains("backupNow"),
+        "MainActivity 不得自动触发备份（备份须用户显式动作，红线精神）"
+    );
+
+    // JVM 单测在（SDK 侧可跑，CI 无 SDK 靠本测试守文件与结构在场）
+    let test = read("app/src/test/java/com/alpha/finance/mobile/OfflineSyncTest.kt");
+    assert_contains(
+        &test,
+        &["OfflineSyncManager", "dataScopeSummary", "@Test"],
+        "OfflineSyncTest.kt",
+    );
+
+    // 红线第一道防线在 Rust 侧（默认关闭/开启须范围的核心库强制不得被移除）
+    let offline_rs = read("../src/offline.rs");
+    assert_contains(
+        &offline_rs,
+        &[
+            "if !self.config.enabled", // 未开启拒快照/拒恢复
+            "scopes.is_empty()",       // 开启须非空范围
+            "\"sync_disabled\"",       // 未授权不出同步工作项
+            "Default",                 // OfflineSyncConfig 派生 Default = 关闭（单测锁定）
+        ],
+        "mobile/src/offline.rs 红线强制",
     );
 }
 

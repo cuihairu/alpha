@@ -32,6 +32,7 @@
 
 mod market;
 mod notify;
+mod offline;
 mod state;
 mod sync;
 
@@ -40,6 +41,9 @@ pub use market::{
 };
 pub use notify::{
     AlertRule, LocalQueueChannel, NotificationChannel, NotificationKind, NotificationSpec, Notifier,
+};
+pub use offline::{
+    DataScope, OfflineEntry, OfflineManager, OfflineSnapshot, OfflineSyncConfig, SyncDelta,
 };
 pub use state::{MobileCore, MobileError};
 pub use sync::{
