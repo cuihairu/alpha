@@ -16,6 +16,7 @@ pub mod memory;
 pub mod models;
 pub mod parallel;
 pub mod platform;
+pub mod risk;
 #[cfg(feature = "std")]
 pub mod safety_audit;
 pub mod simd;
