@@ -134,6 +134,51 @@ jobs:
       - name: Web 前端检查
         run: scripts/check-web.sh
 
+  # 多目标平台并行构建（TODO L467，设计见 docs/cross-platform-architecture.md §7「CI 矩阵」）
+  # fail-fast=false：单平台失败不取消其余平台的并行构建，信号互不遮蔽
+  build:
+    name: 构建（${{ matrix.target }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          # 公共仓库免费 arm64 runner（服务器侧未来部署形态的前哨构建）
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          # macOS 双架构：apple 工具链原生支持从 arm64 runner 交叉编译 x86_64（intel runner 已退役）
+          - os: macos-latest
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 安装 protobuf-compiler
+        # tonic-build proto 代码生成需系统 protoc；跨平台 action 统一装并写 PATH
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # 构建含测试目标的编译链接，运行期验证归 test/desktop 既有作业；alpha-desktop 排除：
+      # Linux runner 无 WebKitGTK 系统依赖，GUI 作业单独覆盖（Desktop macOS + Desktop Framework）
+      - name: 构建 workspace（含测试目标编译）
+        run: cargo build --workspace --all-targets --exclude alpha-desktop --target ${{ matrix.target }}
+
   security:
     name: 安全审计（报告型，不阻塞）
     runs-on: ubuntu-latest
