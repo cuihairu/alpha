@@ -20,12 +20,12 @@ import {
  */
 
 describe('parseFeedFrame（协议形状）', () => {
-  it('sync 帧解析 op/seq/channel/data', () => {
+  it('线上帧型 PascalCase（serde variant 原名，无 rename）——sync 帧解析', () => {
     const raw = JSON.stringify({
-      type: 'sync',
+      type: 'Sync',
       channel: 'real_time_quotes',
       seq: 7,
-      op: 'delta',
+      op: 'Delta',
       data: { price: 10.5 },
     })
     expect(parseFeedFrame(raw)).toEqual({
@@ -37,14 +37,33 @@ describe('parseFeedFrame（协议形状）', () => {
     })
   })
 
+  it('小写帧型兼容（入站大小写不敏感）', () => {
+    const raw = JSON.stringify({
+      type: 'sync',
+      channel: 'real_time_quotes',
+      seq: 1,
+      op: 'full',
+      data: {},
+    })
+    expect(parseFeedFrame(raw)).toEqual({
+      kind: 'sync',
+      channel: 'real_time_quotes',
+      seq: 1,
+      op: 'full',
+      data: {},
+    })
+  })
+
   it('connected / data / error / 未知 type / 非法 JSON', () => {
-    expect(parseFeedFrame('{"type":"connected"}')).toEqual({ kind: 'connected' })
-    expect(parseFeedFrame('{"type":"data","channel":"c","data":{"a":1}}')).toEqual({
+    expect(parseFeedFrame('{"type":"Connected","session_id":"s","server_time":1}')).toEqual({
+      kind: 'connected',
+    })
+    expect(parseFeedFrame('{"type":"Data","channel":"c","data":{"a":1}}')).toEqual({
       kind: 'data',
       channel: 'c',
       data: { a: 1 },
     })
-    expect(parseFeedFrame('{"type":"error","message":"boom"}')).toEqual({
+    expect(parseFeedFrame('{"type":"Error","code":404,"message":"boom"}')).toEqual({
       kind: 'error',
       message: 'boom',
     })
@@ -52,14 +71,14 @@ describe('parseFeedFrame（协议形状）', () => {
     expect(parseFeedFrame('not json')).toBeNull()
   })
 
-  it('订阅帧形状对齐 SubscribeRequest（serde tag + channels 常量）', () => {
+  it('订阅帧形状对齐 SubscribeRequest（协议枚举原名 + channels 常量）', () => {
     expect(JSON.parse(subscribeMessage('conn-1', ['600519']))).toEqual({
-      type: 'subscribe',
+      type: 'Subscribe',
       id: 'conn-1',
       channels: ['real_time_quotes'],
       symbols: ['600519'],
     })
-    expect(JSON.parse(pingMessage)).toEqual({ type: 'ping' })
+    expect(JSON.parse(pingMessage)).toEqual({ type: 'Ping' })
   })
 })
 

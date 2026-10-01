@@ -96,7 +96,12 @@ export type FeedFrame =
   | { kind: 'pong' }
   | { kind: 'error'; message: string }
 
-/** 解析一帧服务端文本（非法 JSON / 未知 type → null，调用方跳过） */
+/**
+ * 解析一帧服务端文本（非法 JSON / 未知 type → null，调用方跳过）。
+ * 帧型大小写不敏感：Rust 侧 WsMessage 的 serde tag 无 rename，线上帧型是
+ * variant 原名 PascalCase（"Sync"/"Resync"…，e2e 探针实测锁定）；入站同时
+ * 接受小写（容错对端归一化）。op 同理归一（Full/Delta → full/delta）。
+ */
 export function parseFeedFrame(raw: string): FeedFrame | null {
   let msg: { type?: unknown; [k: string]: unknown }
   try {
@@ -104,7 +109,8 @@ export function parseFeedFrame(raw: string): FeedFrame | null {
   } catch {
     return null
   }
-  switch (msg.type) {
+  const type = String(msg.type ?? '').toLowerCase()
+  switch (type) {
     case 'connected':
       return { kind: 'connected' }
     case 'pong':
@@ -114,7 +120,7 @@ export function parseFeedFrame(raw: string): FeedFrame | null {
         kind: 'sync',
         channel: String(msg.channel ?? ''),
         seq: Number(msg.seq ?? 0),
-        op: msg.op === 'delta' ? 'delta' : 'full',
+        op: String(msg.op ?? '').toLowerCase() === 'delta' ? 'delta' : 'full',
         data: msg.data,
       }
     case 'data':
@@ -126,15 +132,15 @@ export function parseFeedFrame(raw: string): FeedFrame | null {
   }
 }
 
-/** 订阅帧文本（channels 对齐 protocols::channels::REAL_TIME_QUOTES） */
+/** 订阅帧文本（channels 对齐 protocols::channels::REAL_TIME_QUOTES；帧型走协议枚举原名） */
 export const QUOTE_CHANNEL = 'real_time_quotes'
 
 export function subscribeMessage(id: string, symbols: string[]): string {
-  return JSON.stringify({ type: 'subscribe', id, channels: [QUOTE_CHANNEL], symbols })
+  return JSON.stringify({ type: 'Subscribe', id, channels: [QUOTE_CHANNEL], symbols })
 }
 
 /** 心跳帧（服务端 30s 静默判定前的客户端主动 pong） */
-export const pingMessage = JSON.stringify({ type: 'ping' })
+export const pingMessage = JSON.stringify({ type: 'Ping' })
 
 /**
  * 从 sync/data 帧的 data 里提取报价 tick（RealTimeQuote 形状校验：
