@@ -508,7 +508,7 @@
 - [ ] 桌面端：多标签页界面和工作区管理
 - [ ] Android 端：小组件（Widget）和快捷方式支持
 - [ ] iOS 端：Live Activities 和动态岛支持
-- [ ] 全平台：深色模式和系统主题适配
+- [x] 全平台：深色模式和系统主题适配：语义三端同构（三态偏好 system/light/dark → 生效主题，跟随系统为统一缺省口径）——web 侧 L432 已交付（ThemeToggle + matchMedia 监听 + CSS 变量对），desktop 复用同一 web 主题系统（tauri v1 `theme` 配置仅 Light/Dark 无 system 档，L516 实测过 schema 故窗口 chrome 留空走 OS 决定，登记 docs/theme-adaptation.md）；本项 Android 落地 `Theme.kt`：`ThemePreference` 三态 + `parseThemePreference` 解析收口（未知/损坏/缺省回 SYSTEM）+ `prefersDark` 映射（对齐 web resolveTheme 语义）+ `ThemeSettingsStore` 单键持久化（复用 L512 KeyValueStore 抽象，损坏 fail-safe 回跟随系统）+ `AlphaTheme` Composable 切 Material3 light/dark（isSystemInDarkTheme 组合刷新），MainActivity 去硬编码 lightColorScheme 改 AlphaTheme（偏好变更重启生效取简，进程内热切换随设置页 TODO）；iOS 目录属 L119 不动、对应物登记留档。3 个新 JVM 测试（43/43 全绿）（✅ 2026-10-02）
 - [x] 移动端：生物识别认证和隐私保护（Android 落地，iOS 边界登记）：`BiometricGate.kt` 三件套——① 生物识别门：门密钥 `alpha_biometric_gate` 绑定每次认证（auth-per-use + 新录入生物凭据即作废，API 30+ AUTH_BIOMETRIC_STRONG / 26-29 validity -1 双分支），BiometricPrompt CryptoObject 流认证成功后加密哨兵明文作门禁凭证（伪造 UI 拿不到 TEE 内的密钥操作）；纯逻辑 `GateStateMachine` 迁移全显式（冷启动即锁/退后台重锁清计数/认证失败留锁累计/关开关立即解锁/开锁不突袭）JVM 锁定；② 静态加密：`EncryptedKeyValueStore` AES-256-GCM 每写新随机 IV、篡改/换钥解密返 null 不抛错，与门密钥**两层分离**（门证明人在场、加密保护数据本身——auth-per-use 密钥不能当批量数据密钥，理由入档）；能力不可用（无硬件/未录入）门不激活不把用户锁门外，由静态加密兜底；③ 防泄漏基线：FLAG_SECURE 防截屏/最近任务缩略图（默认开可关）、隐私设置单键 JSON 持久化损坏 fail-safe 回默认（biometricEnabled=false opt-in、lockOnBackground/screenshotShield 默认开）。MainActivity 换 FragmentActivity 基类（androidx.biometric 硬要求）+ GateLayer 覆盖层 + onStop 重锁；权限 USE_BIOMETRIC（normal）从 L520 注册表 planned→allow 迁移（checker 实测 android=1 对账通过）。docs/mobile-privacy.md 七节。10 个新 JVM 测试（40/40 全绿，Keystore/Prompt 设备路径不触框架类）（✅ 2026-10-02）
 
 ## 📦 跨平台打包与分发

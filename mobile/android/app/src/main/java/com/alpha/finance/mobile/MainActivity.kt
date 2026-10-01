@@ -21,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,6 +48,9 @@ import kotlinx.coroutines.launch
  * api_url 详情行，local-only）。手势编排只在 [Gestures.kt]，本文件只做
  * Compose modifier 挂接与状态应用。
  *
+ * 主题接线（L511，docs/theme-adaptation.md）：三态偏好（跟随系统/浅/深）
+ * 经 [AlphaTheme] 切 Material3 配色，语义对齐 web 端 ThemeToggle。
+ *
  * 隐私接线（L512，docs/mobile-privacy.md）：FLAG_SECURE 防截屏/最近任务
  * 缩略图；生物识别门 [GateLayer]（设置 opt-in + 设备能力可用才激活），
  * 退后台即重锁（[onStop] → [GateStateMachine.onBackground]）。基类为
@@ -64,9 +66,11 @@ class MainActivity : FragmentActivity() {
 
     private val gate = GateStateMachine(PrivacySettings())
     private val gateView = mutableStateOf(LockState.Unlocked to 0)
+    private val themeStore by lazy { ThemeSettingsStore(SharedPreferencesKeyValueStore(this)) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val settings = PrivacySettingsStore(SharedPreferencesKeyValueStore(this)).load()
+        val themePref = themeStore.load()
         gate.updateSettings(settings)
         gateView.value = gate.state to gate.failedAttempts
         // 防截屏/最近任务缩略图（隐私开关默认开；用户可关）
@@ -78,7 +82,8 @@ class MainActivity : FragmentActivity() {
         }
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme()) {
+            // L511：三态主题（缺省跟随系统深色；偏好变更重启生效）
+            AlphaTheme(themePref) {
                 Surface(Modifier.fillMaxSize()) {
                     GateLayer(
                         gate = gate,
