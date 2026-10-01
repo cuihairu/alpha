@@ -364,7 +364,29 @@
   行情；边界（§10）：通知实际弹出/权限授权流/Doze 降级/远程通道凭据链留真机。
   门禁：check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅ /
   check-desktop.sh [1-5/5] ✅（✅ 2026-10-01）
-- [ ] 实现触屏手势和移动端 UI 交互优化
+- [x] 实现触屏手势和移动端 UI 交互优化：手势=平台壳职责（架构文档 §13 行 273
+  既定性），**Rust 核心库零改动、FFI 零新增**——手势集三选覆盖触控三模式
+  （docs/mobile-gestures.md §2）：①下拉刷新 `PullToRefreshBox`（material3
+  1.3.x）→ `Gestures.kt::refreshWithManualSync` 编排：`quotes` 重拉 →
+  `syncPlan("manual")`（Manual 不受 L337 间隔闸门，用户手势无条件响应）→
+  `plan.due` 则 `markSynced` 否则 `syncStatus`（安全网）；②长按行情行
+  `combinedClickable(onLongClick)` → `analyze`（与既有按钮并存，减少误触）；
+  ③双击状态头折叠 api_url 详情行（local-only 不触 FFI）。横向滑动不引入——
+  删除观察列表超出核心库能力（架构文档 §7 边界），自造语义会绕过观察列表。
+  落地：`Gestures.kt`（GestureAction 枚举 + `targetBridgeMethod()` 手势→FFI
+  翻译面契约源 + `RefreshGateway` 接口 + `refreshWithManualSync` 编排，纯逻辑
+  零 Compose/uniffi 依赖可 JVM 测）；`AlphaBridge` `implement RefreshGateway`
+  （既有方法签名加 `override`，公共 API 零变化）；`MainActivity` 三手势
+  modifier 挂接 + 刷新占位状态（异常路径 finally 复位）；JVM 单测
+  `GestureMappingTest.kt` 3 例（映射逐分支点名 + fake gateway 断言调用序列
+  与 due 分支，runBlocking 驱动零新测试依赖）；android_shell_contract.rs +1
+  例（Gestures.kt 纯逻辑纪律 / 映射目标方法真实存在于 AlphaBridge / MainActivity
+  挂接在场 / JVM 测试文件在场，共 11 例）。本机 gradle assembleDebug +
+  testDebugUnitTest 13 测实证（10 载荷 + 3 手势，不进 CI 门禁）。
+  边界（文档 §8）：触摸延迟/惯性滚动、PullToRefresh 视觉阈值、长按与双击
+  冲突窗口、小屏折叠布局、异常路径占位复位均需真机观察。
+  门禁：check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅ /
+  check-desktop.sh [1-5/5] ✅（✅ 2026-10-01）
 - [ ] 构建移动端离线数据存储和同步机制
 
 ## 📊 跨平台 UI 框架开发

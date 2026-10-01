@@ -17,7 +17,7 @@ import uniffi.alpha_mobile.MobileException
  * Kotlin 侧错误面，不 import 任何 uniffi 类型。推送/同步的平台送达与
  * WorkManager 调度接缝见 [PushSyncSeam]。
  */
-class AlphaBridge(symbols: List<String>, apiUrl: String) : AutoCloseable {
+class AlphaBridge(symbols: List<String>, apiUrl: String) : AutoCloseable, RefreshGateway {
     /** Kotlin 侧错误面：Rust 语义不在 UI 层重复实现，只做类型搬运与文案兜底 */
     sealed class Error(message: String) : Exception(message) {
         /** 观察列表外（核心库唯一业务判断的镜像） */
@@ -69,7 +69,7 @@ class AlphaBridge(symbols: List<String>, apiUrl: String) : AutoCloseable {
     }
 
     /** 逐标的快照；单项失败（列表外/核心错误）按项降级，不拖垮整屏 */
-    suspend fun quotes(symbols: List<String>): List<QuotePayload> = symbols.mapNotNull { symbol ->
+    override suspend fun quotes(symbols: List<String>): List<QuotePayload> = symbols.mapNotNull { symbol ->
         try {
             quote(symbol)
         } catch (ignored: Error) {
@@ -98,7 +98,7 @@ class AlphaBridge(symbols: List<String>, apiUrl: String) : AutoCloseable {
     }
 
     /** 同步状态（due 按 periodic 口径） */
-    suspend fun syncStatus(): SyncStatusPayload = withContext(Dispatchers.IO) {
+    override suspend fun syncStatus(): SyncStatusPayload = withContext(Dispatchers.IO) {
         translate { json.decodeFromString<SyncStatusPayload>(core.syncStatusJson()) }
     }
 
@@ -107,12 +107,12 @@ class AlphaBridge(symbols: List<String>, apiUrl: String) : AutoCloseable {
      * `manual`，未知值抛 [Error.Failed]。壳层拿 due=true 的计划后执行平台取数
      * 并回 [markSynced]（骨架期可空转，取数执行归 L339）。
      */
-    suspend fun syncPlan(trigger: String): SyncPlanPayload = withContext(Dispatchers.IO) {
+    override suspend fun syncPlan(trigger: String): SyncPlanPayload = withContext(Dispatchers.IO) {
         translate { json.decodeFromString<SyncPlanPayload>(core.syncPlanJson(trigger)) }
     }
 
     /** 标记已同步（Rust 侧记时刻 + 重算指纹），返回更新后的状态 */
-    suspend fun markSynced(): SyncStatusPayload = withContext(Dispatchers.IO) {
+    override suspend fun markSynced(): SyncStatusPayload = withContext(Dispatchers.IO) {
         translate { json.decodeFromString<SyncStatusPayload>(core.markSyncedJson()) }
     }
 

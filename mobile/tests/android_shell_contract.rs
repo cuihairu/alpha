@@ -436,6 +436,74 @@ fn push_sync_seam_stays_shell_side() {
     );
 }
 
+/// L367 手势接线契约（docs/mobile-gestures.md §6）：手势是壳层职责（Rust 零改动、
+/// FFI 零新增），「手势 → 该调哪个 bridge 方法」的翻译面由 Gestures.kt 独占，
+/// MainActivity 只做 modifier 挂接；编排目标方法必须真实存在于 AlphaBridge
+#[test]
+fn gesture_actions_bind_ui_to_bridge() {
+    let gestures = read("app/src/main/java/com/alpha/finance/mobile/Gestures.kt");
+    assert_contains(
+        &gestures,
+        &[
+            "enum class GestureAction",
+            "PullToRefresh",
+            "LongPressAnalyze",
+            "DoubleTapHeader",
+            "fun GestureAction.targetBridgeMethod", // 手势→FFI 翻译面契约源
+            "interface RefreshGateway",             // fake 注入面（JVM 单测可测）
+            "suspend fun refreshWithManualSync",
+            "AlphaBridge.TRIGGER_MANUAL", // 刷新编排固定用 Manual（不受间隔闸门）
+        ],
+        "Gestures.kt 手势契约",
+    );
+    // 纯逻辑：不依赖 Compose（识别在 MainActivity）也不触 uniffi（只经 AlphaBridge）
+    let gestures_kt = strip_line_comments(&gestures);
+    for forbidden in ["import androidx.compose", "import uniffi."] {
+        assert!(
+            !gestures_kt.contains(forbidden),
+            "Gestures.kt 应为纯逻辑（{forbidden} 违规）"
+        );
+    }
+
+    // 动作映射的目标方法必须真实存在于 AlphaBridge（映射不许指向不存在的 FFI）
+    let bridge = read("app/src/main/java/com/alpha/finance/mobile/AlphaBridge.kt");
+    assert_contains(&bridge, &["RefreshGateway"], "AlphaBridge 实现刷新编排接口");
+    for target in [
+        "suspend fun quotes(",
+        "suspend fun syncPlan(",
+        "suspend fun markSynced(",
+        "suspend fun syncStatus(",
+        "suspend fun analyze(",
+    ] {
+        assert!(
+            bridge.contains(target),
+            "targetBridgeMethod 映射目标 {target:?} 在 AlphaBridge 不存在"
+        );
+    }
+
+    // MainActivity 只做 modifier 挂接与状态应用（编排在 Gestures.kt）
+    let activity = read("app/src/main/java/com/alpha/finance/mobile/MainActivity.kt");
+    assert_contains(
+        &activity,
+        &[
+            "PullToRefreshBox",      // 下拉刷新挂接
+            "combinedClickable",     // 长按/双击挂接
+            "onLongClick",           // 长按 → 分析
+            "onDoubleClick",         // 双击状态头折叠
+            "refreshWithManualSync", // 编排经 Gestures.kt，不在 UI 层拼 FFI 序列
+        ],
+        "MainActivity.kt 手势挂接",
+    );
+
+    // JVM 单测在（SDK 侧可跑，CI 无 SDK 靠本测试守文件与结构在场）
+    let test = read("app/src/test/java/com/alpha/finance/mobile/GestureMappingTest.kt");
+    assert_contains(
+        &test,
+        &["targetBridgeMethod", "refreshWithManualSync", "@Test"],
+        "GestureMappingTest.kt",
+    );
+}
+
 /// 构建产物不入库；生成绑定入库（消费面随提交可审）
 #[test]
 fn gitignore_separates_generated_source_from_artifacts() {
