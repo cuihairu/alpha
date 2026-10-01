@@ -1,0 +1,50 @@
+name: Perf
+
+# L495 自动化性能回归检测：criterion 基线比对。基线与机器强相关（同机
+# 比对才有效）——actions/cache 按周滚动固化基线，命中则比对、未命中则
+# 重新固化（首次不判回归）。解释：性能波动属统计判定，为免 PR 被机器
+# 噪声误伤，本作业仅 schedule/手动触发，不进 PR required 面。
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每周三 04:17 UTC（与 coverage/miri 错峰）
+    - cron: '17 4 * * 3'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  perf-regression:
+    name: Perf regression (criterion)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: perf-bench
+
+      # 周滚动基线：周号变 → 缓存未命中（跑完由脚本固化新基线），旧基线
+      # 自然淘汰；restore-keys 回退最近一周基线（同周内多次跑沿用旧基线
+      # 比对，判过的基线不漂移）
+      - name: 计算周号
+        run: echo "WEEK=$(date -u +%G-W%V)" >> "$GITHUB_ENV"
+
+      - name: 取周滚动基线
+        uses: actions/cache@v4
+        with:
+          path: target/criterion
+          key: criterion-baseline-${{ runner.os }}-${{ env.WEEK }}
+          restore-keys: |
+            criterion-baseline-${{ runner.os }}-
+
+      - name: 性能回归门禁（比对或固化基线）
+        run: scripts/check-perf.sh

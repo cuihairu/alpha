@@ -492,7 +492,7 @@
 - [x] 开发性能基准测试和回归测试套件——criterion 基准套件 `packages/core/benches/indicators_bench.rs` 三组 8 项：热路径指标（SMA/EMA/RSI/Bollinger/MACD @10k 根，Elements 吞吐标注）、形态识别（K 线形态 + zigzag find_swings @10k）、优化引擎（2×3 网格 grid_search @1k——寻优编排开销代表面）；价格序列确定性 LCG 游走（种子 42，同 simd.rs 测试口径，无 rand 依赖可复现）；dev-dep criterion 0.5 关 default-features（无 plotters/gnuplot，CI 零绘图依赖）；`cargo bench -p alpha-core --bench indicators_bench` 实测 8 项全跑通（SMA 10k ≈70µs / find_swings 10k ≈32µs / grid_search ≈202µs）；lib 自带 bench 目标与 criterion 参数不兼容的坑以 `--bench` 定向解决；clippy --all-targets（含 bench）0 警告、全 crate 124 测试通过。回归检测面归 L495（--save-baseline 比对本套件）（✅ 2026-10-02）
 - [ ] 实现基于 Proptest 的模糊测试和属性验证
 - [ ] 构建代码覆盖率报告和质量度量
-- [ ] 开发自动化性能回归检测系统
+- [x] 开发自动化性能回归检测系统——`scripts/check-perf.sh` criterion 基线比对（`--save-baseline` 固化 / `--baseline` 比对，基线 target/criterion 按基准分桶不入库；PERF_SAVE=1 显式刷新、PERF_BASELINE 改名）；criterion 对回归只打印不退出是坑——脚本 tee 输出后 grep「Performance has regressed」判失败（判退路径实测 exit 1：3 项 p=0.00 判退被正确拦截；放行路径 = grep 否命）；**前置条件登记：机器须空闲**——criterion 记墙钟，同机并行 cargo 构建期间实测 +100% 级全线漂移（p=0.00 全线判退），CI 单租户 runner 天然满足、本地跑前须停其他构建；CI `.github/workflows/perf.yml` 周滚动基线（周号 env + actions/cache：同周沿用旧基线比对防漂移、跨周重固化），仅 schedule/手动触发不进 PR required（统计判定不吃机器噪声误伤）；抖动耐受由 criterion p 值自带不另设百分比阈值（✅ 2026-10-02）
 - [ ] 实现基于 Miri 的内存安全静态分析
 
 ## 📈 业务功能开发
