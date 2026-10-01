@@ -167,7 +167,9 @@ fn cross_language_names_stay_consistent() {
             "--language kotlin",
             "aarch64-linux-android",
             "API_LEVEL=26",
-            "jniLibs/arm64-v8a",
+            // L517 双 ABI：落位路径参数化 + ABI 循环保留 arm64-v8a 档（原硬编码 jniLibs/arm64-v8a 已随循环改造失效）
+            "jniLibs/$JNI_ABI",
+            "aarch64-linux-android:arm64-v8a",
             "libalpha_mobile.so",
         ],
         "gen-bindings.sh",
