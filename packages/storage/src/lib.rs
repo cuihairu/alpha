@@ -5,6 +5,7 @@
 pub mod cache;
 pub mod clickhouse;
 pub mod cloud;
+pub mod columnar;
 pub mod dal;
 pub mod disk_kv;
 pub mod memory;
@@ -22,6 +23,7 @@ use alpha_core::errors::AlphaResult;
 pub use cache::*;
 pub use clickhouse::*;
 pub use cloud::*;
+pub use columnar::*;
 pub use dal::*;
 pub use disk_kv::*;
 pub use memory::*;
