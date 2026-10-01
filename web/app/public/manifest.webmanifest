@@ -1,0 +1,19 @@
+{
+  "name": "Alpha Finance",
+  "short_name": "Alpha",
+  "description": "A股行情与数据分析（实时看板 · 技术指标 · SQL 工作台）",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2980b9",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

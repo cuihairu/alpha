@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- L507 PWA 图标：蓝底三根阳线（K线意象，accent #2980b9 对齐主题色） -->
+  <rect width="512" height="512" rx="96" fill="#2980b9"/>
+  <g stroke="#ffffff" stroke-width="18" stroke-linecap="round">
+    <line x1="140" y1="150" x2="140" y2="330"/>
+    <line x1="256" y1="110" x2="256" y2="300"/>
+    <line x1="372" y1="70" x2="372" y2="250"/>
+  </g>
+  <rect x="108" y="200" width="64" height="90" rx="10" fill="#ffffff"/>
+  <rect x="224" y="160" width="64" height="100" rx="10" fill="#ffffff"/>
+  <rect x="340" y="110" width="64" height="100" rx="10" fill="#ffffff"/>
+</svg>
