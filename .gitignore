@@ -36,6 +36,9 @@ wasm-analyzer/node_modules/
 # Web (build output)
 web/dist/*
 web/pkg/*
+# React 骨架（L427）：构建产物与可选 wasm 拷贝位（node_modules 由全局规则覆盖）
+web/app/dist/
+web/app/public/pkg/
 !web/dist/.gitkeep
 # 桌面端 Tauri 的 distDir（tauri.conf.json build.distDir）必须有内容才能启动窗口，
 # 故兜底壳受版本控制；`npm run build` 会用真实前端覆盖这两个文件

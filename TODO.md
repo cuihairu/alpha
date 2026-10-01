@@ -424,7 +424,7 @@
   check-desktop.sh [1-5/5] ✅（✅ 2026-10-01）
 
 ## 📊 跨平台 UI 框架开发
-- [ ] 选择和集成跨平台 UI 框架（Web: React/Vue, Desktop: Tauri, Mobile: Native）
+- [x] 选择和集成跨平台 UI 框架（Web: React/Vue, Desktop: Tauri, Mobile: Native）：选型决策写入 docs/web-framework-selection.md——Web 定 **React 18 + TypeScript + Vite**（vs Vue 3：金融终端级组件生态〔图表/虚拟表格/Monaco 编辑器〕React 一等封装更全；vs Yew/Leptos：生态空缺抵不过「同语言」收益，不选作主框架，wasm-analyzer 维持 cdylib+JS 绑定现模式）；影响面登记：L428 组件化后续按 React 路线重定 scope、L429 图表候选 lightweight-charts/ECharts；Web 骨架落地 web/app/（独立 Vite 工程：最小示例页 = 行情演示表 + 纯 TS SMA + WASM 引擎探针三态〔动态 import /pkg 接缝与纯 TS 对账〕，vitest 8 单测 + tsc 严格类型〔纯 TS SMA 口径**对齐** Rust 侧 TechnicalIndicators::calculate_sma：等长输出/前导 0.0 占位/样本不足全 0/4 位小数取整，单测沿用 Rust 同名样本向量对账，前端不另立指标语义〕，package-lock 锁定）；现有 web/ 演示页零回退（未触碰任何既有文件；scripts/check-web.sh 第 1 步在场守门 + node --check 冒烟 + 本机 server.js 实测 index.html/wasm-demo.html 均 200）；新门禁 scripts/check-web.sh 四步（旧页在场冒烟 → 骨架结构断言 → npm ci → tsc+vitest+vite build）接入 CI wasm 作业尾部（ubuntu-latest 自带 node）；Desktop/Mobile 仅文档登记接入边界不实现（Desktop Tauri 1.5 维持现状、frontendDist 指向 web/app/dist 的策略归后续单〔§6 选项 A〕；Mobile 维持 Native 不引 React Native——移动端共享面是 Rust FFI 而非 UI，设计语义对齐即可）。全仓门禁复跑 0 失败（check-lint.sh / 全仓测试 / check-cross-platform.sh 四步 / check-desktop.sh [1-5/5] / check-web.sh）（✅ 2026-10-01）
 - [ ] 基于 Yew/Leptos 开发 Web 端组件化数据分析界面
 - [ ] 集成高性能图表库（D3.js + Canvas + 原生渲染）
 - [ ] 开发跨平台 SQL 查询编辑器和结果可视化

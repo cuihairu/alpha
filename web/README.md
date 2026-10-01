@@ -50,6 +50,24 @@ python3 -m http.server 8080 --bind 127.0.0.1
 HOST=0.0.0.0 PORT=8080 npm start
 ```
 
+## ⚛️ React 骨架（`app/`，TODO L427）
+
+跨平台 UI 框架选型已定 **React 18 + TypeScript + Vite**（对比、理由与
+Desktop/Mobile 边界见 `../docs/web-framework-selection.md`）。新组件化界面
+在 `app/` 独立 npm 工程开发；本目录既有 vanilla 演示页**零改动**继续可用：
+
+```bash
+cd app
+npm ci          # 依赖安装（lockfile 锁定）
+npm run dev     # 骨架示例页（http://localhost:5173）
+npm test        # vitest 单测
+npm run build   # 类型检查 + 生产构建
+```
+
+门禁 `scripts/check-web.sh`（旧演示页在场冒烟 + `npm ci` + tsc + vitest +
+`vite build`）已接入 CI `wasm` 作业。示例页内置 WASM 引擎探针：先
+`npm run build:wasm`（本目录）再把 `pkg/` 拷入 `app/public/pkg/` 即可加载。
+
 ## 📊 功能特性
 
 ### 🔧 核心分析引擎
@@ -90,6 +108,7 @@ HOST=0.0.0.0 PORT=8080 npm start
 
 ```
 web/
+├── app/                # React 骨架（L427，独立 npm 工程）
 ├── index.html          # 主页面
 ├── app.js             # 主要应用逻辑
 ├── server.js          # Node.js 开发服务器

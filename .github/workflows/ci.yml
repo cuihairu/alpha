@@ -130,6 +130,10 @@ jobs:
           cd wasm-analyzer
           wasm-pack build --target web --out-dir pkg --release
 
+      # Web 前端门禁（L427 React 骨架 + 旧演示页行为不回退守门；runner 自带 node）
+      - name: Web 前端检查
+        run: scripts/check-web.sh
+
   security:
     name: 安全审计（报告型，不阻塞）
     runs-on: ubuntu-latest

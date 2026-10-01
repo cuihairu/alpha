@@ -118,3 +118,4 @@ grpc 零改动；wasm 侧取 `--no-default-features` 契约层，wasm32 编译�
 | 跨平台共享核心库（core/protocols/storage） | §5 | ✅ 已落地：core wasm-clean（wasm feature）；protocols grpc feature 门控后 wasm32 契约层编译通过；storage 按设计属 L1 服务端专属（移动端经 REST/WS 访问 services，不直连 storage） |
 | 平台适配层抽象接口 | §4 草案 | 随 Tauri 文件导出 / mobile 立项落地 `platform.rs` |
 | 统一 Rust 代码规范与兼容性检查 | 本设计 §6 | 脚本已落地，CI 集成随「CI/CD」节推进 |
+| Web UI 框架选型与集成（L427） | 本设计 §3 L2 | ✅ 已落地：docs/web-framework-selection.md 定论 **React 18 + TS + Vite**（Yew/Leptos 不选作主框架），`web/app/` 骨架 + `scripts/check-web.sh` 接入 CI `wasm` 作业；旧演示页零回退；Desktop/Mobile 接入边界登记于该文档 §6 |
