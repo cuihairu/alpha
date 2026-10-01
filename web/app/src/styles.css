@@ -1,0 +1,150 @@
+/*
+ * L431 响应式基础样式（断点：≤720 移动 / 721-1024 平板 / >1024 桌面）。
+ * 内容优先单列布局：窄屏字号/间距收缩、控件纵向堆叠、表格横向滚动兜底。
+ * 色彩令牌只铺最小集（深浅主题系统归 L432，不在此展开）。
+ */
+
+:root {
+  --fg: #1f2d3d;
+  --fg-muted: #6b7a8d;
+  --accent: #2980b9;
+  --border: #d8e0e8;
+  --bg: #ffffff;
+  --bg-soft: #f5f7fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--fg);
+  background: var(--bg);
+  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  line-height: 1.55;
+  font-size: 15px;
+}
+
+main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 8px 0;
+}
+
+h2 {
+  font-size: 17px;
+  margin: 20px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+section {
+  margin-bottom: 20px;
+  /* 窄屏兜底：宽表/图在节内横向滚动而非撑破版心 */
+  overflow-x: auto;
+}
+
+p {
+  margin: 6px 0;
+}
+
+code {
+  background: var(--bg-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.92em;
+}
+
+button {
+  font-size: 14px;
+  padding: 6px 14px;
+  min-height: 32px; /* 触控目标下限 */
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th {
+  background: var(--bg-soft);
+  font-weight: 600;
+}
+
+tbody tr:hover {
+  background: var(--bg-soft);
+}
+
+textarea {
+  font-size: 14px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* 平板及以下：行内控件允许换行堆叠 */
+@media (max-width: 1024px) {
+  main {
+    padding: 16px 12px 40px;
+  }
+}
+
+/* 移动：字号/触控进一步收缩，label 纵向堆叠 */
+@media (max-width: 720px) {
+  body {
+    font-size: 14px;
+  }
+
+  h1 {
+    font-size: 19px;
+  }
+
+  h2 {
+    font-size: 16px;
+  }
+
+  button {
+    width: 100%;
+    min-height: 40px; /* 移动端触控目标加大 */
+  }
+
+  label {
+    display: block;
+    margin: 6px 0;
+  }
+
+  select,
+  textarea {
+    width: 100%;
+  }
+
+  th,
+  td {
+    padding: 5px 8px;
+  }
+}

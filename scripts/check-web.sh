@@ -26,6 +26,7 @@ for f in web/app/package.json web/app/package-lock.json web/app/index.html \
          web/app/src/components/QuoteTable.tsx web/app/src/components/IndicatorPanel.tsx \
          web/app/src/components/PriceChart.tsx web/app/src/components/SqlWorkbench.tsx \
          web/app/src/components/ResultGrid.tsx web/app/src/components/WasmProbe.tsx \
+         web/app/src/styles.css \
          web/app/vite.config.ts; do
   if [ ! -f "$f" ]; then
     echo "缺失骨架文件: $f"
@@ -41,6 +42,11 @@ node -e "
     if (!p.scripts[s]) { console.error('缺 npm 脚本: ' + s); process.exit(1); }
   }
 "
+# 响应式三要素（L431）：viewport meta、样式挂载、移动断点在场
+grep -q 'name="viewport"' web/app/index.html || { echo "index.html 缺 viewport meta"; exit 1; }
+grep -q 'styles.css' web/app/src/main.tsx || { echo "main.tsx 未挂载 styles.css"; exit 1; }
+grep -q '@media (max-width: 720px)' web/app/src/styles.css || { echo "styles.css 缺移动断点"; exit 1; }
+grep -q '@media (max-width: 1024px)' web/app/src/styles.css || { echo "styles.css 缺平板断点"; exit 1; }
 
 echo "--- [3/4] 依赖安装（npm ci，lockfile 锁定）"
 cd web/app
