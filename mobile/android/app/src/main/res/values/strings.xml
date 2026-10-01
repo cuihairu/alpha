@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Alpha Mobile</string>
+    <!-- L509 widget 占位与快捷方式标签 -->
+    <string name="widget_placeholder">Alpha 行情</string>
+    <string name="widget_no_data">--</string>
+    <string name="shortcut_600519">贵州茅台行情</string>
+    <string name="shortcut_600519_long">查看贵州茅台行情与分析</string>
+    <string name="shortcut_000001">平安银行行情</string>
+    <string name="shortcut_000001_long">查看平安银行行情与分析</string>
 </resources>

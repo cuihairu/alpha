@@ -73,6 +73,9 @@ class MainActivity : FragmentActivity() {
         val themePref = themeStore.load()
         gate.updateSettings(settings)
         gateView.value = gate.state to gate.failedAttempts
+        // L509 深链：快捷方式/widget 点击带入预选标的（标准 launchMode 下
+        // 每次新建实例走 onCreate；进程内热路由归单实例改造 TODO）
+        val deepLinkSymbol = intent?.getStringExtra(EXTRA_SYMBOL)
         // 防截屏/最近任务缩略图（隐私开关默认开；用户可关）
         if (settings.screenshotShield) {
             window.setFlags(
@@ -92,7 +95,7 @@ class MainActivity : FragmentActivity() {
                         capabilities = AndroidBiometricCapabilities(this),
                         onRequestUnlock = { requestUnlock() },
                     ) {
-                        MarketScreen(bridge)
+                        MarketScreen(bridge, initialSymbol = deepLinkSymbol)
                     }
                 }
             }
@@ -128,11 +131,16 @@ class MainActivity : FragmentActivity() {
         bridge.close()
         super.onDestroy()
     }
+
+    companion object {
+        /** 深链 extra：快捷方式与 widget 点击共用的预选标的键（L509） */
+        const val EXTRA_SYMBOL = "alpha_extra_symbol"
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun MarketScreen(bridge: AlphaBridge) {
+fun MarketScreen(bridge: AlphaBridge, initialSymbol: String? = null) {
     var status by remember { mutableStateOf<StatusPayload?>(null) }
     var quotes by remember { mutableStateOf<List<QuotePayload>>(emptyList()) }
     var analysis by remember { mutableStateOf<AnalysisPayload?>(null) }
@@ -140,16 +148,21 @@ fun MarketScreen(bridge: AlphaBridge) {
     var refreshing by remember { mutableStateOf(false) }
     var headerCollapsed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(Unit) {
         try {
             status = bridge.status()
             quotes = bridge.quotes(status?.symbols.orEmpty())
+            // L509：行情到手即发布 widget（首只标的，应用是唯一数据源）
+            publishWidgetQuote(context, quotes)
             message = null
         } catch (e: AlphaBridge.Error) {
             message = e.message
         }
     }
+
+    // L509 深链 effect 置于 loadAnalysis 声明之后（本地函数先声明后引用）
 
     /** 长按行情行 / 「分析」按钮共用：触发该标的技术分析并展示摘要 */
     fun loadAnalysis(symbol: String) {
@@ -161,6 +174,11 @@ fun MarketScreen(bridge: AlphaBridge) {
                 message = e.message
             }
         }
+    }
+
+    // L509 深链：快捷方式/widget 带入标的 → 直接触发该标的分析
+    LaunchedEffect(initialSymbol) {
+        initialSymbol?.takeIf { it.isNotEmpty() }?.let { loadAnalysis(it) }
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -196,6 +214,8 @@ fun MarketScreen(bridge: AlphaBridge) {
                             status?.symbols.orEmpty(),
                         )
                         quotes = outcome.quotes
+                        // L509：下拉刷新同样发布 widget 最新态
+                        publishWidgetQuote(context, quotes)
                         message = null
                     } catch (e: AlphaBridge.Error) {
                         message = e.message

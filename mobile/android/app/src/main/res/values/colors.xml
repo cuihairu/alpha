@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- L509 widget 配色：红涨绿跌与三端一致（docs/theme-adaptation.md 语义），
+     独立资源便于 RemoteViews setTextColor 引用。骨架期浅色底。 -->
+<resources>
+    <color name="widget_up">#C0392B</color>
+    <color name="widget_down">#27AE60</color>
+    <color name="widget_flat">#7F8C8D</color>
+    <color name="widget_bg">#FFFFFF</color>
+    <color name="widget_text">#212121</color>
+</resources>

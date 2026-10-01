@@ -16,6 +16,22 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- L509 静态快捷方式（长按图标直达标的预选分析） -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+        <!-- L509 行情小卡：exported=false（官方口径，系统特权投递
+             APPWIDGET_UPDATE）；无网络权限，数据只来自应用内发布 -->
+        <receiver
+            android:name=".AlphaQuoteWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_quote_info" />
+        </receiver>
     </application>
 </manifest>

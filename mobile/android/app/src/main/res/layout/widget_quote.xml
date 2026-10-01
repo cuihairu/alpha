@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- L509 行情小卡：单行布局（标的/价格/涨跌/更新时间），色彩经
+     AlphaQuoteWidgetProvider 按涨跌方向 setTextColor（红涨绿跌，
+     与 web/Android 应用内同口径）。骨架期浅色底（桌面 widget 深色
+     适配归主题项后续），文字色走独立资源便于 RemoteViews 引用。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:background="@color/widget_bg">
+
+    <TextView
+        android:id="@+id/widget_symbol"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@color/widget_text"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="@string/widget_placeholder" />
+
+    <TextView
+        android:id="@+id/widget_price"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="@color/widget_text"
+        android:text="@string/widget_no_data" />
+
+    <TextView
+        android:id="@+id/widget_change"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:textSize="12sp"
+        android:textColor="@color/widget_flat"
+        android:text="--" />
+</LinearLayout>

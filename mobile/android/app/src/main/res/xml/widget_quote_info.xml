@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- L509 widget 元信息：单行卡（约 2×1 格）；updatePeriodMillis 取系统
+     30min 下限——真实更新由应用刷新路径 publishWidgetQuote 驱动，
+     系统轮询只做占位重绘（widget 无网络权限，不发数据请求）。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="40dp"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_quote"
+    android:widgetCategory="home_screen" />

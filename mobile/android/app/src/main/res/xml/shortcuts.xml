@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- L509 静态快捷方式：长按应用图标直达标的预选分析（MainActivity
+     EXTRA_SYMBOL 深链契约，与 widget 点击同一入口）。观察列表为内置
+     演示值，动态 shortcuts（随用户观察列表生成）归设置页 TODO。 -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="quote_600519"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/shortcut_600519"
+        android:shortcutLongLabel="@string/shortcut_600519_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.alpha.finance.mobile"
+            android:targetClass="com.alpha.finance.mobile.MainActivity">
+            <extra
+                android:name="alpha_extra_symbol"
+                android:value="600519" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="quote_000001"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/shortcut_000001"
+        android:shortcutLongLabel="@string/shortcut_000001_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.alpha.finance.mobile"
+            android:targetClass="com.alpha.finance.mobile.MainActivity">
+            <extra
+                android:name="alpha_extra_symbol"
+                android:value="000001" />
+        </intent>
+    </shortcut>
+</shortcuts>
