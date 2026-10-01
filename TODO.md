@@ -517,5 +517,5 @@
 - [ ] 实现 Android APK/AAB 分包和多渠道发布
 - [ ] 配置 iOS IPA 签名和 TestFlight/App Store 发布
 - [ ] 构建自动更新和增量更新机制
-- [ ] 开发平台合规性检查和适配（隐私政策、权限申请）
+- [x] 开发平台合规性检查和适配（隐私政策、权限申请）：config/compliance/permissions-registry.txt（[allow]/[planned] 双段权限注册表——allow 为检查基线、planned 留档计划权限含加入触发条件）+ scripts/check-compliance.sh（python3 对账四面：注册表 allow 条目理由非空校验、AndroidManifest.xml <uses-permission> ⊆ android 段、tauri.conf.json allowlist 启用组**双向对账**（未登记的启用组=失败、登记但未启用的陈旧条目=失败，注册表不许腐烂）、CSP 非空；负路径实测：注入 CAMERA 未登记权限/移除注册条目均正确 exit 1）+ docs/platform-compliance.md（隐私政策工程草案六条（数据最小化/本地优先/无遥测/权限可关停，标注发布前法务复核边界）+ 四平台权限台账：Android 骨架零权限最小清单（INTERNET 按 planned 触发条件走，POST_NOTIFICATIONS 为 API 33+ 运行时申请、INTERNET/USE_BIOMETRIC 为 normal 安装期授予）、iOS 仅登记边界（L119 交付面不动：push entitlement + NSFaceIDUsageDescription 随落地项进 Info.plist）、桌面 Tauri 六 allowlist 组逐条理由与最小权限评审（组粒度收窄归 L516 复核、签名公证归 L518）、Web PWA 通知授权边界（用户手势触发、拒绝降级站内）。新增权限流程 = 注册表 conscious ack + 文档同步，CI 接线归 L467（✅ 2026-10-02）
 - [x] （未来项 → 已落地 2026-09-28，见 P2「重投递封顶」条）消息投递/重送交付计数上限：claim_stale 按 delivery_count 封顶（默认 5，env 可调），超限毒消息不再重投、转 quotes.dlq 留痕并 ack 停投，与兜底扫描路径协同防止资源耗尽；毒串消息的完整运营机制（批量重放工具、DLQ 内容级再处理）留待后续

@@ -1,0 +1,27 @@
+# 平台权限注册表（L520「开发平台合规性检查和适配」检查基线）
+#
+# 语义：[allow] 段是「允许出现在平台清单/能力配置中的权限」白名单——
+# 检查器（scripts/check-compliance.sh）对 mobile/android/app/src/main/AndroidManifest.xml
+# 的 <uses-permission> 与 desktop/tauri.conf.json 的 allowlist 启用组逐一双向对账：
+# 白名单外的新增权限 = 门禁失败；登记了但平台已不再启用的陈旧条目 = 门禁失败。
+# 新增 allow 条目 = conscious ack，须同步 docs/platform-compliance.md 的理由
+# 与隐私政策影响面后抬基线（与 packages/core safety_audit 预算同一纪律）。
+#
+# 格式：<platform>:<permission-or-group>  #  理由（非空，检查器校验）
+# [planned] 段仅留档（检查器不消费），记录计划中的权限与加入触发条件。
+
+[allow]
+tauri:shell # shell.open 仅用于打开外部链接（数据来源/文档）；不放开 execute
+tauri:dialog # 文件选择对话框：本地数据文件导入/导出的用户主动操作入口
+tauri:fs # 本地工作区数据文件读写（限用户经 dialog 显式选择的路径范围）
+tauri:path # 路径解析（fs/dialog 的配套只读能力）
+tauri:notification # 行情告警本地通知（L337 推送决策面的桌面侧形态）
+tauri:globalShortcut # 全局快捷键唤起主窗口（桌面效率特性）
+
+[planned]
+android:android.permission.INTERNET # api-gateway 真实数据接入时加入（现骨架全本地，见 AndroidManifest 头注释）
+android:android.permission.POST_NOTIFICATIONS # Android 13+ 运行时申请；L337 推送落地时加入
+android:android.permission.USE_BIOMETRIC # L512 生物识别认证落地时加入（normal 权限，安装期授予）
+ios:push-entitlement # APNs 推送 entitlement（iOS 目录属 L119 交付面不动，仅登记边界）
+ios:NSFaceIDUsageDescription # FaceID 用途声明，L512 落地时随 Info.plist 登记
+web:Notification # PWA 通知（L506）：须用户手势触发授权，拒绝则降级站内告警
