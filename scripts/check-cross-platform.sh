@@ -13,7 +13,7 @@
 #      rest/websocket/grpc 结构体）编译通过；proto/gRPC 传输为 grpc feature 门控的
 #      服务端专属能力，不在 wasm 契约层内。
 #
-# 用法：scripts/check-cross-platform.sh   （非交互；缺 wasm32 target 自动 rustup 安装）
+# 用法：scripts/check-cross-platform.sh   （非交互）
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,10 +26,9 @@ TARGET=wasm32-unknown-unknown
 
 echo "=== 跨平台兼容性检查 ==="
 
-# 0) wasm32 标准库（非交互安装）
-if ! rustup target list --installed 2>/dev/null | grep -q "^$TARGET$"; then
-    info "未安装 $TARGET，尝试 rustup target add（需要网络）..."
-    rustup target add "$TARGET" || fail "无法安装 $TARGET，请手动安装后重跑"
+# 0) wasm32 标准库（检查是否已安装，不自动安装——CI 环境预装）
+if ! rustc --print target-list 2>/dev/null | grep -q "^$TARGET$"; then
+    fail "目标 $TARGET 未安装，请先运行 rustup target add $TARGET"
 fi
 
 # 1) alpha-core wasm32 编译

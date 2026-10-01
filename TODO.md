@@ -464,7 +464,7 @@
 - [x] 实现实时告警和智能故障诊断：Prometheus 告警（config/alpha-alerts.yml 8 条：网关限流/上游健康/5xx 错误率、data-engine p95 延迟/内存、realtime 连接/吞吐、Prometheus up==0 自监控——只引用已真实埋点指标，upstream 标签/`/ on()` 向量匹配两处硬教训见 docs/alerting-and-diagnosis.md）+ Alertmanager（分组/抑制/路由，空 auth/模板两处启动坑已排）+ alert-webhook 服务（钉钉/企微/Slack/PagerDuty 转发，externalURL 全大写 rename + label_or 借用两处编译坑，3 单测，随 workspace 门禁）+ storage diagnosis 纯函数引擎（规则知识库→根因报告，沿 L460 链路）+ compose/prometheus 接线（alertmanager:9093 + webhook:8084）。设计文档 docs/alerting-and-diagnosis.md。边界：Loki/alloc/SIMD 无 emitter 不设规则（后续指标项）；Jaeger OTLP 全量导出沿 L460 登记（✅ 2026-10-02）
 
 ## 🚀 跨平台 CI/CD 与发布
-- [ ] 配置 GitHub Actions 支持多目标平台并行构建
+- [x] 配置 GitHub Actions 支持多目标平台并行构建：.github/workflows/ci.yml build 作业矩阵（ubuntu-latest x86_64 / ubuntu-24.04-arm aarch64 / windows-latest x86_64-msvc / macos-latest aarch64+x86_64）——fail-fast=false 互不遮蔽；arduino/setup-protoc@v3 统一 proto 代码生成；cache key 按 target 隔离；cargo build --workspace --all-targets --exclude alpha-desktop --target ${{ matrix.target }} 编译验证（运行期测试归 test/desktop 既有作业）。（✅ 2026-10-02）
 - [ ] 开发跨平台 Docker 镜像和容器化部署方案
 - [ ] 实现自动化测试（单元测试、集成测试、端到端跨平台测试）
 - [ ] 构建多平台发布流水线（Web、Desktop、Android、iOS）
