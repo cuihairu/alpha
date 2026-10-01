@@ -18,8 +18,44 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         ndk {
-            // gen-bindings.sh 目前只产 arm64-v8a（主流真机 + arm64 模拟器镜像）
-            abiFilters += listOf("arm64-v8a")
+            // gen-bindings.sh 双 ABI（L517）：arm64-v8a 真机 + x86_64 模拟器/Chromebook
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+    }
+
+    // L517 分包：APK 侧按 ABI 拆分 + universal 兜底（直发渠道按机型自选或全装）；
+    // Play 渠道走 AAB——设备维度的分包由 Play 动态下发，splits 对 AAB 不生效
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = true
+        }
+    }
+
+    // L517 多渠道：play = AAB 上架 Google Play；direct = 官网/侧载 universal APK。
+    // applicationId 保持一致（同一应用身份），渠道以 BuildConfig 标记供运行期
+    // 与更新检查区分（docs/android-release.md §渠道矩阵）
+    flavorDimensions += "channel"
+    productFlavors {
+        create("play") {
+            dimension = "channel"
+            buildConfigField("String", "DISTRIBUTION_CHANNEL", "\"play\"")
+        }
+        create("direct") {
+            dimension = "channel"
+            buildConfigField("String", "DISTRIBUTION_CHANNEL", "\"direct\"")
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            // 密钥全走环境变量/CI secret，keystore 绝不入库（docs/android-release.md §签名）
+            System.getenv("ALPHA_KEYSTORE_PATH")?.let { storeFile = file(it) }
+            storePassword = System.getenv("ALPHA_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("ALPHA_KEY_ALIAS")
+            keyPassword = System.getenv("ALPHA_KEY_PASSWORD")
         }
     }
 
@@ -27,6 +63,10 @@ android {
         release {
             // 混淆关闭：uniffi 生成面靠 JNA 反射，R8 处理规则归发布流水线 TODO
             isMinifyEnabled = false
+            // keystore 环境未配置时保持 unsigned（CI/本机冒烟可构建，不可安装）
+            if (System.getenv("ALPHA_KEYSTORE_PATH") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -39,6 +79,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true // 渠道标记 DISTRIBUTION_CHANNEL（L517 多渠道）
     }
     composeOptions {
         // 与 Kotlin 1.9.25 官方配对；2.x K2 与 uniffi 0.25 生成面不兼容（见根 build 注释）
