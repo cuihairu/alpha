@@ -11,6 +11,7 @@ pub mod disk_kv;
 pub mod memory;
 pub mod partition;
 pub mod postgres_kv;
+pub mod prefetch;
 pub mod rate_limit;
 pub mod redis_kv;
 pub mod redis_streams;
