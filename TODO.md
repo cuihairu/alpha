@@ -334,7 +334,36 @@
   门禁：check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅ /
   check-desktop.sh [1-5/5] ✅（Android 工具链不进 CI 门禁，靠契约测试守结构）
 - [x] 实现 iOS Swift + Rust 集成（SwiftUI + UniFFI）
-- [ ] 开发移动端特有的推送通知和后台同步
+- [x] 开发移动端特有的推送通知和后台同步：分层纪律「核心库只做决策（推什么/
+  何时同步），壳层只做送达与调度（怎么弹/何时醒来）」（docs/mobile-push-sync.md
+  §1）——mobile/src/notify.rs：AlertRule（规则键 = 标的|方向|目标价位模式
+  to_bits，稳定去重键）+ NotificationSpec 六字段载荷（id/kind/symbol/title/
+  body/created_at）+ NotificationChannel trait 可插拔（默认 LocalQueueChannel
+  入队、壳层 take_pending_json 取走送平台 API；FCM/APNs 等云推送**不引入**，
+  留 trait 实现位，不新增付费云服务）+ Notifier 穿越去重（穿越一次发一次、
+  条件回落重武装，防通知轰炸，11 单测）；mobile/src/sync.rs：SyncTrigger 四种
+  触发时机（periodic 受 300s 默认间隔闸门 / foreground / connectivity_restored /
+  manual 无条件出计划；字符串枚举走 serde，foreground 显式 rename）+
+  BackgroundSync 间隔闸门/状态/指纹三件套 + content_seq/fingerprint_of 沿桌面
+  L116 FNV-1a 同算法（symbol 排序聚合、与传入顺序无关）（10 单测）；
+  state.rs：MobileCore 挂 Mutex<Notifier>+Mutex<BackgroundSync>，FFI **只增不
+  改**六方法（set_alert_rules_json 返回规则条数+观察列表/正数校验、
+  check_alerts_json 评估入队、take_pending_json 取走即空、sync_status_json、
+  sync_plan_json 未知触发走 Failed、mark_synced_json 记时刻+重算指纹；构造器
+  与 L118 三方法签名原样——L119 iOS 壳在用，6 单测）；uniffi Kotlin 绑定重生成
+  （+139 行）；Android 接缝：MarketModels 六载荷模型（u64→ULong）+ AlphaBridge
+  六透传（Dispatchers.IO + TRIGGER_* 常量与 serde 线上串逐字一致）+
+  PushSyncSeam.kt（NotificationDispatcher 送达口 + PeriodicSyncWorker 骨架 +
+  WorkManager ≥15min 钳制口径装配，work-runtime-ktx 2.9.1 入壳工程）；
+  PayloadParsingTest +6（规则编码 serde 契约/通知载荷/评估报告/状态/计划双形）；
+  android_shell_contract.rs +1 守门（绑定六方法在、透传接线在、触发串跨语言
+  一致、PushSyncSeam 不触碰 uniffi）；本机 gradle assembleDebug +
+  testDebugUnitTest 10 测实证（不进 CI 门禁）。假设（文档 §8）：默认间隔 300s
+  为骨架值（系统钳制作壳层兼容、不作一致性保证）、取数执行归 L339（api_url
+  仍为配置槽）、规则整体替换不持久化（归 L339 kv 快照）、评估用确定性演示
+  行情；边界（§10）：通知实际弹出/权限授权流/Doze 降级/远程通道凭据链留真机。
+  门禁：check-lint.sh ✅ / 全仓测试 ✅ / check-cross-platform.sh 四步 ✅ /
+  check-desktop.sh [1-5/5] ✅（✅ 2026-10-01）
 - [ ] 实现触屏手势和移动端 UI 交互优化
 - [ ] 构建移动端离线数据存储和同步机制
 

@@ -61,3 +61,57 @@ data class StatusPayload(
     val symbols: List<String>,
     @SerialName("api_url") val apiUrl: String,
 )
+
+// ── L337 推送/同步载荷（docs/mobile-push-sync.md §4；u64/usize → ULong）──
+
+/** 价格告警规则 ↔ alpha-mobile `AlertRule`（整体替换式设置） */
+@Serializable
+data class AlertRulePayload(
+    val symbol: String,
+    @SerialName("target_price") val targetPrice: Double,
+    val above: Boolean,
+)
+
+/** 通知载荷 ↔ alpha-mobile `NotificationSpec`（id 为稳定去重键，kind 目前仅 PriceAlert） */
+@Serializable
+data class NotificationSpecPayload(
+    val id: String,
+    val kind: String,
+    val symbol: String,
+    val title: String,
+    val body: String,
+    @SerialName("created_at") val createdAt: String,
+)
+
+/** 告警评估报告 ↔ `check_alerts_json`（fired=本轮新触发，pending=队列待取条数） */
+@Serializable
+data class AlertsReportPayload(
+    val fired: List<NotificationSpecPayload>,
+    val pending: ULong,
+)
+
+/** 待送达队列 ↔ `take_pending_json`（取走即空） */
+@Serializable
+data class TakenPayload(
+    val taken: List<NotificationSpecPayload>,
+)
+
+/** 同步状态 ↔ `sync_status_json`/`mark_synced_json`（lastSync 为 RFC3339，从未同步为 null） */
+@Serializable
+data class SyncStatusPayload(
+    @SerialName("last_sync") val lastSync: String? = null,
+    val fingerprint: ULong,
+    @SerialName("interval_secs") val intervalSecs: ULong,
+    val due: Boolean,
+)
+
+/** 同步计划 ↔ `sync_plan_json`（due=false 时只带 reason 不带工作项） */
+@Serializable
+data class SyncPlanPayload(
+    val due: Boolean,
+    val trigger: String,
+    val symbols: List<String>,
+    @SerialName("since_fingerprint") val sinceFingerprint: ULong,
+    @SerialName("interval_secs") val intervalSecs: ULong,
+    val reason: String? = null,
+)

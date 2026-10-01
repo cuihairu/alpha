@@ -173,18 +173,20 @@ mobile/android/
 └── app/src/
     ├── main/java/com/alpha/finance/mobile/
     │   ├── MainActivity.kt    Compose 界面（状态头 + 快照 LazyColumn + 行内分析）
-    │   ├── AlphaBridge.kt     唯一 uniffi 消费点（Dispatchers.IO + MobileException→Error 翻译）
-    │   └── MarketModels.kt    FFI JSON 载荷 ↔ kotlinx-serialization（@SerialName 对齐 serde）
+    │   ├── AlphaBridge.kt     唯一 uniffi 消费点（Dispatchers.IO + MobileException→Error 翻译；L337 增推送/同步六透传与 TRIGGER_* 常量）
+    │   ├── MarketModels.kt    FFI JSON 载荷 ↔ kotlinx-serialization（@SerialName 对齐 serde；L337 增推送/同步六载荷）
+    │   └── PushSyncSeam.kt    推送/同步壳层接缝（L337：NotificationDispatcher 送达口 + PeriodicSyncWorker + WorkManager 装配口径）
     ├── main/java/uniffi/alpha_mobile/alpha_mobile.kt   生成绑定（入库）
     ├── main/jniLibs/arm64-v8a/                          .so（不入库）
-    └── test/java/.../PayloadParsingTest.kt              JVM 载荷契约单测（无需设备）
+    └── test/java/.../PayloadParsingTest.kt              JVM 载荷契约单测（无需设备；L337 起 10 例）
 ```
 
-分层纪律（由 `mobile/tests/android_shell_contract.rs` 9 例守门，CI 无 SDK 也
+分层纪律（由 `mobile/tests/android_shell_contract.rs` 10 例守门，CI 无 SDK 也
 能防漂移）：跨语言四名一致（cdylib `alpha_mobile` ↔ JNA 载名 ↔ uniffi 命名
 空间 ↔ jniLibs 路径）；生成绑定必须暴露壳层在用的 FFI 面；`import uniffi.*`
 是 AlphaBridge 的特权，UI 层零生成绑定引用；清单/主题/Gradle 三方一致；
-`.gitignore` 分离「生成源入库 / 构建产物不入库」。
+`.gitignore` 分离「生成源入库 / 构建产物不入库」；推送/同步接缝不触碰
+uniffi（决策面只在 Rust，docs/mobile-push-sync.md §1）。
 
 ## 11. 非交互假设（自行判定，已注明）
 
@@ -240,6 +242,6 @@ mobile/android/
 |---|---|---|
 | 270 Android Kotlin 环境 | §9 管线 + §10.1 壳 | **L301 已落**（设计文档+骨架+契约单测；真机运行留 §12①） |
 | 271 iOS Swift 集成 | §9 staticlib + uniffi Swift 绑定 | 未启（无工具链） |
-| 272 推送/后台同步 | §5 错误分类 + `api_url` 配置槽 + JNI 回调 | 未启（JNI 逃生舱已随 L301 连依赖） |
+| 272 推送/后台同步 | §5 错误分类 + `api_url` 配置槽 + JNI 回调 | **L337 已落**（决策面 notify/sync 进核心库 + FFI 六方法只增不改 + Android 接缝；见 docs/mobile-push-sync.md，真机送达/调度留其 §10） |
 | 273 触屏手势 | 平台壳职责，不在核心库 | 未启 |
 | 274 移动端离线存储与同步 | §7 `api_url` 起点；同步语义参考桌面 L116（kv 快照 + 指纹增量）同口径复用 | 未启 |

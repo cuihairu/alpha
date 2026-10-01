@@ -58,6 +58,8 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // L337：周期后台同步（WorkManager 系统钳制 ≥15min，见 PushSyncSeam 注释）
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     // FFI 载荷 = JSON 字符串（serde 字段契约），Kotlin 侧 kotlinx-serialization 解析
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 

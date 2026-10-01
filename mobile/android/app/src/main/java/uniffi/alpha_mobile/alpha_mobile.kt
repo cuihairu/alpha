@@ -389,9 +389,21 @@ internal interface _UniFFILib : Library {
     ): Pointer
     fun uniffi_alpha_mobile_fn_method_mobilecore_analyze_json(`ptr`: Pointer,`symbol`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_check_alerts_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_mark_synced_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_alpha_mobile_fn_method_mobilecore_quote_json(`ptr`: Pointer,`symbol`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_set_alert_rules_json(`ptr`: Pointer,`rulesJson`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Long
     fun uniffi_alpha_mobile_fn_method_mobilecore_status_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_sync_plan_json(`ptr`: Pointer,`trigger`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_sync_status_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_alpha_mobile_fn_method_mobilecore_take_pending_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_alpha_mobile_rustbuffer_alloc(`size`: Int,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
@@ -509,9 +521,21 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_alpha_mobile_checksum_method_mobilecore_analyze_json(
     ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_check_alerts_json(
+    ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_mark_synced_json(
+    ): Short
     fun uniffi_alpha_mobile_checksum_method_mobilecore_quote_json(
     ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_set_alert_rules_json(
+    ): Short
     fun uniffi_alpha_mobile_checksum_method_mobilecore_status_json(
+    ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_sync_plan_json(
+    ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_sync_status_json(
+    ): Short
+    fun uniffi_alpha_mobile_checksum_method_mobilecore_take_pending_json(
     ): Short
     fun uniffi_alpha_mobile_checksum_constructor_mobilecore_new(
     ): Short
@@ -535,10 +559,28 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_analyze_json() != 26131.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_check_alerts_json() != 11354.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_mark_synced_json() != 24041.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_quote_json() != 35557.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_set_alert_rules_json() != 3009.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_status_json() != 46641.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_sync_plan_json() != 2113.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_sync_status_json() != 31500.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_alpha_mobile_checksum_method_mobilecore_take_pending_json() != 64419.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_alpha_mobile_checksum_constructor_mobilecore_new() != 38652.toShort()) {
@@ -550,6 +592,26 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
 
 // Public interface members begin here.
 
+
+public object FfiConverterULong: FfiConverter<ULong, Long> {
+    override fun lift(value: Long): ULong {
+        return value.toULong()
+    }
+
+    override fun read(buf: ByteBuffer): ULong {
+        return lift(buf.getLong())
+    }
+
+    override fun lower(value: ULong): Long {
+        return value.toLong()
+    }
+
+    override fun allocationSize(value: ULong) = 8
+
+    override fun write(value: ULong, buf: ByteBuffer) {
+        buf.putLong(value.toLong())
+    }
+}
 
 public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
     // Note: we don't inherit from FfiConverterRustBuffer, because we use a
@@ -770,9 +832,15 @@ abstract class FFIObject(
 
 public interface MobileCoreInterface {
     @Throws(MobileException::class)
-    fun `analyzeJson`(`symbol`: String): String@Throws(MobileException::class)
-    fun `quoteJson`(`symbol`: String): String
-    fun `statusJson`(): String
+    fun `analyzeJson`(`symbol`: String): String
+    fun `checkAlertsJson`(): String
+    fun `markSyncedJson`(): String@Throws(MobileException::class)
+    fun `quoteJson`(`symbol`: String): String@Throws(MobileException::class)
+    fun `setAlertRulesJson`(`rulesJson`: String): ULong
+    fun `statusJson`(): String@Throws(MobileException::class)
+    fun `syncPlanJson`(`trigger`: String): String
+    fun `syncStatusJson`(): String
+    fun `takePendingJson`(): String
     companion object
 }
 
@@ -811,6 +879,28 @@ class MobileCore(
             FfiConverterString.lift(it)
         }
     
+    override fun `checkAlertsJson`(): String =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_check_alerts_json(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
+    override fun `markSyncedJson`(): String =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_mark_synced_json(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
     
     @Throws(MobileException::class)override fun `quoteJson`(`symbol`: String): String =
         callWithPointer {
@@ -823,10 +913,56 @@ class MobileCore(
             FfiConverterString.lift(it)
         }
     
+    
+    @Throws(MobileException::class)override fun `setAlertRulesJson`(`rulesJson`: String): ULong =
+        callWithPointer {
+    rustCallWithError(MobileException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_set_alert_rules_json(it,
+        FfiConverterString.lower(`rulesJson`),
+        _status)
+}
+        }.let {
+            FfiConverterULong.lift(it)
+        }
+    
     override fun `statusJson`(): String =
         callWithPointer {
     rustCall() { _status ->
     _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_status_json(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
+    
+    @Throws(MobileException::class)override fun `syncPlanJson`(`trigger`: String): String =
+        callWithPointer {
+    rustCallWithError(MobileException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_sync_plan_json(it,
+        FfiConverterString.lower(`trigger`),
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
+    override fun `syncStatusJson`(): String =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_sync_status_json(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
+    override fun `takePendingJson`(): String =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_alpha_mobile_fn_method_mobilecore_take_pending_json(it,
         
         _status)
 }

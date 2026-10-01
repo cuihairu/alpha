@@ -1,24 +1,27 @@
 //! Alpha Finance 移动端 Rust 核心库（TODO「设计移动端 Rust 核心库架构
-//! （JNI + UniFFI）」，台账 L118）
+//! （JNI + UniFFI）」，台账 L118；L337 增推送/同步决策面）
 //!
-//! 分层（docs/mobile-core-architecture.md）：
+//! 分层（docs/mobile-core-architecture.md 与 docs/mobile-push-sync.md）：
 //!
 //! * **本 crate（FFI 桥 + 核心状态，零平台 SDK 依赖）**：[`state::MobileCore`]
-//!   持观察列表/配置槽/分析引擎，经 UniFFI proc-macro（`setup_scaffolding!`，
-//!   无 UDL 副本）导出 Kotlin/Swift 绑定面；载荷为 JSON 字符串（字段契约由
-//!   单测锁定），错误经 [`MobileError`] 跨桥抛类型化异常。业务与计算全部在
-//!   `alpha-core`——与 web/desktop 同一份引擎，不重复实现。
-//! * **平台壳（后续 TODO）**：Kotlin/Compose、Swift/SwiftUI 侧调用生成的绑定，
-//!   主线程禁止直调（重活上后台）；裸 JNI 只作 SDK 回调等逃生舱（workspace
-//!   已 pin `jni`，本骨架不引用）。
+//!   持观察列表/配置槽/分析引擎/推送同步决策，经 UniFFI proc-macro
+//!   （`setup_scaffolding!`，无 UDL 副本）导出 Kotlin/Swift 绑定面；载荷为
+//!   JSON 字符串（字段契约由单测锁定），错误经 [`MobileError`] 跨桥抛类型化
+//!   异常。业务与计算全部在 `alpha-core`——与 web/desktop 同一份引擎，不
+//!   重复实现。推送/同步同样只做决策（推什么/何时同步），送达与调度归平台壳
+//!   （docs/mobile-push-sync.md §1）。
+//! * **平台壳（L301 Android / L119 iOS）**：Kotlin/Compose、Swift/SwiftUI 侧
+//!   调用生成的绑定，主线程禁止直调（重活上后台）；裸 JNI 只作 SDK 回调等
+//!   逃生舱（workspace 已 pin `jni`，本骨架不引用）。
 //!
 //! 骨架进 workspace 成员名单：`cargo clippy/test --workspace` 即覆盖编译与
 //! 单测（Linux 可全绿）；绑定**生成**与真机运行需 Android SDK / Xcode，
-//! 属登记的验收边界（文档 §12）。
+//! 属登记的验收边界（架构文档 §12、推送同步文档 §10）。
 //!
 //! 非交互假设（§11 编号）：proc-macro-only（不写 UDL）、JSON 字符串桥而非
 //! `uniffi::Record`、JNI 逃生舱本轮不引用、per-call current-thread 运行时、
-//! 观察列表外一律 `InvalidSymbol`。
+//! 观察列表外一律 `InvalidSymbol`；L337 另有推送/同步假设集
+//! （docs/mobile-push-sync.md §8）。
 
 #![warn(missing_docs)]
 // uniffi 0.25 `setup_scaffolding!` 展开码自带函数指针版本校验，rustc 的
@@ -28,12 +31,21 @@
 #![allow(unpredictable_function_pointer_comparisons)]
 
 mod market;
+mod notify;
 mod state;
+mod sync;
 
 pub use market::{
     synthetic_quote, synthetic_quote_at, synthetic_series, synthetic_series_at, DEFAULT_BARS,
 };
+pub use notify::{
+    AlertRule, LocalQueueChannel, NotificationChannel, NotificationKind, NotificationSpec, Notifier,
+};
 pub use state::{MobileCore, MobileError};
+pub use sync::{
+    content_seq, fingerprint_of, BackgroundSync, SyncConfig, SyncPlan, SyncStatus, SyncTrigger,
+    DEFAULT_INTERVAL_SECS,
+};
 
 // uniffi 顶层装配：proc-macro-only 模式的唯一入口（与 include_scaffolding!
 // 互斥——本 crate 不写 UDL，双份定义漂移是 uniffi 的头号事故源）。宏展开项

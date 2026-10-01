@@ -20,7 +20,9 @@ crate-type = ["lib", "cdylib", "staticlib"]
 alpha-core = { workspace = true }
 # FFI 桥：proc-macro-only（setup_scaffolding，无 UDL 副本），pin 沿用 workspace
 uniffi = { workspace = true }
-# 序列化：FFI 载荷 = JSON 字符串（§4 数据契约）
+# 序列化：FFI 载荷 = JSON 字符串（§4 数据契约）；L337 载荷类型（规则/
+# 通知/同步状态与计划）自带 serde 契约，由单测逐字段点名
+serde = { workspace = true }
 serde_json = { workspace = true }
 # 演示行情时间戳（market.rs 与桌面端同口径）
 chrono = { workspace = true }

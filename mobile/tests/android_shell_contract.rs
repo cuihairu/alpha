@@ -192,6 +192,13 @@ fn generated_bindings_expose_consumed_surface() {
             "fun `quoteJson`(`symbol`: String): String",
             "fun `analyzeJson`(`symbol`: String): String",
             "fun `statusJson`(): String",
+            // L337 推送/同步六方法（只增不改：L118 三方法与构造器原样）
+            "fun `setAlertRulesJson`(`rulesJson`: String): ULong",
+            "fun `checkAlertsJson`(): String",
+            "fun `takePendingJson`(): String",
+            "fun `syncStatusJson`(): String",
+            "fun `syncPlanJson`(`trigger`: String): String",
+            "fun `markSyncedJson`(): String",
             "sealed class MobileException",
             "class InvalidSymbol(",
             "class Failed(",
@@ -212,6 +219,13 @@ fn shell_layers_stay_in_their_lanes() {
             "core.statusJson()",
             "core.quoteJson(",
             "core.analyzeJson(",
+            // L337 六透传（决策在 Rust，壳层只搬运 JSON↔载荷）
+            "core.setAlertRulesJson(",
+            "core.checkAlertsJson()",
+            "core.takePendingJson()",
+            "core.syncStatusJson()",
+            "core.syncPlanJson(",
+            "core.markSyncedJson()",
             "MobileException",               // 翻译源：生成绑定异常
             "Error.InvalidSymbol(e.symbol)", // 类型搬运，不加逻辑
             "Error.Failed(",
@@ -333,12 +347,92 @@ fn payload_models_cover_serde_field_contract() {
         "StatusPayload",
     );
 
+    // L337 推送/同步载荷（docs/mobile-push-sync.md §4；serde snake_case 契约）
+    assert_contains(
+        &models,
+        &[
+            "AlertRulePayload",
+            "target_price",
+            "NotificationSpecPayload",
+            "created_at",
+            "AlertsReportPayload",
+            "TakenPayload",
+            "SyncStatusPayload",
+            "last_sync",
+            "fingerprint",
+            "interval_secs",
+            "SyncPlanPayload",
+            "since_fingerprint",
+            "reason",
+        ],
+        "推送/同步载荷",
+    );
+
     // JVM 契约单测在（SDK 侧可跑，CI 无 SDK 靠本文件守字段）
     let test = read("app/src/test/java/com/alpha/finance/mobile/PayloadParsingTest.kt");
     assert_contains(
         &test,
-        &["QuotePayload", "AnalysisPayload", "StatusPayload", "@Test"],
+        &[
+            "QuotePayload",
+            "AnalysisPayload",
+            "StatusPayload",
+            "NotificationSpecPayload",
+            "SyncPlanPayload",
+            "@Test",
+        ],
         "PayloadParsingTest.kt",
+    );
+}
+
+/// L337 推送/同步接缝：接口面在壳层（PushSyncSeam），决策回路只经 AlphaBridge
+/// 六透传；触发串与 Rust serde 契约逐字一致；WorkManager 依赖与 15min 钳制口径在
+#[test]
+fn push_sync_seam_stays_shell_side() {
+    let seam = read("app/src/main/java/com/alpha/finance/mobile/PushSyncSeam.kt");
+    assert_contains(
+        &seam,
+        &[
+            "interface NotificationDispatcher", // 送达口（平台实现归真机 TODO）
+            "class PeriodicSyncWorker",         // 周期同步 Worker 骨架
+            "MIN_PERIODIC_MINUTES",             // WorkManager ≥15min 钳制口径
+        ],
+        "PushSyncSeam.kt",
+    );
+
+    // 触发串跨语言逐字一致（serde snake_case + foreground 显式 rename）
+    let bridge = read("app/src/main/java/com/alpha/finance/mobile/AlphaBridge.kt");
+    assert_contains(
+        &bridge,
+        &[
+            "TRIGGER_PERIODIC = \"periodic\"",
+            "TRIGGER_FOREGROUND = \"foreground\"",
+            "TRIGGER_CONNECTIVITY_RESTORED = \"connectivity_restored\"",
+            "TRIGGER_MANUAL = \"manual\"",
+        ],
+        "AlphaBridge 触发串",
+    );
+    let sync_rs = read("../src/sync.rs");
+    assert_contains(
+        &sync_rs,
+        &[
+            "rename = \"foreground\"", // 显式 rename（非 snake_case 推导）
+        ],
+        "Rust SyncTrigger 线上串",
+    );
+
+    // WorkManager 依赖已入壳工程（周期任务装配可编译）
+    let gradle = read("app/build.gradle.kts");
+    assert_contains(
+        &gradle,
+        &["androidx.work:work-runtime-ktx"],
+        "app/build.gradle.kts",
+    );
+
+    // 决策不外溢：PushSyncSeam 不 import uniffi（决策面只在 Rust + AlphaBridge）
+    let seam_kt = strip_line_comments(&seam);
+    assert!(
+        !seam_kt.contains("uniffi."),
+        "PushSyncSeam.kt 不得触碰生成绑定（决策面在 Rust 侧）"
     );
 }
 
