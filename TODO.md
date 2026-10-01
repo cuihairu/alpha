@@ -442,7 +442,7 @@
 ## 💾 存储与数据处理
 - [x] 集成 SQLx + TimescaleDB 实现时序数据存储
 - [x] 使用 DataFusion + Arrow 构建内存分析引擎
-- [ ] 设计 Parquet 格式的数据湖存储架构
+- [x] 设计 Parquet 格式的数据湖存储架构：设计项落地 docs/data-lake-parquet.md（10 节，零代码改动沿设计项先例）——现状实测锚定（Parquet 现仅 HTTP 即时导出无落湖、DataFusion 35 仅 MemTable 热查询、ClickHouse `market_data` 七列事实 schema）；三层模型 Bronze/Silver/Gold（湖为分析侧持久层，不替代热库不迁移）；物理布局 `{layer}/{table}/trade_date=YYYY-MM-DD/part-{seq}.parquet`（交易日分区、内容幂等键、128MB 文件/行组、symbol 字典编码、snappy 起步）；schema 与 ClickHouse 列名零映射对齐（timestamp/symbol/open_price/... 七列 + 演进规则列只增不删、破坏性变更走新表版本）；写路径临时文件原子 rename 幂等重放；读路径多引擎（data-engine ListingTable 分区裁剪与 MemTable 并存 / DuckDB-WASM read_parquet 通配零改动 / Tauri 随 L427 §6 接缝）；catalog 骨架期不引 metastore/Iceberg（目录即清单，manifest 文件挂后续）；冷热分层与保留策略；后续边界划分 L447 多维分区/L448 压缩调优/lake writer 落地改造 export 端点。假设与边界见其 §10（lake_root 本机目录起步、单写者、首表 silver/market_data）。全仓门禁复跑 0 失败（docs-only，Rust 零改动）（✅ 2026-10-02）
 - [ ] 实现基于 Redis 的分布式缓存和限流系统
 - [ ] 开发智能数据分区策略（时间、股票、交易所维度）
 - [ ] 构建数据压缩和列式存储优化算法
