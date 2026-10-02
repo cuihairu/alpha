@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import { demoQuotes } from './demoData'
 import { IndicatorPanel } from './components/IndicatorPanel'
 import { LiveQuoteBoard } from './components/LiveQuoteBoard'
@@ -10,6 +11,7 @@ import { WasmProbe } from './components/WasmProbe'
 import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { LocaleProvider, useLocale } from './hooks/useLocale'
 import { useWorkspaces } from './hooks/useWorkspaces'
+import { createEventBuffer, loadOptIn, saveOptIn } from './lib/analytics'
 import type { Locale } from './lib/i18n'
 
 /**
@@ -31,6 +33,29 @@ export default function App() {
 /** 内层：消费语言（Provider 下） */
 function Shell() {
   const { locale, setLocale, tr } = useLocale()
+  // L480 埋点缓冲：匿名 id 每次加载随机（不持久化，最小隐私面）；
+  // 缺省关闭，隐私面板显式 opt-in 才记；发送器（flush 到哪）暂不接线。
+  const [optIn, setOptIn] = useState(() => {
+    try {
+      return loadOptIn(window.localStorage)
+    } catch {
+      return false
+    }
+  })
+  const buffer = useMemo(
+    () => createEventBuffer(`anon-${Math.floor(Math.random() * 2 ** 31)}`, optIn),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+  const toggleOptIn = (next: boolean) => {
+    setOptIn(next)
+    buffer.setEnabled(next)
+    try {
+      saveOptIn(window.localStorage, next)
+    } catch {
+      // saveOptIn 内部已兜底
+    }
+  }
   const fallbackSymbols = demoQuotes.map((q) => ({ symbol: q.symbol, name: q.name }))
   const ws = useWorkspaces(
     fallbackSymbols.map((s) => s.symbol),
@@ -57,19 +82,19 @@ function Shell() {
         <ThemeToggle />
       </header>
       <p>{tr('app.intro')}</p>
-      <WorkspaceTabs ws={ws} />
+      <WorkspaceTabs ws={ws} record={buffer.record} />
       <section>
         <h2>{tr('app.liveSection')}</h2>
-        <LiveQuoteBoard symbols={boardSymbols} />
+        <LiveQuoteBoard symbols={boardSymbols} record={buffer.record} />
       </section>
-      <PrivacyPanel />
+      <PrivacyPanel optIn={optIn} onOptIn={toggleOptIn} />
       <section>
         <h2>{tr('app.demoSection')}</h2>
         <QuoteTable quotes={demoQuotes} />
       </section>
       <IndicatorPanel />
       <PriceChart />
-      <SqlWorkbench />
+      <SqlWorkbench record={buffer.record} />
       <WasmProbe />
     </main>
   )

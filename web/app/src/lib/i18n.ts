@@ -107,7 +107,7 @@ const zh = {
   // —— 隐私面板 ——
   'privacy.title': '数据与隐私（L488：本地数据导出 / 清除，无账号体系）',
   'privacy.descA': '应用用户数据仅存本机（键清单 ',
-  'privacy.descB': ' 项：自选工作区、主题偏好），服务端不留存个人维度数据。义务映射见 ',
+  'privacy.descB': ' 项：自选工作区、主题偏好、匿名统计开关），服务端不留存个人维度数据。义务映射见 ',
   'privacy.period': '。',
   'privacy.present': '（本机存在）',
   'privacy.absent': '（未使用）',
@@ -115,6 +115,7 @@ const zh = {
   'privacy.clear': '清除我的数据',
   'privacy.cleared': ' 已清除本机应用数据。',
   'privacy.confirm': '清除全部应用本地数据（自选工作区与主题偏好）？此操作不可撤销。',
+  'analytics.optIn': '匿名使用统计（本地缓冲，可随时关闭）',
 } as const
 
 export type I18nKey = keyof typeof zh
@@ -199,7 +200,7 @@ const en: Record<I18nKey, string> = {
   'wasm.retry': 'Retry',
   'privacy.title': 'Data & privacy (L488: local export / erase, no accounts)',
   'privacy.descA': 'App user data stays on this device (key list, ',
-  'privacy.descB': ' entries: workspace watchlist, theme preference); the server keeps no personal data. Obligation mapping: ',
+  'privacy.descB': ' entries: workspace watchlist, theme preference, analytics opt-in); the server keeps no personal data. Obligation mapping: ',
   'privacy.period': '.',
   'privacy.present': '(stored locally)',
   'privacy.absent': '(unused)',
@@ -207,6 +208,7 @@ const en: Record<I18nKey, string> = {
   'privacy.clear': 'Erase my data',
   'privacy.cleared': ' Local app data erased.',
   'privacy.confirm': 'Erase all local app data (workspace watchlist and theme preference)? This cannot be undone.',
+  'analytics.optIn': 'Anonymous usage analytics (local buffer, can be turned off anytime)',
 }
 
 export const STRINGS: Record<Locale, Record<I18nKey, string>> = { zh, en }

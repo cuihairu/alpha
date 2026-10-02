@@ -10,7 +10,7 @@
  */
 
 /** 应用数据键显式清单（数据清单的声明面；与 docs/data-privacy.md §3 同步） */
-export const USER_DATA_KEYS = ['alpha.workspaces', 'alpha.theme'] as const
+export const USER_DATA_KEYS = ['alpha.workspaces', 'alpha.theme', 'alpha.analytics_opt_in'] as const
 
 /** 应用数据键前缀（扫描面） */
 export const APP_KEY_PREFIX = 'alpha.'

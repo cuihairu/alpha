@@ -25,8 +25,10 @@ function updateTime(q: LiveQuote, tag: string): string {
  */
 export function LiveQuoteBoard({
   symbols,
+  record,
 }: {
   symbols?: Array<{ symbol: string; name?: string; base: number }>
+  record?: (name: string) => void
 }) {
   const { tr, trf, tag } = useLocale()
   const { quotes, source, seq } = useLiveQuotes(symbols ?? DEFAULT_SYMBOLS)
@@ -44,6 +46,7 @@ export function LiveQuoteBoard({
       })),
     )
     downloadCsv(`quotes-${new Date().toISOString().slice(0, 10)}.csv`, text)
+    record?.('quotes.export_csv')
   }
 
   return (

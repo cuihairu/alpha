@@ -10,7 +10,7 @@ type WorkspaceActions = ReturnType<typeof useWorkspaces>
  * 自选标的编辑（chips 移除、输入添加，归一化/去重/上限在 lib 收口）。
  * 活动工作区的标的集驱动实时行情看板（App 接线）。
  */
-export function WorkspaceTabs({ ws }: { ws: WorkspaceActions }) {
+export function WorkspaceTabs({ ws, record }: { ws: WorkspaceActions; record?: (name: string) => void }) {
   const { tr, trf } = useLocale()
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
@@ -23,6 +23,7 @@ export function WorkspaceTabs({ ws }: { ws: WorkspaceActions }) {
 
   const submitNew = () => {
     ws.create(newName)
+    record?.('workspace.create')
     setNewName('')
     setAdding(false)
   }

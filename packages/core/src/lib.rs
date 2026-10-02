@@ -9,6 +9,7 @@ pub mod alerts;
 pub mod alloc_tracking;
 pub mod analytics;
 pub mod backtest;
+pub mod behavior;
 pub mod diagnosis;
 pub mod errors;
 pub mod hybrid_cache;

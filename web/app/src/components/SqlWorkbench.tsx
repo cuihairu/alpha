@@ -17,7 +17,7 @@ const DEFAULT_SQL = 'SELECT * FROM demo_quotes ORDER BY change_pct DESC'
  * 编辑器最小实现（textarea，等宽字体；语法高亮/补全留后续增强），
  * 结果可视化 = ResultGrid 网格 + 行列/耗时摘要。引擎资产未拷入时明示降级。
  */
-export function SqlWorkbench() {
+export function SqlWorkbench({ record }: { record?: (name: string) => void }) {
   const { tr } = useLocale()
   const [state, setState] = useState<EngineState>('idle')
   const [error, setError] = useState<string>('')
@@ -47,6 +47,7 @@ export function SqlWorkbench() {
       setElapsedMs(performance.now() - t0)
       const { columns, rows } = tableToRows(table)
       setResult(capRows(columns, rows, RESULT_CAP))
+      record?.('sql.run')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setState('error')

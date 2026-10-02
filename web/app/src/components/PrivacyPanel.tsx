@@ -14,7 +14,7 @@ import {
  * 仅 `alpha.` 应用键，非应用存储不动）。清单与按钮语义全部来自
  * lib/privacy 纯函数（本组件只做装配与确认交互）。
  */
-export function PrivacyPanel() {
+export function PrivacyPanel({ optIn, onOptIn }: { optIn?: boolean; onOptIn?: (next: boolean) => void }) {
   const { tr } = useLocale()
   const store = useMemo(() => localStorageStore(), [])
   const [presentKeys, setPresentKeys] = useState<string[]>(() => listUserDataKeys(store))
@@ -54,6 +54,16 @@ export function PrivacyPanel() {
           </li>
         ))}
       </ul>
+      <p>
+        <label>
+          <input
+            type="checkbox"
+            checked={optIn ?? false}
+            onChange={(e) => onOptIn?.(e.target.checked)}
+          />{' '}
+          {tr('analytics.optIn')}
+        </label>
+      </p>
       <p>
         <button type="button" onClick={exportJson}>
           {tr('privacy.export')}
