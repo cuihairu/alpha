@@ -96,9 +96,9 @@ data class WidgetContent(
             }
             val direction = when {
                 state.changePct == null -> WidgetDirection.FLAT
-                state.changePct > 0 -> WidgetDirection.UP
-                state.changePct < 0 -> WidgetDirection.DOWN
-                else -> WidgetDirection.FLAT
+                // A 股惯例平盘红：0 归涨侧，与 web（`pct >= 0`）/iOS（`>= 0 ? .red`）同口径
+                state.changePct >= 0 -> WidgetDirection.UP
+                else -> WidgetDirection.DOWN
             }
             val changeText = state.changePct?.let {
                 String.format(Locale.ROOT, "%+.2f%%", it)

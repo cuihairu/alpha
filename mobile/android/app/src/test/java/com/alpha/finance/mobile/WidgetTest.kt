@@ -93,6 +93,15 @@ class WidgetTest {
         )
         assertEquals("--", flat.changeText)
         assertEquals(WidgetDirection.FLAT, flat.direction)
+
+        // A 股惯例平盘红：0 归涨侧（与 web `pct >= 0` / iOS `>= 0 ? .red` 同口径）
+        val zero = WidgetContent.from(
+            WidgetQuote(symbol = "600519", price = 90.5, changePct = 0.0, updatedAt = "2026-10-02T09:30:00Z"),
+            nowMs = 0,
+            staleAfterMs = Long.MAX_VALUE,
+        )
+        assertEquals("+0.00%", zero.changeText)
+        assertEquals(WidgetDirection.UP, zero.direction)
     }
 
     @Test
