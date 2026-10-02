@@ -1,0 +1,11 @@
+Alpha Finance is an A-share market data and analytics app:
+
+- Live quote board: WebSocket push with automatic local-simulation fallback, red-up/green-down tick flashes
+- Technical indicators: SMA/EMA/RSI/Bollinger/MACD, candlestick and line patterns, wave validation
+- Strategy backtesting: grid search and walk-forward with out-of-sample validation and overfit warnings
+- Risk tools: max drawdown, VaR, Sharpe/Sortino, portfolio volatility, Kelly sizing
+- Watchlist workspaces: multi-tab symbol sets persisted on-device, CSV export
+- Widget and shortcuts: glanceable home-screen widget, long-press shortcuts to watchlist symbols
+- Privacy-first: no accounts, personal data stays on-device with one-tap export and erase; dark mode and Chinese/English UI
+
+Data note: quotes come from demo feeds/connected sources and are not investment advice. No in-app trading.

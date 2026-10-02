@@ -1,0 +1,1 @@
+stocks,quotes,technicals,backtest,finance
