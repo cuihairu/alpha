@@ -1,0 +1,416 @@
+name: Release
+
+# 多平台发布流水线（TODO L470）
+# 设计登记：docs/desktop-release.md §2/§5（跨OS打包/签名公证/runner规格）、
+# docs/android-release.md §3（keystore secret 注入）、docs/ios-release.md（分步脚本）、
+# docs/auto-update.md §3（打包+签名secret+feed 上传的执行者）、docs/docker-deployment.md §5（buildx push）
+#
+# 触发：workflow_dispatch（手工，version/notes 输入）+ v* tag（人工打 tag 后自动跑；
+# 本仓不自动产 tag）。密钥全部走 repo secrets，缺失时降级 unsigned/跳过并打印登记说明——
+# 流水线在无密钥仓库可全绿跑通（各脚本自身的非交互语义），签名/推送步骤随 secrets 翻真。
+# 只产 artifacts，不创建 GitHub Release/Tag（发布面归 L471 商店与 L472 版本管理）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（semver，如 0.2.0；喂 updater feed 与镜像 tag）"
+        required: true
+      notes:
+        description: "发布说明（updater feed notes，可空）"
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ---------- 版本门禁：五处同值（L472 check-version）+ 触发版本对账 ----------
+  # 防错标：dispatch 的 version 输入 / v* tag 与仓库五处版本必须同值，
+  # 否则 docker tag 与 updater feed 会把 0.1.0 的产物标成 0.2.0。
+  version-gate:
+    name: 版本门禁（L472 对账）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 五处版本同值 + SW 缓存名对账
+        run: scripts/check-version.sh
+
+      - name: 触发版本与仓库版本对账
+        env:
+          # inputs 走 env 注入（不内联 run）：自由文本不进 shell 字面量
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          REPO_VERSION="$(awk '/^\[workspace\.package\]/{f=1;next} f&&/^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)"
+          [ -n "$REPO_VERSION" ] || { echo "无法解析 [workspace.package] version"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            TRIGGER_VERSION="$INPUT_VERSION"
+          else
+            TRIGGER_VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ "$TRIGGER_VERSION" != "$REPO_VERSION" ]; then
+            echo "❌ 触发版本 $TRIGGER_VERSION ≠ 仓库版本 $REPO_VERSION——先 scripts/bump-version.sh $TRIGGER_VERSION 再发版"
+            exit 1
+          fi
+          echo "✅ 版本一致: $REPO_VERSION（触发源: $GITHUB_EVENT_NAME）"
+
+  # ---------- Web：wasm + 静态产物 + CDN 可选发布 ----------
+  web:
+    name: Web（dist 构建 + CDN 可选发布）
+    runs-on: ubuntu-latest
+    env:
+      ALPHA_S3_BUCKET: ${{ secrets.ALPHA_S3_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust（wasm-pack 构建 analyzer 用）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: 安装 wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "latest"
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            web/app/package-lock.json
+
+      - name: 构建 dist（wasm + build:prod 指纹/预压缩）
+        run: |
+          npm ci --prefix web --no-audit --no-fund
+          npm --prefix web run build
+
+      - name: 发布到 S3/CDN（secrets 齐则真发，缺则 dry-run 验证计划）
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.ALPHA_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ALPHA_AWS_SECRET_ACCESS_KEY }}
+        run: |
+          if [ -n "$ALPHA_S3_BUCKET" ]; then
+            scripts/web-cdn-deploy.sh --bucket "$ALPHA_S3_BUCKET" \
+              --endpoint "${{ secrets.ALPHA_S3_ENDPOINT }}" \
+              --prefix web
+          else
+            echo "ℹ️ 缺 ALPHA_S3_BUCKET secret——dry-run 走查发布计划（登记 docs/docker-deployment.md §5 同批）"
+            scripts/web-cdn-deploy.sh --bucket alpha-web-placeholder --dry-run
+          fi
+
+      - name: 上传 web-dist 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+          if-no-files-found: error
+
+  # ---------- Desktop：三 OS 并行出安装包（tauri 单宿主单面）----------
+  desktop:
+    name: Desktop（${{ matrix.os }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-22.04：Tauri v1 依赖 webkit2gtk-4.0，24.04 源里只有 4.1（作业内注释即依据）
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: 安装 wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "latest"
+
+      - name: 安装 protobuf-compiler（Linux）
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: 安装 protobuf-compiler（macOS）
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      # Tauri v1 Linux 打包依赖（webkit2gtk-4.0 随 ubuntu-22.04；AppImage 无 FUSE 走 extract-and-run）
+      - name: 安装 Tauri Linux 依赖（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y libwebkit2gtk-4.0-dev build-essential curl wget file \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-desktop
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # beforeBuildCommand = `cd web && npm run build`（root web 的 wasm+prod 链）
+      - name: 安装 web 依赖
+        run: npm ci --prefix web --no-audit --no-fund
+
+      - name: 安装 tauri CLI（rust-cache 命中则秒过）
+        shell: bash
+        run: command -v cargo-tauri >/dev/null 2>&1 || cargo install tauri-cli --version '^1.5' --locked
+
+      - name: 构建安装包（宿主全量）
+        shell: bash
+        run: scripts/desktop-release.sh
+
+      # docs/desktop-release.md §5.1：Linux 作业真机验证——无 FUSE/无显示下解包冒烟
+      - name: AppImage 解包冒烟（Linux）
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          img="$(find target/release/bundle/appimage -name '*.AppImage' 2>/dev/null | head -1)"
+          [ -n "$img" ] || { echo "缺 AppImage 产物"; exit 1; }
+          cd "$(dirname "$img")"
+          "./$(basename "$img")" --appimage-extract >/dev/null
+          test -f squashfs-root/AppRun || { echo "解包缺 AppRun"; exit 1; }
+          echo "✅ AppImage 结构可解包、AppRun 在场"
+
+      - name: 上传安装包 + updater 素材
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            target/release/bundle/**
+            target/release/*.tar.gz
+            target/release/*.sig
+          if-no-files-found: error
+
+  # ---------- Android：双 ABI + 渠道矩阵（keystore secrets 门控签名）----------
+  android:
+    name: Android（AAB/APK 渠道产物）
+    runs-on: ubuntu-latest
+    env:
+      # 门控用：密钥齐则注入签名环境；缺则按脚本默认出 unsigned（冒烟语义）
+      ALPHA_ANDROID_KEYSTORE_B64: ${{ secrets.ALPHA_ANDROID_KEYSTORE_B64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # gen-bindings.sh 默认 NDK 路径 = $ANDROID_HOME/ndk/27.3.13750724（与本机实测版本对齐）
+      - name: 安装 NDK（27.3.13750724）
+        run: |
+          sdkmanager --install "ndk;27.3.13750724" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
+
+      - name: 注入 keystore 签名（secrets 齐则签名，缺省 unsigned）
+        if: env.ALPHA_ANDROID_KEYSTORE_B64 != ''
+        env:
+          ALPHA_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ALPHA_ANDROID_KEYSTORE_PASSWORD }}
+          ALPHA_ANDROID_KEY_ALIAS: ${{ secrets.ALPHA_ANDROID_KEY_ALIAS }}
+          ALPHA_ANDROID_KEY_PASSWORD: ${{ secrets.ALPHA_ANDROID_KEY_PASSWORD }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/upload-keystore.jks"
+          printf '%s' "$ALPHA_ANDROID_KEYSTORE_B64" | base64 -d > "$KEYSTORE_PATH"
+          {
+            echo "ALPHA_KEYSTORE_PATH=$KEYSTORE_PATH"
+            echo "ALPHA_KEYSTORE_PASSWORD=$ALPHA_ANDROID_KEYSTORE_PASSWORD"
+            echo "ALPHA_KEY_ALIAS=$ALPHA_ANDROID_KEY_ALIAS"
+            echo "ALPHA_KEY_PASSWORD=$ALPHA_ANDROID_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: 构建双 ABI 绑定 + 渠道产物
+        run: scripts/android-release.sh
+
+      - name: 上传 AAB/APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-outputs
+          path: mobile/android/app/build/outputs/**
+          if-no-files-found: error
+
+  # ---------- iOS：bindings 冒烟恒跑；签名发布链 secrets 门控 ----------
+  ios:
+    name: iOS（bindings 冒烟 + 签名发布门控）
+    runs-on: macos-latest
+    env:
+      HAS_APPLE: ${{ secrets.ALPHA_APPLE_API_KEY_ID != '' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust（bindings 交叉编译）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ios
+
+      - name: FFI 绑定冒烟（STAGE=bindings）
+        shell: bash
+        run: STAGE=bindings scripts/ios-release.sh
+
+      - name: archive + export + TestFlight 上传（secrets 齐则执行）
+        if: env.HAS_APPLE == 'true'
+        shell: bash
+        env:
+          APP_SPEC: ${{ secrets.ALPHA_APPLE_APP_SPEC }}
+          PROFILE_NAME: ${{ secrets.ALPHA_APPLE_PROFILE_NAME }}
+          API_KEY_ID: ${{ secrets.ALPHA_APPLE_API_KEY_ID }}
+          API_ISSUER: ${{ secrets.ALPHA_APPLE_API_ISSUER_ID }}
+        run: STAGE=all scripts/ios-release.sh
+
+      - name: 登记说明（缺 Apple secrets）
+        if: env.HAS_APPLE != 'true'
+        run: echo "ℹ️ 缺 ALPHA_APPLE_* secrets——只跑 bindings 冒烟；archive/export/upload 归 L471 商店账号接线后翻真（docs/ios-release.md §4）"
+
+  # ---------- Docker：五服务镜像多架构推送（registry secret 门控）----------
+  docker:
+    name: 服务镜像多架构推送（门控）
+    runs-on: ubuntu-latest
+    needs: version-gate
+    env:
+      ALPHA_REGISTRY: ${{ secrets.ALPHA_REGISTRY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析版本 tag
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then V="$INPUT_VERSION"; else V="${GITHUB_REF_NAME#v}"; fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+
+      - name: QEMU + buildx
+        if: env.ALPHA_REGISTRY != ''
+        uses: docker/setup-qemu-action@v3
+
+      - name: 注册 buildx builder
+        if: env.ALPHA_REGISTRY != ''
+        uses: docker/setup-buildx-action@v3
+
+      - name: 多架构构建并推送（linux/amd64 + arm64）
+        if: env.ALPHA_REGISTRY != ''
+        run: |
+          scripts/build-images.sh --platforms linux/amd64,linux/arm64 \
+            --push --registry "$ALPHA_REGISTRY"
+
+      - name: 登记说明（缺 registry secret）
+        if: env.ALPHA_REGISTRY == ''
+        run: echo "ℹ️ 缺 ALPHA_REGISTRY secret——镜像推送跳过；本机可跑 scripts/build-images.sh 验证构建（docs/docker-deployment.md §3）"
+
+  # ---------- updater feed：桌面产物拼 latest.json（auto-update §3 的执行者接线）----------
+  updater-feed:
+    name: updater latest.json 拼装
+    needs: [version-gate, desktop]
+    runs-on: ubuntu-latest
+    env:
+      ALPHA_RELEASE_BASE_URL: ${{ secrets.ALPHA_RELEASE_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析版本与发布说明
+        env:
+          # inputs 走 env 注入 + NOTES 用多行分隔符写 GITHUB_ENV：
+          # notes 是自由文本，内联 `NOTES="${{ inputs.notes }}"` 会被
+          # 引号/换行/命令替换击穿（shell 注入 + env 写坏）
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_NOTES: ${{ inputs.notes }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            V="$INPUT_VERSION"
+            NOTES="$INPUT_NOTES"
+          else
+            V="${GITHUB_REF_NAME#v}"
+            NOTES=""
+          fi
+          {
+            echo "VERSION=$V"
+            echo "NOTES<<__RELEASE_NOTES__"
+            printf '%s\n' "$NOTES"
+            echo "__RELEASE_NOTES__"
+          } >> "$GITHUB_ENV"
+
+      - name: 下载桌面产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: artifacts
+
+      - name: 拼装 feed（updater 素材在场才产出，否则登记跳过）
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          tars=(artifacts/**/*.tar.gz)
+          if [ "${#tars[@]}" -eq 0 ]; then
+            echo "ℹ️ 无 updater 产物——tauri.conf updater 未激活（docs/auto-update.md 激活归 L472），翻真后本作业自动开始产出 latest.json"
+            exit 0
+          fi
+          if [ -z "$ALPHA_RELEASE_BASE_URL" ]; then
+            echo "ℹ️ 缺 ALPHA_RELEASE_BASE_URL secret（占位域名待定，docs/auto-update.md §4）——跳过 feed 产出"
+            exit 0
+          fi
+          args=()
+          for osname in ubuntu-22.04 macos-latest windows-latest; do
+            dir="artifacts/desktop-$osname"
+            [ -d "$dir" ] || continue
+            tar_file="$(find "$dir" -name '*.tar.gz' | head -1)"
+            [ -n "$tar_file" ] || continue
+            sig_file="${tar_file%.tar.gz}.sig"
+            [ -f "$sig_file" ] || { echo "缺签名 $sig_file"; exit 1; }
+            case "$osname" in
+              ubuntu-22.04) target=x86_64-unknown-linux-gnu ;;
+              macos-latest)  target=aarch64-apple-darwin ;;
+              windows-latest) target=x86_64-pc-windows-msvc ;;
+            esac
+            args+=(--platform "$target=$ALPHA_RELEASE_BASE_URL/$(basename "$tar_file")=$(cat "$sig_file")")
+          done
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "ℹ️ 桌面产物中无 updater 素材——登记跳过"
+            exit 0
+          fi
+          scripts/release-update-feed.sh --version "$VERSION" --notes "$NOTES" \
+            "${args[@]}" --out dist/latest.json
+          echo "✅ latest.json 产出："
+          cat dist/latest.json
+
+      - name: 上传 latest.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-json
+          path: dist/latest.json
+          if-no-files-found: ignore
