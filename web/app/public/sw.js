@@ -9,8 +9,8 @@
  * 可整页打开，面板层各自的降级路径照常（实时看板 → 确定性模拟盘等）；
  * 同源静态资产（/assets/*、manifest、图标）缓存优先 + 后台填充。
  */
-const SHELL_CACHE = 'alpha-shell-v1'
-const ASSET_CACHE = 'alpha-assets-v1'
+const SHELL_CACHE = 'alpha-shell-v0.1.0'
+const ASSET_CACHE = 'alpha-assets-v0.1.0'
 const SHELL_URLS = ['/', '/manifest.webmanifest', '/icon.svg']
 const MAX_ASSET_ENTRIES = 60
 
