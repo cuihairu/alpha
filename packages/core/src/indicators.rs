@@ -220,7 +220,15 @@ trait RoundTo {
 
 impl RoundTo for f64 {
     fn round_to(self, precision: usize) -> Self {
-        let multiplier = 10_f64.powi(precision as i32);
+        // 逐次乘法求 10^precision 而非 10_f64.powi()：powi 的求值方式随
+        // 执行引擎而异（原生 LLVM 展开为乘法序列、精确；Miri 解释执行返回
+        // 9999.999999999996 这类舍入值），会让同一断言在门禁下出现 ulp 级
+        // 漂移。10^n 在 n≤22 时逐位乘法在 f64 中精确（5^22 仍在 53 位尾数
+        // 内），与原生 powi 结果逐位一致；「保留 n 位小数」语义下 n>22 无意义。
+        let mut multiplier = 1.0_f64;
+        for _ in 0..precision {
+            multiplier *= 10.0;
+        }
         (self * multiplier).round() / multiplier
     }
 }

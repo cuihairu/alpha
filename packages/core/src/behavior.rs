@@ -48,9 +48,13 @@ pub fn count_by_name(events: &[BehaviorEvent]) -> HashMap<String, usize> {
 pub fn daily_active(events: &[BehaviorEvent]) -> HashMap<i64, usize> {
     let mut days: HashMap<i64, HashSet<&str>> = HashMap::new();
     for e in events {
-        days.entry(e.ts_ms.div_euclid(DAY_MS)).or_default().insert(e.user.as_str());
+        days.entry(e.ts_ms.div_euclid(DAY_MS))
+            .or_default()
+            .insert(e.user.as_str());
     }
-    days.into_iter().map(|(d, users)| (d, users.len())).collect()
+    days.into_iter()
+        .map(|(d, users)| (d, users.len()))
+        .collect()
 }
 
 /// 会话（同用户按时间排序，相邻间隔超 `gap_ms` 切新会话）
@@ -109,7 +113,10 @@ pub fn funnel(events: &[BehaviorEvent], steps: &[&str]) -> Vec<usize> {
     }
     let mut by_user: HashMap<&str, Vec<(&i64, &str)>> = HashMap::new();
     for e in events {
-        by_user.entry(e.user.as_str()).or_default().push((&e.ts_ms, e.name.as_str()));
+        by_user
+            .entry(e.user.as_str())
+            .or_default()
+            .push((&e.ts_ms, e.name.as_str()));
     }
     let mut counts = vec![0usize; steps.len()];
     for streams in by_user.values() {
@@ -196,11 +203,21 @@ mod tests {
         // 用户名字典序：u1 两段在前
         assert_eq!(
             sessions[0],
-            Session { user: "u1".into(), start_ms: 0, end_ms: 1_000, events: 2 }
+            Session {
+                user: "u1".into(),
+                start_ms: 0,
+                end_ms: 1_000,
+                events: 2
+            }
         );
         assert_eq!(
             sessions[1],
-            Session { user: "u1".into(), start_ms: 100_000, end_ms: 100_000, events: 1 }
+            Session {
+                user: "u1".into(),
+                start_ms: 100_000,
+                end_ms: 100_000,
+                events: 1
+            }
         );
         assert_eq!(sessions[2].user, "u2");
         // 边界：间隔恰等于 gap 不切分
@@ -212,9 +229,13 @@ mod tests {
     fn funnel_requires_order_and_dedupes() {
         let events = vec![
             // u1 顺序完成三步（含重复）
-            ev("u1", "view", 1), ev("u1", "view", 2), ev("u1", "add", 3), ev("u1", "buy", 4),
+            ev("u1", "view", 1),
+            ev("u1", "view", 2),
+            ev("u1", "add", 3),
+            ev("u1", "buy", 4),
             // u2 乱序：buy 在 add 之前，只算到 view
-            ev("u2", "view", 1), ev("u2", "buy", 2),
+            ev("u2", "view", 1),
+            ev("u2", "buy", 2),
             // u3 只看
             ev("u3", "view", 1),
         ];
@@ -242,7 +263,8 @@ mod tests {
     #[test]
     fn event_serde_roundtrip_for_sink_contract() {
         let e = ev("anon-7", "workspace.create", 1727856000000);
-        let back: BehaviorEvent = serde_json::from_value(serde_json::to_value(&e).unwrap()).unwrap();
+        let back: BehaviorEvent =
+            serde_json::from_value(serde_json::to_value(&e).unwrap()).unwrap();
         assert_eq!(back, e);
     }
 }

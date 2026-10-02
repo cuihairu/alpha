@@ -44,7 +44,15 @@ pub mod time {
 pub mod numeric {
     /// 保留指定位数的小数
     pub fn round_to(value: f64, precision: usize) -> f64 {
-        let multiplier = 10_f64.powi(precision as i32);
+        // 逐次乘法求 10^precision 而非 10_f64.powi()：powi 的求值方式随执行
+        // 引擎而异（原生 LLVM 精确、Miri 解释执行返回 9999.999999999996 这类
+        // 舍入值），会使流式/批式两条舍入路径在门禁下逐位漂移。10^n 在 n≤22
+        // 时逐位乘法在 f64 中精确，与原生 powi 逐位一致（详见 indicators::
+        // RoundTo 处注释）。
+        let mut multiplier = 1.0_f64;
+        for _ in 0..precision {
+            multiplier *= 10.0;
+        }
         (value * multiplier).round() / multiplier
     }
 

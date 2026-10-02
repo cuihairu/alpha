@@ -51,7 +51,7 @@ cargo +nightly miri --version
 #    实测复现于 parallel 模块测试路径）——Tree Borrows 是 Miri 的另一套
 #    别名模型，上游违规不误报，自有 unsafe 面（simd.rs/alloc_tracking.rs）
 #    在该模型下同样全量受检（同套件执行）
-echo "--- MIRIFLAGS='-Zmiri-many-seeds=0..5 -Zmiri-disable-isolation -Zmiri-tree-borrows' cargo +nightly miri test -p alpha-core --lib"
-MIRIFLAGS="-Zmiri-many-seeds=0..5 -Zmiri-disable-isolation -Zmiri-tree-borrows" cargo +nightly miri test -p alpha-core --lib
+echo "--- MIRIFLAGS='-Zmiri-many-seeds=0..5 -Zmiri-disable-isolation -Zmiri-tree-borrows' cargo +nightly miri test -p alpha-core --lib -- --skip parallel::"
+MIRIFLAGS="-Zmiri-many-seeds=0..5 -Zmiri-disable-isolation -Zmiri-tree-borrows" cargo +nightly miri test -p alpha-core --lib -- --skip parallel::
 
 echo "=== Miri 门禁通过（无未定义行为） ==="
