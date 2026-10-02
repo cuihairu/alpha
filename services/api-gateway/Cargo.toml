@@ -12,6 +12,8 @@ axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 hyper = { workspace = true }
+# TLS 终止（L485：--tls-cert/key 双配即切 HTTPS，缺省纯 HTTP）
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 
 # 异步运行时
 tokio = { workspace = true }
@@ -59,3 +61,8 @@ alpha-storage = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
+# L476：账户写穿持久化测试桩需实现 alpha_storage::StorageBackend（该 trait
+# 由 async_trait 展开，故测试面同款依赖）
+async-trait = { workspace = true }
+# L485 TLS 端到端测试：in-test 自签证书（零外部文件）
+rcgen = "0.13"

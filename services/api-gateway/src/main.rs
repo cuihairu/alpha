@@ -25,10 +25,12 @@ use serde::Serialize;
 use alpha_storage::{RateDecision, RedisRateLimiter};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
+mod account;
 mod audit;
 mod auth;
 mod shield;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
 use tower_http::{
@@ -103,6 +105,11 @@ struct Args {
     #[arg(long, default_value = "")]
     auth_provision_key: String,
 
+    /// 账户/同步持久化后端 URL（L476：留空 = 纯内存，单机形态零依赖；
+    /// 配 Postgres 则账户状态写穿该实例，启动时连不上直接退出）
+    #[arg(long, default_value = "")]
+    account_store_url: String,
+
     /// 日志级别
     #[arg(short, long, default_value = "info")]
     log_level: String,
@@ -130,6 +137,8 @@ struct GatewayState {
     shield: shield::ShieldState,
     /// 安全审计与失败风暴检测（L487）
     audit: audit::AuditState,
+    /// 统一账户与跨端数据同步存储（L476：内存权威 + 可选 Postgres 写穿）
+    account_store: account::AccountStore,
     /// Prometheus 指标渲染句柄（/metrics）
     metrics: PrometheusHandle,
 }
@@ -196,6 +205,11 @@ async fn main() -> anyhow::Result<()> {
         rate_limit_per_minute: args.rate_limit_per_minute,
         shield: shield::ShieldState::from_env(),
         audit: audit::AuditState::from_env(),
+        account_store: init_account_store(&resolve_url(
+            "ALPHA_GATEWAY_ACCOUNT_STORE_URL",
+            &args.account_store_url,
+        ))
+        .await?,
         metrics,
         auth: {
             let mode =
@@ -226,6 +240,22 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 账户存储装配（L476）：URL 为空 = 内存形态（默认，与历史启动行为完全
+/// 一致）；非空则连 Postgres KV 表写穿账户快照——**连接失败即退出**
+/// （静默降级到内存会让多副本部署各持一份互相看不见的账户数据，
+/// 比启动失败更难排查）。
+async fn init_account_store(url: &str) -> anyhow::Result<account::AccountStore> {
+    if url.is_empty() {
+        tracing::info!("account sync store: in-memory (no --account-store-url)");
+        return Ok(account::AccountStore::in_memory());
+    }
+    let backend = alpha_storage::PostgresKvStorage::connect(url, "alpha_accounts", None, None)
+        .await
+        .map_err(|e| anyhow::anyhow!("account store connect failed: {e}"))?;
+    tracing::info!("account sync store: postgres-backed");
+    Ok(account::AccountStore::with_persistence(Arc::new(backend)))
+}
+
 fn build_router(state: GatewayState) -> Router {
     // /api 子路由：认证 + 护栏 + 限流中间件只包 REST 反代面（健康检查、
     // 指标、WS 与 /auth/token 不占配额不鉴权）。layer 注册顺序注意：后注册
@@ -233,6 +263,10 @@ fn build_router(state: GatewayState) -> Router {
     // 护栏（bot/burst/扫描）挡下的流量不再消耗 Redis 限流配额。
     let api = Router::new()
         .route("/v1/*path", any(api_proxy))
+        // 账户与跨端同步（L476）：走 /api 前缀与上游反代同级，故与反代面
+        // 共用同一道 auth → shield → rate_limit 链（认证后才知账户 id）
+        .route("/v1/account/profile", get(get_account_profile).put(put_account_profile))
+        .route("/v1/account/sync", axum::routing::post(post_account_sync))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
@@ -452,6 +486,11 @@ async fn auth_middleware(
     next: axum::middleware::Next,
 ) -> Response {
     if state.auth.mode == auth::AuthMode::Off {
+        // 账户面（L476）需要知道「当前是谁」：认证关闭时显式插入 None，
+        // 下游按本机缺省账户处理（不用 Extension 缺省值——Optional
+        // FromRequestParts 在无扩展时报 500 而非回落）
+        let mut req = req;
+        req.extensions_mut().insert(None::<auth::Claims>);
         return next.run(req).await;
     }
 
@@ -475,6 +514,12 @@ async fn auth_middleware(
             }
             metrics::counter!("alpha_gateway_auth_total", "mode" => "allowed").increment(1);
             tracing::debug!(sub = %claims.sub, "authenticated");
+            let mut req = req;
+            // 账户面按 sub 分区（L476）：校验通过的 Claims 下传，
+            // 处理器据此取账户档案/同步记录，不再二次验签。插入类型必须
+            // 与处理器提取的 `Extension<Option<Claims>>` 逐字一致——
+            // 插 `Claims` 会让提取器找不到扩展、返回空体 500
+            req.extensions_mut().insert(Some::<auth::Claims>(claims));
             next.run(req).await
         }
         Err(_) => {
@@ -487,6 +532,86 @@ async fn auth_middleware(
             unauthorized()
         }
     }
+}
+
+/// 请求所属账户 id（L476）：认证关闭 = 本机缺省账户（单账户本地形态）；
+/// 开启认证时取 auth 中间件校验过的 `Claims`（存于请求扩展，避免处理器
+/// 里二次验签——票据已在本链路校验过，再验一次只会多一处失败分支）。
+fn request_account_id(claims: Option<&auth::Claims>) -> String {
+    claims
+        .map(|c| c.sub.clone())
+        .unwrap_or_else(|| alpha_core::account::LOCAL_ACCOUNT_ID.to_string())
+}
+
+/// `GET /api/v1/account/profile`：当前账户档案（不存在则按 sub 建初始档案）
+async fn get_account_profile(
+    State(state): State<GatewayState>,
+    axum::Extension(claims): axum::Extension<Option<auth::Claims>>,
+) -> Response {
+    let account_id = request_account_id(claims.as_ref());
+    let profile = state
+        .account_store
+        .profile(&account_id, system_now_ms())
+        .await;
+    (
+        StatusCode::OK,
+        Json(account::ProfileResponse {
+            account_id: profile.account_id,
+            display_name: profile.display_name,
+            email: profile.email,
+            locale: profile.locale,
+            rev: profile.rev,
+        }),
+    )
+        .into_response()
+}
+
+/// `PUT /api/v1/account/profile`：字段级更新（缺省字段不改，空邮箱串 = 清除）
+async fn put_account_profile(
+    State(state): State<GatewayState>,
+    axum::Extension(claims): axum::Extension<Option<auth::Claims>>,
+    Json(patch): Json<account::ProfilePatch>,
+) -> Response {
+    let account_id = request_account_id(claims.as_ref());
+    match state
+        .account_store
+        .update_profile(&account_id, &patch, system_now_ms())
+        .await
+    {
+        Ok(profile) => (
+            StatusCode::OK,
+            Json(account::ProfileResponse {
+                account_id: profile.account_id,
+                display_name: profile.display_name,
+                email: profile.email,
+                locale: profile.locale,
+                rev: profile.rev,
+            }),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "success": false,
+                "error": err,
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /api/v1/account/sync`：同步往返（接受推送 + 回传增量 + 新水位）
+async fn post_account_sync(
+    State(state): State<GatewayState>,
+    axum::Extension(claims): axum::Extension<Option<auth::Claims>>,
+    Json(request): Json<alpha_core::account::SyncRequest>,
+) -> Response {
+    let account_id = request_account_id(claims.as_ref());
+    let response = state
+        .account_store
+        .sync(&account_id, &request, system_now_ms())
+        .await;
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 /// bootstrap 签发端点（L483）：`POST /auth/token` + `X-Provision-Key` 头。
@@ -982,6 +1107,10 @@ mod tests {
         extract::ws::{WebSocket, WebSocketUpgrade as TestWsUpgrade},
         routing::get as test_get,
     };
+    use std::collections::BTreeMap;
+
+    /// 存储 trait 方法（账户写穿测试用；`as _` = 只要方法不要名字）
+    use alpha_storage::StorageBackend as _;
 
     /// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
     /// install 全局接管 metrics 宏，后续并行测试复用同一句柄渲染；
@@ -1010,6 +1139,7 @@ mod tests {
             rate_limit_per_minute: 120,
             shield: shield::ShieldState::from_config(shield::ShieldConfig::default()),
             audit: audit::AuditState::new(60_000, 20),
+            account_store: account::AccountStore::in_memory(),
             auth: auth::AuthConfig::disabled(),
             // build_recorder 不占全局 install（install_recorder 每进程一次，
             // 并行测试会冲突）；render 走本 recorder 快照
@@ -1432,6 +1562,423 @@ mod tests {
             body.contains("upstream=\"data-engine\""),
             "健康 gauge 应按 upstream 标签分桶（job 标签会被抓取覆盖）:\n{body}"
         );
+    }
+
+    /// 账户面装配（L476）：认证关闭 → 请求落到本机缺省账户（单账户本地形态）
+    async fn spawn_account_app(state: GatewayState) -> String {
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    fn account_test_state() -> GatewayState {
+        test_state(
+            "http://127.0.0.1:1".to_string(),
+            "http://127.0.0.1:1".to_string(),
+        )
+    }
+
+    async fn post_json(client: &reqwest::Client, url: &str, body: &str) -> serde_json::Value {
+        client
+            .post(url)
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap()
+    }
+
+    /// GET 建初始档案、PUT 字段级更新（缺省字段不改，非法值 400 且不推进 rev）
+    #[tokio::test]
+    async fn account_profile_get_creates_and_put_patches_fields() {
+        let base = spawn_account_app(account_test_state()).await;
+        let client = reqwest::Client::new();
+        let url = format!("{base}/api/v1/account/profile");
+
+        let created: serde_json::Value =
+            client.get(&url).send().await.unwrap().json().await.unwrap();
+        assert_eq!(created["account_id"], alpha_core::account::LOCAL_ACCOUNT_ID);
+        assert_eq!(
+            created["display_name"], "本机用户",
+            "缺省展示名不编造用户身份"
+        );
+        assert_eq!(created["rev"], 1);
+        assert!(
+            created.get("email").is_none(),
+            "缺省档案不带空邮箱字段（省流量的编码惯例）: {created}"
+        );
+
+        let patched: serde_json::Value = client
+            .put(&url)
+            .header("content-type", "application/json")
+            .body(r#"{"display_name":"Cui","email":" cui@example.com ","locale":"zh-CN"}"#)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(patched["display_name"], "Cui");
+        assert_eq!(patched["email"], "cui@example.com", "邮箱去空白");
+        assert_eq!(patched["locale"], "zh-CN");
+        assert_eq!(patched["rev"], 2);
+
+        // 字段级更新：只给 locale 时其余字段保持（不是整体替换）
+        let locale_only: serde_json::Value = client
+            .put(&url)
+            .header("content-type", "application/json")
+            .body(r#"{"locale":"en-US"}"#)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(locale_only["display_name"], "Cui");
+        assert_eq!(locale_only["email"], "cui@example.com");
+        assert_eq!(locale_only["rev"], 3);
+
+        // 非法字段 → 400 且不推进 rev（失败的写不得改变服务端状态）
+        let rejected = client
+            .put(&url)
+            .header("content-type", "application/json")
+            .body(r#"{"display_name":"   "}"#)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rejected.status().as_u16(), 400);
+        let after: serde_json::Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+        assert_eq!(after["rev"], 3, "被拒的更新不得推进版本");
+    }
+
+    /// 同步往返：接受 → 旧基线冲突回权威副本 → 带权威 rev 重推 → 墓碑留痕
+    #[tokio::test]
+    async fn account_sync_round_trips_over_http() {
+        let base = spawn_account_app(account_test_state()).await;
+        let client = reqwest::Client::new();
+        let url = format!("{base}/api/v1/account/sync");
+
+        let pushed = post_json(
+            &client,
+            &url,
+            r#"{"cursor":0,"base":{},"pushes":[{"key":"workspace:a","base_rev":0,"payload":{"name":"盯盘"}}]}"#,
+        )
+        .await;
+        assert_eq!(pushed["accepted"][0]["rev"], 1, "服务端分配权威 rev");
+        assert!(
+            pushed["accepted"][0]["updated_at_ms"].as_i64().unwrap() > 0,
+            "时间戳以服务端时钟为准（客户端时钟不可信）: {pushed}"
+        );
+        assert_eq!(pushed["cursor"], 1);
+        assert_eq!(pushed["changes"].as_array().unwrap().len(), 1);
+
+        // 旧 base_rev → 冲突 + 权威副本（乐观并发，非最后写入者胜）
+        let stale = post_json(
+            &client,
+            &url,
+            r#"{"cursor":1,"base":{"workspace:a":0},"pushes":[{"key":"workspace:a","base_rev":0,"payload":{"name":"打板"}}]}"#,
+        )
+        .await;
+        assert!(stale["accepted"].as_array().unwrap().is_empty());
+        assert_eq!(stale["rejected"][0]["reason"], "conflict");
+        assert_eq!(stale["rejected"][0]["server"]["payload"]["name"], "盯盘");
+        assert!(
+            stale["changes"].as_array().unwrap().is_empty(),
+            "水位之后无变更 = 空增量: {stale}"
+        );
+        assert_eq!(stale["cursor"], 1, "被拒的推送不消耗水位");
+
+        // 带权威 rev 重推 → rev 推进
+        let retried = post_json(
+            &client,
+            &url,
+            r#"{"cursor":1,"base":{"workspace:a":1},"pushes":[{"key":"workspace:a","base_rev":1,"payload":{"name":"打板"}}]}"#,
+        )
+        .await;
+        assert_eq!(retried["accepted"][0]["rev"], 2);
+        assert_eq!(retried["accepted"][0]["payload"]["name"], "打板");
+
+        // 墓碑走同一路径（删除要留痕，否则传不到其他端）
+        let deleted = post_json(
+            &client,
+            &url,
+            r#"{"cursor":2,"pushes":[{"key":"workspace:a","base_rev":2,"deleted":true,"payload":null}]}"#,
+        )
+        .await;
+        assert_eq!(deleted["accepted"][0]["deleted"], true);
+        assert_eq!(deleted["accepted"][0]["rev"], 3);
+        assert!(deleted["accepted"][0]["payload"].is_null());
+
+        // 键形非法在服务端兜一层（客户端已拦，这里锁服务端不依赖客户端自律）
+        let bad_key = post_json(
+            &client,
+            &url,
+            r#"{"cursor":3,"pushes":[{"key":"nope","base_rev":0,"payload":null}]}"#,
+        )
+        .await;
+        assert_eq!(bad_key["rejected"][0]["reason"], "invalid_key");
+        assert!(bad_key["rejected"][0].get("server").is_none());
+    }
+
+    /// 账户隔离：认证开启后按 token 的 sub 分区，一个账户推的数据另一个拉不到
+    #[tokio::test]
+    async fn account_endpoints_partition_by_token_sub() {
+        let mut state = account_test_state();
+        state.auth = auth::AuthConfig {
+            mode: auth::AuthMode::JwtRequired,
+            secret: "test-secret".to_string(),
+            expected_issuer: String::new(),
+            expected_audience: String::new(),
+            provision_key: String::new(),
+        };
+        let base = spawn_account_app(state).await;
+        let client = reqwest::Client::new();
+        let profile_url = format!("{base}/api/v1/account/profile");
+        let sync_url = format!("{base}/api/v1/account/sync");
+
+        // 未认证不得读写任何账户
+        assert_eq!(
+            client
+                .get(&profile_url)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16(),
+            401
+        );
+        assert_eq!(
+            client
+                .post(&sync_url)
+                .header("content-type", "application/json")
+                .body(r#"{"cursor":0,"base":{},"pushes":[]}"#)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16(),
+            401
+        );
+
+        // viewer 票据：认证过了，但同步是写方法 → 403（账户面同样受 RBAC 约束）
+        let viewer =
+            auth::create_token("test-secret", "carol", "", Duration::from_secs(60)).unwrap();
+        assert_eq!(
+            client
+                .post(&sync_url)
+                .bearer_auth(&viewer)
+                .header("content-type", "application/json")
+                .body(r#"{"cursor":0,"base":{},"pushes":[]}"#)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16(),
+            403
+        );
+
+        // 同步端点是写方法 → 需 operator+ 角色（viewer 只读，L484）
+        let alice = auth::create_token_with_roles(
+            "test-secret",
+            "alice",
+            "",
+            &["operator".to_string()],
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        let bob = auth::create_token_with_roles(
+            "test-secret",
+            "bob",
+            "",
+            &["operator".to_string()],
+            Duration::from_secs(60),
+        )
+        .unwrap();
+
+        let alice_profile: serde_json::Value = client
+            .get(&profile_url)
+            .bearer_auth(&alice)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(alice_profile["account_id"], "alice", "档案按 sub 分区");
+
+        post_json_typed(
+            &client,
+            &sync_url,
+            &alice,
+            r#"{"cursor":0,"base":{},"pushes":[{"key":"workspace:a","base_rev":0,"payload":{"secret":"A"}}]}"#,
+        )
+        .await;
+
+        // bob 从 0 水位拉不到 alice 的记录
+        let bob_view = post_json_typed(
+            &client,
+            &sync_url,
+            &bob,
+            r#"{"cursor":0,"base":{},"pushes":[]}"#,
+        )
+        .await;
+        assert!(
+            bob_view["changes"].as_array().unwrap().is_empty(),
+            "账户间记录不可见: {bob_view}"
+        );
+        let bob_profile: serde_json::Value = client
+            .get(&profile_url)
+            .bearer_auth(&bob)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(bob_profile["account_id"], "bob");
+        assert_eq!(bob_profile["display_name"], "bob");
+
+        // alice 自己拉得到（确认上一条不是「谁都没数据」）
+        let alice_view = post_json_typed(
+            &client,
+            &sync_url,
+            &alice,
+            r#"{"cursor":0,"base":{},"pushes":[]}"#,
+        )
+        .await;
+        assert_eq!(alice_view["changes"].as_array().unwrap().len(), 1);
+    }
+
+    async fn post_json_typed(
+        client: &reqwest::Client,
+        url: &str,
+        token: &str,
+        body: &str,
+    ) -> serde_json::Value {
+        client
+            .post(url)
+            .bearer_auth(token)
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap()
+    }
+
+    /// 写穿持久化（L476）：改动写穿后端；换一份空内存存储（模拟重启）能恢复
+    #[tokio::test]
+    async fn account_store_write_through_survives_fresh_memory() {
+        // 同一后端实例挂两份存储 = 进程重启后内存空、后端还在
+        let backend = Arc::new(alpha_storage::MemoryStorage::new());
+        let store = account::AccountStore::with_persistence(backend.clone());
+        store.profile("alice", 100).await;
+        let response = store
+            .sync(
+                "alice",
+                &alpha_core::account::SyncRequest {
+                    cursor: 0,
+                    base: BTreeMap::new(),
+                    pushes: vec![alpha_core::account::SyncPush {
+                        key: "workspace:a".into(),
+                        base_rev: 0,
+                        deleted: false,
+                        payload: serde_json::json!({"n": 1}),
+                        updated_at_ms: 0,
+                    }],
+                },
+                200,
+            )
+            .await;
+        assert_eq!(response.accepted.len(), 1);
+        let keys = backend.list_keys("alpha:account:").await.unwrap();
+        assert_eq!(keys.len(), 1, "账户状态整体落一个键");
+        assert!(
+            keys[0].starts_with("alpha:account:"),
+            "键带账户前缀（slug 化 sub）: {}",
+            keys[0]
+        );
+
+        // 新存储 = 空内存 + 同一后端（等价于进程重启）
+        let fresh = account::AccountStore::with_persistence(backend);
+        let view = fresh
+            .sync(
+                "alice",
+                &alpha_core::account::SyncRequest {
+                    cursor: 0,
+                    base: BTreeMap::new(),
+                    pushes: vec![],
+                },
+                300,
+            )
+            .await;
+        assert_eq!(view.changes.len(), 1, "记录应从快照恢复");
+        assert_eq!(view.changes[0].rev, 1);
+        assert_eq!(view.changes[0].payload, serde_json::json!({"n": 1}));
+        assert_eq!(fresh.profile("alice", 400).await.rev, 1, "档案随快照恢复");
+        assert_eq!(fresh.profile("alice", 500).await.display_name, "alice");
+    }
+
+    /// 写穿失败只告警不拒绝请求（内存仍是权威 serving 层——多副本下由
+    /// 下次写穿收敛；把 5xx 抛给客户端会让一次后端抖动变成用户可见的数据丢失）
+    #[tokio::test]
+    async fn account_store_write_through_failure_still_serves() {
+        let store = account::AccountStore::with_persistence(Arc::new(FailingWriteBackend));
+        let response = store
+            .sync(
+                "alice",
+                &alpha_core::account::SyncRequest {
+                    cursor: 0,
+                    base: BTreeMap::new(),
+                    pushes: vec![alpha_core::account::SyncPush {
+                        key: "workspace:a".into(),
+                        base_rev: 0,
+                        deleted: false,
+                        payload: serde_json::json!({"n": 1}),
+                        updated_at_ms: 0,
+                    }],
+                },
+                100,
+            )
+            .await;
+        assert_eq!(response.accepted.len(), 1, "后端写失败不应拒绝同步请求");
+    }
+
+    /// 写失败后端（账户写穿 fail-open 测试桩；`store` 恒失败）
+    #[derive(Default)]
+    struct FailingWriteBackend;
+
+    #[async_trait::async_trait]
+    impl alpha_storage::StorageBackend for FailingWriteBackend {
+        async fn store(&self, _key: &str, _value: Vec<u8>) -> alpha_core::errors::AlphaResult<()> {
+            Err(alpha_core::errors::AlphaError::StorageError(
+                "injected write failure".into(),
+            ))
+        }
+        async fn retrieve(&self, _key: &str) -> alpha_core::errors::AlphaResult<Option<Vec<u8>>> {
+            Ok(None)
+        }
+        async fn delete(&self, _key: &str) -> alpha_core::errors::AlphaResult<bool> {
+            Ok(false)
+        }
+        async fn exists(&self, _key: &str) -> alpha_core::errors::AlphaResult<bool> {
+            Ok(false)
+        }
+        async fn list_keys(&self, _prefix: &str) -> alpha_core::errors::AlphaResult<Vec<String>> {
+            Ok(Vec::new())
+        }
+        async fn clear(&self) -> alpha_core::errors::AlphaResult<()> {
+            Ok(())
+        }
     }
 
     #[test]

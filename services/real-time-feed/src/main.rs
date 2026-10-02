@@ -280,8 +280,12 @@ async fn main() -> anyhow::Result<()> {
         .with_state(app_state);
 
     // 启动服务器
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8082").await?;
-    tracing::info!("Real-Time Feed service listening on 0.0.0.0:8082");
+    // 与 docker-compose/Dockerfile/dev-start 的约定一致（8082），可用 ALPHA_REALTIME_FEED_BIND
+    // 覆盖（e2e 测试与多实例部署需要地址可配，默认值保持既有行为）
+    let bind =
+        std::env::var("ALPHA_REALTIME_FEED_BIND").unwrap_or_else(|_| "0.0.0.0:8082".to_string());
+    let listener = tokio::net::TcpListener::bind(&bind).await?;
+    tracing::info!("Real-Time Feed service listening on {}", bind);
 
     axum::serve(listener, app).await?;
 
