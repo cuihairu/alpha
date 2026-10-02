@@ -1,4 +1,4 @@
-# GDPR / CCPA 数据合规（TODO L488）
+# GDPR / CCPA 数据合规
 
 与 `docs/platform-compliance.md`（L520 隐私政策与权限台账）分工：本篇是
 **数据主体权利与数据生命周期的工程义务映射**——每项法定义务 → 本仓落地面

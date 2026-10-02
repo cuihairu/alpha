@@ -25,15 +25,20 @@ export default {
       "classic",
       {
         "docs": {
-          "sidebarPath": "/Users/cui/Workspaces/alpha/docs/sidebars.js",
+          "path": ".",
+          "exclude": [
+            "node_modules/**",
+            "build/**",
+            ".docusaurus/**",
+            "src/**",
+            "static/**"
+          ],
+          "sidebarPath": "/home/cui/workspaces/alpha/docs/sidebars.js",
           "editUrl": "https://github.com/cuihairu/alpha/tree/main/docs/"
         },
-        "blog": {
-          "showReadingTime": true,
-          "editUrl": "https://github.com/cuihairu/alpha/tree/main/docs/blog/"
-        },
+        "blog": false,
         "theme": {
-          "customCss": "/Users/cui/Workspaces/alpha/docs/src/css/custom.css"
+          "customCss": "/home/cui/workspaces/alpha/docs/src/css/custom.css"
         }
       }
     ]
@@ -47,11 +52,6 @@ export default {
           "sidebarId": "tutorialSidebar",
           "position": "left",
           "label": "文档"
-        },
-        {
-          "to": "/blog",
-          "label": "博客",
-          "position": "left"
         },
         {
           "href": "https://github.com/cuihairu/alpha",
@@ -68,16 +68,20 @@ export default {
           "title": "文档",
           "items": [
             {
-              "label": "快速开始",
+              "label": "简介",
               "to": "/docs/intro"
+            },
+            {
+              "label": "快速开始",
+              "to": "/docs/getting-started"
             },
             {
               "label": "部署指南",
               "to": "/docs/deployment"
             },
             {
-              "label": "API 文档",
-              "to": "/docs/api/overview"
+              "label": "市场数据 API",
+              "to": "/docs/market-data-api"
             }
           ]
         },
@@ -102,17 +106,13 @@ export default {
           "title": "更多",
           "items": [
             {
-              "label": "博客",
-              "to": "/blog"
-            },
-            {
               "label": "更新日志",
               "href": "https://github.com/cuihairu/alpha/releases"
             }
           ]
         }
       ],
-      "copyright": "Copyright © 2025 Alpha Finance Team. Built with Rust ❤️."
+      "copyright": "Copyright © 2026 Alpha Finance Team. Built with Rust ❤️."
     },
     "colorMode": {
       "defaultMode": "light",

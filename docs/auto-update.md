@@ -1,4 +1,4 @@
-# 自动更新与增量更新机制（TODO L519）
+# 自动更新与增量更新机制
 
 本单落地**更新分发通道的完整骨架**：桌面 Tauri updater 登记（schema 已入
 conf 并被契约测试锁定、feed 生成器就绪）+ 各平台更新策略边界。激活
@@ -18,7 +18,7 @@ conf 并被契约测试锁定、feed 生成器就绪）+ 各平台更新策略�
    运行时对两种形态都做占位符替换（测试同时验证两种形态）。
 2. **feed 生成器**（`scripts/release-update-feed.sh`）：按 Tauri v1
    manifest 格式产 `latest.json`（version/notes/pub_date(RFC3339
-   UTC)/platforms{signature,url}），semver 与 rust triple 在入口校验，
+   UTC)/platforms\{signature,url\}），semver 与 rust triple 在入口校验，
    产物过 JSON 合法性检查。CI 在打包作业末尾调用并上传静态 CDN。
 3. **签名链路**（翻真步骤）：`tauri signer generate` 产出 minisign
    密钥对——**公钥**入 conf `pubkey`，**私钥**进 CI secret（绝不入库）；

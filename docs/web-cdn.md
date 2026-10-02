@@ -1,4 +1,4 @@
-# Web 端 CDN 部署与静态资源优化（TODO L515）
+# Web 端 CDN 部署与静态资源优化
 
 三件套：**构建期优化**（`web/scripts/optimize-dist.mjs`，已接入
 `npm run build`）、**源站**（compose `web-origin` + nginx 配置，本机

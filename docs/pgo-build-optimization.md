@@ -1,4 +1,4 @@
-# 基于 LLVM Profile 的编译优化（TODO L455）
+# 基于 LLVM Profile 的编译优化
 
 工具面：`scripts/build-pgo.sh`——PGO（Profile-Guided Optimization）三阶段
 构建循环的一键封装。本文档定用法、负载画像要求与边界。

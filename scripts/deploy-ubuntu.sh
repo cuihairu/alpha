@@ -422,4 +422,4 @@ else
     log_warning "⚠️ 部署完成但部分服务可能需要手动检查。"
 fi
 
-echo "📚 更多信息请查看: $WORK_DIR/docs/DEPLOYMENT.md"
+echo "📚 更多信息请查看: $WORK_DIR/docs/deployment-runbook.md"

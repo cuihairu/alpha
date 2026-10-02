@@ -20,14 +20,17 @@ const config = {
     [
       'classic',
       {
+        // 文档内容就放在 docs/ 根（42 篇工程文档），不再维护 docs/docs/ 子树。
+        // path 相对 siteDir（docs/）；构建产物/依赖/生成目录必须显式排除——
+        // path='.' 时 contentDir=siteDir，否则 node_modules 里的 README 会被当成文档。
         docs: {
+          path: '.',
+          exclude: ['node_modules/**', 'build/**', '.docusaurus/**', 'src/**', 'static/**'],
           sidebarPath: require.resolve('./sidebars.js'),
           editUrl: 'https://github.com/cuihairu/alpha/tree/main/docs/',
         },
-        blog: {
-          showReadingTime: true,
-          editUrl: 'https://github.com/cuihairu/alpha/tree/main/docs/blog/',
-        },
+        // 站内无真实博客内容，停用（删除原占位文章后不再启用）。
+        blog: false,
         theme: {
           customCss: require.resolve('./src/css/custom.css'),
         },
@@ -46,11 +49,6 @@ const config = {
           label: '文档',
         },
         {
-          to: '/blog',
-          label: '博客',
-          position: 'left'
-        },
-        {
           href: 'https://github.com/cuihairu/alpha',
           label: 'GitHub',
           position: 'right',
@@ -64,16 +62,20 @@ const config = {
           title: '文档',
           items: [
             {
-              label: '快速开始',
+              label: '简介',
               to: '/docs/intro',
+            },
+            {
+              label: '快速开始',
+              to: '/docs/getting-started',
             },
             {
               label: '部署指南',
               to: '/docs/deployment',
             },
             {
-              label: 'API 文档',
-              to: '/docs/api/overview',
+              label: '市场数据 API',
+              to: '/docs/market-data-api',
             },
           ],
         },
@@ -97,10 +99,6 @@ const config = {
         {
           title: '更多',
           items: [
-            {
-              label: '博客',
-              to: '/blog',
-            },
             {
               label: '更新日志',
               href: 'https://github.com/cuihairu/alpha/releases',

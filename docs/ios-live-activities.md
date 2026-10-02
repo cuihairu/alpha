@@ -1,4 +1,4 @@
-# iOS Live Activities 与灵动岛支持（TODO L510）——工程设计契约
+# iOS Live Activities 与灵动岛支持——工程设计契约
 
 **边界声明**：`mobile/ios/` 属 L119 会话交付面，本项不动其任何文件。
 本文是可直接照做的实现契约（ActivityKit 接入点、类型契约、更新预算、
@@ -77,7 +77,7 @@ extension AlphaViewModel {
 
 **更新预算（实测口径，落地时复核）**：进程内 update 无硬性次数限制，
 但系统对高频更新节流（Lock Screen 卡片更新建议 ≥1 分钟级；灵动岛同）。
-行情节拍天然 >1s，App 侧做节流：距上次 update <60s 则只记内存态、
+行情节拍天然 >1s，App 侧做节流：距上次 update \<60s 则只记内存态、
 下一个允许窗口合并提交。`staleDate` 设为 `now + 120s`（行情过期灰显）。
 
 ## 4. 灵动岛与锁屏 UI（Widget Extension 内）
@@ -127,7 +127,7 @@ A股色板（红涨绿跌）与 Web/Android 一致（docs/theme-adaptation.md �
 
 1. 设备（A14+/iOS 16.1+）设置页开启「实时活动」→ 锁屏见卡片；
 2. 灵动岛三形态（compact/minimal/expanded）内容正确、红涨绿跌；
-3. 更新节流：<60s 的 tick 合并提交（埋点计数，Xcode Instruments 或日志）；
+3. 更新节流：\<60s 的 tick 合并提交（埋点计数，Xcode Instruments 或日志）；
 4. 设置关闭 → `endActivities` 立即移除；应用被杀后卡片 stale 灰显；
 5. `xcodebuild test`：ContentState Codable 往返 + 节流纯逻辑单测
    （Swift 侧，随 L119 门禁）。

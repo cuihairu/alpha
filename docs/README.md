@@ -1,125 +1,36 @@
-# Alpha Finance 文档
+# Alpha 文档站
 
-基于 Docusaurus 构建的现代化文档站点，专为 Alpha Finance 金融数据分析平台设计。
-
-## 📁 文档结构
+Docusaurus 3 文档站，内容即 `docs/` 根下的 42 篇工程文档（`docusaurus.config.js`
+中 `docs.path: '.'`——不再维护 `docs/docs/` 子树）。站点由 GitHub Pages 托管：
+`.github/workflows/docs.yml` 在 `main` 分支的 `docs/**` 或 `README.md`（仓库根）
+变更时自动构建部署，地址 https://cuihairu.github.io/alpha/ 。
 
 ```
 docs/
-├── docs/                   # 文档内容
-│   ├── intro.md           # 项目介绍
-│   ├── getting-started.md # 快速开始
-│   ├── installation.md    # 安装指南
-│   └── deployment.md      # 部署指南
-├── blog/                  # 博客文章
-│   ├── authors.yml        # 作者信息
-│   └── 2024-01-01-alpha-finance-launch.md
-├── src/                   # 源文件
-│   └── css/
-│       └── custom.css     # 自定义样式
-├── static/                # 静态资源
-├── build/                 # 构建输出目录
-├── package.json           # 依赖配置
-├── docusaurus.config.js   # 站点配置
-└── sidebars.js           # 侧边栏配置
+├── *.md               # 全部文档内容（42 篇，与 sidebars.js 一一登记）
+├── docusaurus.config.js
+├── sidebars.js        # 分类侧边栏：新文档写完在此登记，未登记成 orphan（构建警告）
+├── src/css/custom.css # 主题色
+├── static/            # 静态资源（当前为空）
+├── build/             # 构建产物（gitignore，CI 内现构建现发布）
+└── .gitignore
 ```
 
-## 🚀 本地开发
+## 本地预览
 
 ```bash
-# 进入文档目录
 cd docs
-
-# 安装依赖
-npm install
-
-# 启动开发服务器
-npm start
-
-# 构建静态网站
-npm build
-
-# 预览构建结果
-npm run serve
+pnpm install
+pnpm start     # 开发热重载
+pnpm build     # 产出 build/（同时校验死链）
 ```
 
-## 📖 在线访问
+Node 18+；CI（`.github/workflows/docs.yml`）用 pnpm + Node 22。
 
-- **文档网站**: https://cuihairu.github.io/alpha/
-- **GitHub 仓库**: https://github.com/cuihairu/alpha
+## 写作约定
 
-## 🛠️ 技术栈
-
-本项目使用 [Docusaurus](https://docusaurus.io/) 作为文档生成工具：
-
-- ✅ 现代化的 React 界面
-- ✅ 全文搜索功能
-- ✅ 响应式设计
-- ✅ Markdown 支持
-- ✅ 代码语法高亮
-- ✅ 侧边栏导航
-- ✅ 博客功能
-- ✅ 国际化支持（中文）
-- ✅ SEO 优化
-
-## 🎨 特色功能
-
-- **Alpha Finance 品牌定制**: 专业的金融科技风格设计
-- **多端适配**: 支持桌面端、平板和移动端
-- **实时预览**: 开发时支持热重载
-- **自动部署**: GitHub Actions 自动构建和部署
-
-## ⚠️ 已知问题
-
-当前文档系统存在一些已知的链接警告，但不影响正常使用：
-
-- 部分文档中引用了尚未创建的页面（如 API 文档、架构文档等）
-- 这些链接会在未来的文档完善后自动修复
-- 构建过程正常完成，静态站点可以正常部署
-
-## 🚀 下一步计划
-
-- [ ] 创建 API 文档 (`docs/api/overview.md`)
-- [ ] 创建架构设计文档 (`docs/architecture/overview.md`)
-- [ ] 创建开发指南 (`docs/development/setup.md`)
-- [ ] 添加配置指南 (`docs/configuration.md`)
-- [ ] 添加故障排除文档 (`docs/troubleshooting.md`)
-- [ ] 创建快速开始指南 (`docs/quick-start.md`)
-
-## 📝 编写文档
-
-### 添加新文档
-
-1. 在 `docs/docs/` 目录下创建 Markdown 文件
-2. 在 `sidebars.js` 中配置侧边栏
-3. 更新相关文档中的链接
-
-### 撰写博客
-
-1. 在 `docs/blog/` 目录下创建 Markdown 文件
-2. 文件名格式：`YYYY-MM-DD-title.md`
-3. 在 Front Matter 中设置作者和标签
-
-### 自定义样式
-
-编辑 `src/css/custom.css` 文件来修改样式：
-
-```css
-/* 自定义 Alpha Finance 主题色 */
-:root {
-  --ifm-color-primary: #1e88e5;
-}
-```
-
-## 🔄 自动部署
-
-文档会在每次推送到 `main` 分支时自动部署到 GitHub Pages：
-
-1. 触发 GitHub Actions 工作流
-2. 使用 Node.js 构建静态文件
-3. 部署到 GitHub Pages
-4. 自动更新在线文档站点
-
----
-
-**使用 Alpha Finance 开始您的金融数据分析之旅！** 🚀
+- 标题不带内部条目编号（`（TODO Lxxx）` 不出现在 H1）；正文中的设计登记
+  引用（`docs/xxx.md §n`、L 编号）保留，是本仓设计文档的溯源口径。
+- 只写已存在、可验证的事实；未落地的能力写明「未立项/边界登记」，
+  不预写占位功能与虚构数据。
+- 文档间链接用相对路径（`./xxx.md`），构建时会校验。

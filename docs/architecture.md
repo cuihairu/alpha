@@ -35,7 +35,7 @@ Crawler (Py/Rust) -> Redis Streams -> Rust Processor -> TimescaleDB/ClickHouse/R
 
 ### 3. 数据处理/ETL（Rust）
 - **消费者**：当前使用 Redis Streams 轮询/消费组；后续可切换到 NATS JetStream 或 Kafka。
-- **校验**：Schema 校验、字段缺失补全、异常值（价格<0等）隔离到 quarantine 表。
+- **校验**：Schema 校验、字段缺失补全、异常值（价格\<0等）隔离到 quarantine 表。
 - **衍生计算**：复权价、均线、波动率、行业/概念映射、资金流归集。
 - **批处理**：每日/每周任务校准前复权因子、同步行业分类、重算指标。
 

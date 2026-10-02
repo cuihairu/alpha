@@ -108,7 +108,7 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 
 ## 📚 详细文档
 
-- [完整部署文档](docs/DEPLOYMENT.md)
+- [完整部署文档](docs/deployment-runbook.md)
 - [API 文档](docs/API.md)
 - [配置说明](docs/CONFIGURATION.md)
 - [故障排除指南](docs/TROUBLESHOOTING.md)

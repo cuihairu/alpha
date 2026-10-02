@@ -1,4 +1,4 @@
-# 市场数据 API 与第三方集成（TODO L504）
+# 市场数据 API 与第三方集成
 
 data-engine（`:8081`）承载行情数据 REST 面；第三方两条接入路径：
 **经网关**（JWT，`/api/v1/*` 反代，见 `docs/auth.md`）与**直连 API key**

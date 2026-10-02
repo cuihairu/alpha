@@ -1,4 +1,4 @@
-# 分布式追踪系统（TODO L460）：tracing + Jaeger
+# 分布式追踪系统：tracing + Jaeger
 
 落地分两层：**本单实现的 trace-id 贯穿链路**（可立即用）与
 **Jaeger OTLP 全量 span 导出（登记边界，随发布节启用）**。

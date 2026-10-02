@@ -85,7 +85,7 @@
 * 断言必须有信息量：`assert!(true)` 式空断言等于没有测试（review 即删）。
 * 二进制行为变更后须用重建的二进制做进程级冒烟（`cargo test` 不重编 bin target，
   先 `cargo build -p <svc>`——历史上多次踩坑）。
-* 跨服务端到端冒烟 = `scripts/check-e2e.sh`（TODO L469）：真实进程拉起四服务，断言
+* 跨服务端到端冒烟 = `scripts/check-e2e.sh`：真实进程拉起四服务，断言
   聚合健康三上游 / REST 反代 + x-trace-id 回填 / WS 反代握手 / gateway 业务指标在位；
   Redis 前置（`E2E_REDIS_URL` 可覆写）、端口 env 可覆写、失败自动倾倒服务日志。
 

@@ -1,4 +1,4 @@
-# 移动端生物识别门与隐私保护（TODO L512）
+# 移动端生物识别门与隐私保护
 
 三件套：**生物识别门**（`BiometricGate.kt`：Keystore auth-per-use 门密钥
 + BiometricPrompt CryptoObject 流 + 纯逻辑状态机）、**静态加密存储**

@@ -8,11 +8,91 @@
           "label": "Next",
           "isLast": true,
           "path": "/alpha/docs",
-          "mainDocId": "intro",
+          "mainDocId": "README",
           "docs": [
+            {
+              "id": "account-sync",
+              "path": "/alpha/docs/account-sync",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "alerting-and-diagnosis",
+              "path": "/alpha/docs/alerting-and-diagnosis",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "analysis",
+              "path": "/alpha/docs/analysis",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "android-release",
+              "path": "/alpha/docs/android-release",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "android-widget",
+              "path": "/alpha/docs/android-widget",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "architecture",
+              "path": "/alpha/docs/architecture",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "auth",
+              "path": "/alpha/docs/auth",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "auto-update",
+              "path": "/alpha/docs/auto-update",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "cross-platform-architecture",
+              "path": "/alpha/docs/cross-platform-architecture",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "data-lake-parquet",
+              "path": "/alpha/docs/data-lake-parquet",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "data-privacy",
+              "path": "/alpha/docs/data-privacy",
+              "sidebar": "tutorialSidebar"
+            },
             {
               "id": "deployment",
               "path": "/alpha/docs/deployment",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "deployment-runbook",
+              "path": "/alpha/docs/deployment-runbook",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "desktop-framework",
+              "path": "/alpha/docs/desktop-framework",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "desktop-release",
+              "path": "/alpha/docs/desktop-release",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "distributed-tracing",
+              "path": "/alpha/docs/distributed-tracing",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "docker-deployment",
+              "path": "/alpha/docs/docker-deployment",
               "sidebar": "tutorialSidebar"
             },
             {
@@ -27,7 +107,116 @@
             },
             {
               "id": "intro",
-              "path": "/alpha/docs/",
+              "path": "/alpha/docs/intro",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "ios-live-activities",
+              "path": "/alpha/docs/ios-live-activities",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "ios-release",
+              "path": "/alpha/docs/ios-release",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "market-data-api",
+              "path": "/alpha/docs/market-data-api",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "memory-profiling",
+              "path": "/alpha/docs/memory-profiling",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "mobile-core-architecture",
+              "path": "/alpha/docs/mobile-core-architecture",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "mobile-gestures",
+              "path": "/alpha/docs/mobile-gestures",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "mobile-offline",
+              "path": "/alpha/docs/mobile-offline",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "mobile-privacy",
+              "path": "/alpha/docs/mobile-privacy",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "mobile-push-sync",
+              "path": "/alpha/docs/mobile-push-sync",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "pgo-build-optimization",
+              "path": "/alpha/docs/pgo-build-optimization",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "platform-compliance",
+              "path": "/alpha/docs/platform-compliance",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "README",
+              "path": "/alpha/docs/"
+            },
+            {
+              "id": "realtime-sync-protocol",
+              "path": "/alpha/docs/realtime-sync-protocol",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "rust-code-standards",
+              "path": "/alpha/docs/rust-code-standards",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "store-publishing",
+              "path": "/alpha/docs/store-publishing",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "testing",
+              "path": "/alpha/docs/testing",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "theme-adaptation",
+              "path": "/alpha/docs/theme-adaptation",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "user-guide",
+              "path": "/alpha/docs/user-guide",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "ux-consistency",
+              "path": "/alpha/docs/ux-consistency",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "version-management",
+              "path": "/alpha/docs/version-management",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "web-cdn",
+              "path": "/alpha/docs/web-cdn",
+              "sidebar": "tutorialSidebar"
+            },
+            {
+              "id": "web-framework-selection",
+              "path": "/alpha/docs/web-framework-selection",
               "sidebar": "tutorialSidebar"
             }
           ],
@@ -35,7 +224,7 @@
           "sidebars": {
             "tutorialSidebar": {
               "link": {
-                "path": "/alpha/docs/",
+                "path": "/alpha/docs/intro",
                 "label": "简介"
               }
             }

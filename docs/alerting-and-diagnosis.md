@@ -1,4 +1,4 @@
-# 实时告警与智能故障诊断（TODO L464）
+# 实时告警与智能故障诊断
 
 口径：**工程项**——Prometheus 告警规则 + Alertmanager 路由 +
 Webhook 多渠道分发 + 诊断引擎纯函数库。Jaeger OTLP 全量 span

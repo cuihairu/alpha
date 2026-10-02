@@ -389,7 +389,7 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
 `Monitor`→`MonitorRect`；`gui.rs` 只加两行（setup 调恢复 + Builder 挂事件，
 215 行仍在 220 上限内）；`AppState` 内嵌 `Mutex<WindowStateTracker>`（与
 通知队列同模式）。纪律由 wiring_contract `window_glue_stays_mechanical`
-（<140 行/无命令/无自造错误串/必须引用 `window::`）与
+（\<140 行/无命令/无自造错误串/必须引用 `window::`）与
 `window_management_is_wired` 锁定。
 
 主题的真实边界（假设已注明）：Tauri 1.x **没有运行期 `Window::set_theme`**

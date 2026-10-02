@@ -1,4 +1,4 @@
-# Android APK/AAB 分包与多渠道发布（TODO L517）
+# Android APK/AAB 分包与多渠道发布
 
 落地三件：**双 ABI 原生库**（`gen-bindings.sh` 循环化，分包的真实前提）、
 **gradle 渠道/分包矩阵**（`app/build.gradle.kts`）、**一键构建编排**

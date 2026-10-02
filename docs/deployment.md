@@ -8,10 +8,10 @@ sidebar_position: 4
 
 | 场景 | 看 |
 |---|---|
-| Ubuntu 单机全栈 | `docs/DEPLOYMENT.md` + `scripts/deploy-ubuntu.sh` |
+| Ubuntu 单机全栈 | `docs/deployment-runbook.md` + `scripts/deploy-ubuntu.sh` |
 | 容器化 | `docs/docker-deployment.md` |
 | CDN + 静态资源 | `docs/web-cdn.md`（优化器 → nginx 源站 → S3 发布） |
-| 发布流水线 | TODO L470（Web/Desktop/Android/iOS 四作业，CI 侧） |
+| 发布流水线 | `.github/workflows/release.yml`（版本门禁 + Web/Desktop×3/Android/iOS/Docker/updater feed 七作业，密钥缺失自动降级） |
 | 可观测性 | `docs/alerting-and-diagnosis.md`（Prometheus 规则 + Alertmanager） |
 | 合规基线 | `docs/platform-compliance.md` + `scripts/check-compliance.sh` |
 

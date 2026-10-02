@@ -12,13 +12,13 @@
       {
         "type": "link",
         "label": "简介",
-        "href": "/alpha/docs/",
+        "href": "/alpha/docs/intro",
         "docId": "intro",
         "unlisted": false
       },
       {
         "type": "category",
-        "label": "快速开始",
+        "label": "入门",
         "items": [
           {
             "type": "link",
@@ -39,14 +39,321 @@
         "collapsible": true
       },
       {
+        "type": "link",
+        "label": "用户指南",
+        "href": "/alpha/docs/user-guide",
+        "docId": "user-guide",
+        "unlisted": false
+      },
+      {
         "type": "category",
-        "label": "部署指南",
+        "label": "架构与设计",
         "items": [
           {
             "type": "link",
-            "label": "Ubuntu 24.04 部署",
+            "label": "平台总体方案",
+            "href": "/alpha/docs/architecture",
+            "docId": "architecture",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "跨平台 Rust 架构",
+            "href": "/alpha/docs/cross-platform-architecture",
+            "docId": "cross-platform-architecture",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "UI 框架选型决策",
+            "href": "/alpha/docs/web-framework-selection",
+            "docId": "web-framework-selection",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "桌面端框架（Tauri）",
+            "href": "/alpha/docs/desktop-framework",
+            "docId": "desktop-framework",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "移动端核心库（JNI + UniFFI）",
+            "href": "/alpha/docs/mobile-core-architecture",
+            "docId": "mobile-core-architecture",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "现状分析（早期规划）",
+            "href": "/alpha/docs/analysis",
+            "docId": "analysis",
+            "unlisted": false
+          }
+        ],
+        "collapsed": true,
+        "collapsible": true
+      },
+      {
+        "type": "category",
+        "label": "服务端",
+        "items": [
+          {
+            "type": "link",
+            "label": "市场数据 API",
+            "href": "/alpha/docs/market-data-api",
+            "docId": "market-data-api",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "身份认证",
+            "href": "/alpha/docs/auth",
+            "docId": "auth",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "统一账户与跨端同步",
+            "href": "/alpha/docs/account-sync",
+            "docId": "account-sync",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "实时同步协议",
+            "href": "/alpha/docs/realtime-sync-protocol",
+            "docId": "realtime-sync-protocol",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "Parquet 数据湖",
+            "href": "/alpha/docs/data-lake-parquet",
+            "docId": "data-lake-parquet",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "分布式追踪",
+            "href": "/alpha/docs/distributed-tracing",
+            "docId": "distributed-tracing",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "告警与故障诊断",
+            "href": "/alpha/docs/alerting-and-diagnosis",
+            "docId": "alerting-and-diagnosis",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "内存与性能分析",
+            "href": "/alpha/docs/memory-profiling",
+            "docId": "memory-profiling",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "PGO 编译优化",
+            "href": "/alpha/docs/pgo-build-optimization",
+            "docId": "pgo-build-optimization",
+            "unlisted": false
+          }
+        ],
+        "collapsed": true,
+        "collapsible": true
+      },
+      {
+        "type": "category",
+        "label": "部署与发布",
+        "items": [
+          {
+            "type": "link",
+            "label": "部署指南（总览）",
             "href": "/alpha/docs/deployment",
             "docId": "deployment",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "Ubuntu 部署 Runbook",
+            "href": "/alpha/docs/deployment-runbook",
+            "docId": "deployment-runbook",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "Docker 容器化",
+            "href": "/alpha/docs/docker-deployment",
+            "docId": "docker-deployment",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "Web CDN 与静态资源",
+            "href": "/alpha/docs/web-cdn",
+            "docId": "web-cdn",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "桌面多平台安装包",
+            "href": "/alpha/docs/desktop-release",
+            "docId": "desktop-release",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "自动更新",
+            "href": "/alpha/docs/auto-update",
+            "docId": "auto-update",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "Android 发布",
+            "href": "/alpha/docs/android-release",
+            "docId": "android-release",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "iOS 签名与发布",
+            "href": "/alpha/docs/ios-release",
+            "docId": "ios-release",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "应用商店发布",
+            "href": "/alpha/docs/store-publishing",
+            "docId": "store-publishing",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "版本管理",
+            "href": "/alpha/docs/version-management",
+            "docId": "version-management",
+            "unlisted": false
+          }
+        ],
+        "collapsed": true,
+        "collapsible": true
+      },
+      {
+        "type": "category",
+        "label": "移动端体验",
+        "items": [
+          {
+            "type": "link",
+            "label": "离线存储与同步",
+            "href": "/alpha/docs/mobile-offline",
+            "docId": "mobile-offline",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "推送通知与后台同步",
+            "href": "/alpha/docs/mobile-push-sync",
+            "docId": "mobile-push-sync",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "触屏手势与交互",
+            "href": "/alpha/docs/mobile-gestures",
+            "docId": "mobile-gestures",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "生物识别门与隐私",
+            "href": "/alpha/docs/mobile-privacy",
+            "docId": "mobile-privacy",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "Android 小组件",
+            "href": "/alpha/docs/android-widget",
+            "docId": "android-widget",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "iOS 灵动岛",
+            "href": "/alpha/docs/ios-live-activities",
+            "docId": "ios-live-activities",
+            "unlisted": false
+          }
+        ],
+        "collapsed": true,
+        "collapsible": true
+      },
+      {
+        "type": "category",
+        "label": "跨端体验一致性",
+        "items": [
+          {
+            "type": "link",
+            "label": "UX 一致性",
+            "href": "/alpha/docs/ux-consistency",
+            "docId": "ux-consistency",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "深色模式与主题",
+            "href": "/alpha/docs/theme-adaptation",
+            "docId": "theme-adaptation",
+            "unlisted": false
+          }
+        ],
+        "collapsed": true,
+        "collapsible": true
+      },
+      {
+        "type": "category",
+        "label": "安全与合规",
+        "items": [
+          {
+            "type": "link",
+            "label": "平台合规与权限",
+            "href": "/alpha/docs/platform-compliance",
+            "docId": "platform-compliance",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "数据合规（GDPR/CCPA）",
+            "href": "/alpha/docs/data-privacy",
+            "docId": "data-privacy",
+            "unlisted": false
+          }
+        ],
+        "collapsed": true,
+        "collapsible": true
+      },
+      {
+        "type": "category",
+        "label": "测试与质量",
+        "items": [
+          {
+            "type": "link",
+            "label": "测试体系",
+            "href": "/alpha/docs/testing",
+            "docId": "testing",
+            "unlisted": false
+          },
+          {
+            "type": "link",
+            "label": "Rust 代码规范",
+            "href": "/alpha/docs/rust-code-standards",
+            "docId": "rust-code-standards",
             "unlisted": false
           }
         ],
@@ -56,28 +363,255 @@
     ]
   },
   "docs": {
+    "account-sync": {
+      "id": "account-sync",
+      "title": "统一账户与跨端数据同步（L476）",
+      "description": "领域语义唯一事实源 = packages/core/src/account.rs（纯函数）；",
+      "sidebar": "tutorialSidebar"
+    },
+    "alerting-and-diagnosis": {
+      "id": "alerting-and-diagnosis",
+      "title": "实时告警与智能故障诊断",
+      "description": "口径：工程项——Prometheus 告警规则 + Alertmanager 路由 +",
+      "sidebar": "tutorialSidebar"
+    },
+    "analysis": {
+      "id": "analysis",
+      "title": "Alpha 平台现状分析（2026-09-27）",
+      "description": "范围：main @ e88de7e。目标：盘点各模块完成度、端到端管线真实状态、测试与部署现状，",
+      "sidebar": "tutorialSidebar"
+    },
+    "android-release": {
+      "id": "android-release",
+      "title": "Android APK/AAB 分包与多渠道发布",
+      "description": "落地三件：双 ABI 原生库（gen-bindings.sh 循环化，分包的真实前提）、",
+      "sidebar": "tutorialSidebar"
+    },
+    "android-widget": {
+      "id": "android-widget",
+      "title": "Android 桌面小组件与快捷方式",
+      "description": "两件：行情小卡（HomeWidget.kt + AlphaQuoteWidgetProvider，经典",
+      "sidebar": "tutorialSidebar"
+    },
+    "architecture": {
+      "id": "architecture",
+      "title": "Alpha 平台方案",
+      "description": "系统目标",
+      "sidebar": "tutorialSidebar"
+    },
+    "auth": {
+      "id": "auth",
+      "title": "身份认证",
+      "description": "口径：工程项——网关 JWT 强制校验 + bootstrap 签发端点 +",
+      "sidebar": "tutorialSidebar"
+    },
+    "auto-update": {
+      "id": "auto-update",
+      "title": "自动更新与增量更新机制",
+      "description": "本单落地更新分发通道的完整骨架：桌面 Tauri updater 登记（schema 已入",
+      "sidebar": "tutorialSidebar"
+    },
+    "cross-platform-architecture": {
+      "id": "cross-platform-architecture",
+      "title": "跨平台 Rust 架构设计",
+      "description": "状态：v1 草案（2026-09-28），对应 TODO「🌍 跨平台 Rust 架构设计」首项「设计统一跨平台架构」。",
+      "sidebar": "tutorialSidebar"
+    },
+    "data-lake-parquet": {
+      "id": "data-lake-parquet",
+      "title": "Parquet 数据湖存储架构设计",
+      "description": "口径：设计项（沿 L34 跨平台架构等设计项先例）——本文档定架构与物理布局，",
+      "sidebar": "tutorialSidebar"
+    },
+    "data-privacy": {
+      "id": "data-privacy",
+      "title": "GDPR / CCPA 数据合规",
+      "description": "与 docs/platform-compliance.md（L520 隐私政策与权限台账）分工：本篇是",
+      "sidebar": "tutorialSidebar"
+    },
     "deployment": {
       "id": "deployment",
-      "title": "Alpha Finance Ubuntu 24.04 部署指南",
+      "title": "部署指南",
+      "description": "本页是运维部署总览，具体步骤各有专属文档（不重复写两遍）。",
+      "sidebar": "tutorialSidebar"
+    },
+    "deployment-runbook": {
+      "id": "deployment-runbook",
+      "title": "Alpha Finance 部署文档",
       "description": "📋 目录",
+      "sidebar": "tutorialSidebar"
+    },
+    "desktop-framework": {
+      "id": "desktop-framework",
+      "title": "桌面端框架（Tauri + Rust）",
+      "description": "TODO.md L112「搭建 Tauri + Rust 桌面应用框架」的落地说明。",
+      "sidebar": "tutorialSidebar"
+    },
+    "desktop-release": {
+      "id": "desktop-release",
+      "title": "桌面端多平台安装包",
+      "description": "编排入口 scripts/desktop-release.sh（按宿主 OS 出对应面；macOS dmg/app、",
+      "sidebar": "tutorialSidebar"
+    },
+    "distributed-tracing": {
+      "id": "distributed-tracing",
+      "title": "分布式追踪系统：tracing + Jaeger",
+      "description": "落地分两层：本单实现的 trace-id 贯穿链路（可立即用）与",
+      "sidebar": "tutorialSidebar"
+    },
+    "docker-deployment": {
+      "id": "docker-deployment",
+      "title": "跨平台 Docker 镜像与容器化部署方案",
+      "description": "范围：Rust 服务镜像的多架构构建、运行时安全与编排接线。CI 发布流水线归 L470，",
       "sidebar": "tutorialSidebar"
     },
     "getting-started": {
       "id": "getting-started",
-      "title": "环境要求",
-      "description": "在开始使用 Alpha Finance 之前，请确保您的开发环境满足以下要求。",
+      "title": "快速开始",
+      "description": "环境要求",
       "sidebar": "tutorialSidebar"
     },
     "installation": {
       "id": "installation",
       "title": "安装指南",
-      "description": "本指南将帮助您在不同环境中安装和配置 Alpha Finance。",
+      "description": "Web（PWA，可安装）",
       "sidebar": "tutorialSidebar"
     },
     "intro": {
       "id": "intro",
-      "title": "简介",
-      "description": "🎯 项目概述",
+      "title": "Alpha Finance 简介",
+      "description": "Alpha Finance 是 A 股低延迟行情数据与分析平台：一套 Rust 核心（指标、",
+      "sidebar": "tutorialSidebar"
+    },
+    "ios-live-activities": {
+      "id": "ios-live-activities",
+      "title": "iOS Live Activities 与灵动岛支持——工程设计契约",
+      "description": "边界声明：mobile/ios/ 属 L119 会话交付面，本项不动其任何文件。",
+      "sidebar": "tutorialSidebar"
+    },
+    "ios-release": {
+      "id": "ios-release",
+      "title": "iOS IPA 签名与 TestFlight/App Store 发布",
+      "description": "登记性交付：scripts/ios-release.sh（可执行登记——非 macOS 环境明确",
+      "sidebar": "tutorialSidebar"
+    },
+    "market-data-api": {
+      "id": "market-data-api",
+      "title": "市场数据 API 与第三方集成",
+      "description": "data-engine（:8081）承载行情数据 REST 面；第三方两条接入路径：",
+      "sidebar": "tutorialSidebar"
+    },
+    "memory-profiling": {
+      "id": "memory-profiling",
+      "title": "内存泄漏检测与性能分析工具",
+      "description": "工具面三件：TrackingAllocator（Rust 分配计数/泄漏判读）、",
+      "sidebar": "tutorialSidebar"
+    },
+    "mobile-core-architecture": {
+      "id": "mobile-core-architecture",
+      "title": "移动端 Rust 核心库架构（JNI + UniFFI）",
+      "description": "TODO.md「📱 移动端应用」节第 1 项「设计移动端 Rust 核心库架构（JNI + UniFFI）」",
+      "sidebar": "tutorialSidebar"
+    },
+    "mobile-gestures": {
+      "id": "mobile-gestures",
+      "title": "移动端触屏手势与 UI 交互优化",
+      "description": "口径：设计文档 + 最小可编译骨架 + 单测（沿 L118/L301/L337 既定口径）——触屏手势是",
+      "sidebar": "tutorialSidebar"
+    },
+    "mobile-offline": {
+      "id": "mobile-offline",
+      "title": "移动端离线数据存储与同步机制",
+      "description": "口径：设计要点先行 + 最小可编译闭环 + 单测（沿 L118/L301/L337/L367 既定口径）——",
+      "sidebar": "tutorialSidebar"
+    },
+    "mobile-privacy": {
+      "id": "mobile-privacy",
+      "title": "移动端生物识别门与隐私保护",
+      "description": "三件套：生物识别门（BiometricGate.kt：Keystore auth-per-use 门密钥",
+      "sidebar": "tutorialSidebar"
+    },
+    "mobile-push-sync": {
+      "id": "mobile-push-sync",
+      "title": "移动端推送通知与后台同步架构",
+      "description": "口径：设计文档 + 最小可编译骨架 + 单测（沿 L118/L301 既定口径）——不引入新",
+      "sidebar": "tutorialSidebar"
+    },
+    "pgo-build-optimization": {
+      "id": "pgo-build-optimization",
+      "title": "基于 LLVM Profile 的编译优化",
+      "description": "工具面：scripts/build-pgo.sh——PGO（Profile-Guided Optimization）三阶段",
+      "sidebar": "tutorialSidebar"
+    },
+    "platform-compliance": {
+      "id": "platform-compliance",
+      "title": "平台合规性：隐私政策与权限申请",
+      "description": "本仓的合规面分两层：可门禁的权限注册表（机器对账，本单落地）与",
+      "sidebar": "tutorialSidebar"
+    },
+    "README": {
+      "id": "README",
+      "title": "Alpha 文档站",
+      "description": "Docusaurus 3 文档站，内容即 docs/ 根下的 42 篇工程文档（docusaurus.config.js"
+    },
+    "realtime-sync-protocol": {
+      "id": "realtime-sync-protocol",
+      "title": "实时数据同步协议设计要点（WebSocket 增量更新 + 版本控制）",
+      "description": "对应 TODO「实现实时数据同步协议（WebSocket 增量更新 + 版本控制）」最小可用版本。",
+      "sidebar": "tutorialSidebar"
+    },
+    "rust-code-standards": {
+      "id": "rust-code-standards",
+      "title": "Rust 代码规范",
+      "description": "状态 v1（2026-09-28），对应 TODO「定义统一的 Rust 代码规范和跨平台兼容性检查」。",
+      "sidebar": "tutorialSidebar"
+    },
+    "store-publishing": {
+      "id": "store-publishing",
+      "title": "应用商店发布",
+      "description": "打包产产物（L516–L518）→ 本项负责「上架」：元数据 + 提交流程 + 分阶段发布。",
+      "sidebar": "tutorialSidebar"
+    },
+    "testing": {
+      "id": "testing",
+      "title": "测试体系统筹",
+      "description": "四层金字塔的落点、门禁与 CI 作业矩阵一表清；缺口登记在 §4。",
+      "sidebar": "tutorialSidebar"
+    },
+    "theme-adaptation": {
+      "id": "theme-adaptation",
+      "title": "深色模式与系统主题适配",
+      "description": "全平台一览：主题的「语义」三端同构（三态偏好 system/light/dark → 生效",
+      "sidebar": "tutorialSidebar"
+    },
+    "user-guide": {
+      "id": "user-guide",
+      "title": "用户指南",
+      "description": "面向最终用户的日常操作（Web 与桌面完全一致，桌面复用同一前端）。",
+      "sidebar": "tutorialSidebar"
+    },
+    "ux-consistency": {
+      "id": "ux-consistency",
+      "title": "跨平台 UX 一致性",
+      "description": "四端（Web / Desktop / Android / iOS）同一产品语义的对账表：已对齐项给落点，",
+      "sidebar": "tutorialSidebar"
+    },
+    "version-management": {
+      "id": "version-management",
+      "title": "版本管理与热更新",
+      "description": "1. 版本唯一事实源",
+      "sidebar": "tutorialSidebar"
+    },
+    "web-cdn": {
+      "id": "web-cdn",
+      "title": "Web 端 CDN 部署与静态资源优化",
+      "description": "三件套：构建期优化（web/scripts/optimize-dist.mjs，已接入",
+      "sidebar": "tutorialSidebar"
+    },
+    "web-framework-selection": {
+      "id": "web-framework-selection",
+      "title": "跨平台 UI 框架选型决策",
+      "description": "口径：选型先定论、骨架再落地、边界先登记。本单三件：① 选型决策（本文档）；",
       "sidebar": "tutorialSidebar"
     }
   }

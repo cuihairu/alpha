@@ -1,4 +1,4 @@
-# iOS IPA 签名与 TestFlight/App Store 发布（TODO L518）
+# iOS IPA 签名与 TestFlight/App Store 发布
 
 **登记性交付**：`scripts/ios-release.sh`（可执行登记——非 macOS 环境明确
 跳过 exit 2，供 CI 矩阵无条件调用）+ 本文档的流程/密钥/审核口径。

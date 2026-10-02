@@ -1,4 +1,4 @@
-# Android 桌面小组件与快捷方式（TODO L509）
+# Android 桌面小组件与快捷方式
 
 两件：**行情小卡**（`HomeWidget.kt` + `AlphaQuoteWidgetProvider`，经典
 RemoteViews 免新依赖）与**静态快捷方式**（`shortcuts.xml` 深链预选分析）。

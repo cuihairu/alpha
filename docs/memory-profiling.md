@@ -1,4 +1,4 @@
-# 内存泄漏检测与性能分析工具（TODO L456）
+# 内存泄漏检测与性能分析工具
 
 工具面三件：**TrackingAllocator**（Rust 分配计数/泄漏判读）、
 **scripts/profile.sh**（perf 采样封装）、登记项（tokio-console / valgrind）。

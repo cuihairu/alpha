@@ -1,4 +1,4 @@
-# 桌面端多平台安装包（TODO L516）
+# 桌面端多平台安装包
 
 编排入口 `scripts/desktop-release.sh`（按宿主 OS 出对应面；macOS dmg/app、
 Windows NSIS/WiX 归 CI 矩阵对应作业，本机明确不支持跨 OS 打包——tauri
