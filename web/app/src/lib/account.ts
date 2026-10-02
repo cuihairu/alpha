@@ -272,7 +272,10 @@ export function buildRequest(state: SyncState): SyncRequest {
  * 水位单调前进——**回退水位视为协议破坏直接忽略**（服务端重启可能从低
  * 水位重发，旧增量不得被当新数据应用）。
  */
-export function applyResponse(state: SyncState, response: SyncResponse): SyncOutcome {
+export function applyResponse(
+  state: SyncState,
+  response: SyncResponse,
+): { outcome: SyncOutcome; state: SyncState } {
   const outcome: SyncOutcome = { applied: [], acked: [], conflicts: [...response.rejected] }
   const base = { ...state.base }
   const outbox = { ...state.outbox }
