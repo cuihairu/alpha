@@ -41,7 +41,10 @@ jobs:
       - name: 设置 pnpm
         uses: pnpm/action-setup@v3
         with:
-          version: latest
+          # 钉版本与本地一致（可复现；latest 已是 12.x：不读 package.json 的
+          # pnpm 字段触发 LOCKFILE_CONFIG_MISMATCH，且默认 24h minimumReleaseAge
+          # 拦昨今两日发布的锁文件条目）——升级 pnpm 走独立提交
+          version: 10.22.0
 
       - name: 获取 pnpm 存储目录
         shell: bash
