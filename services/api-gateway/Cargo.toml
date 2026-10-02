@@ -48,8 +48,10 @@ reqwest = { version = "0.11", features = ["json"] }
 tokio-tungstenite = "0.21"
 futures-util = "0.3"
 
-# JWT 认证
-jsonwebtoken = "9.2"
+# JWT 认证（10.3 起修 GHSA-h395-gr6q-cpjc 类型混淆致授权绕过）。
+# v10 起必须显式选 CryptoProvider：用 rust_crypto（纯 Rust，避免
+# aws-lc-sys 的 cmake/C 工具链依赖）
+jsonwebtoken = { version = "10.3", features = ["rust_crypto"] }
 
 # UUID
 uuid = { workspace = true }
