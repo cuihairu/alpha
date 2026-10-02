@@ -2,8 +2,9 @@
 //!
 //! 实时数据流推送服务，支持 WebSocket 连接和广播
 
+use alpha_core::alerts::{AlertEngine, AlertEvent, AlertRule, QuotePoint};
 use alpha_core::sync::build_delta;
-use alpha_protocols::websocket::{channels, SyncOp, WsMessage};
+use alpha_protocols::websocket::{channels, DataMessage, SyncOp, WsMessage};
 use alpha_storage::{InvalidMessage, RedisStreamQueue, StreamEnvelope, StreamMessage};
 use axum::{
     extract::{
@@ -93,8 +94,68 @@ impl ConnectionManager {
 struct AppState {
     connection_manager: ConnectionManager,
     data_sender: broadcast::Sender<RealTimeData>,
+    /// 业务告警引擎（L503）：规则评估 + 冷却/交叉推进状态
+    alert_engine: Arc<Mutex<AlertEngine>>,
+    /// 每符号滚动收盘窗口（PctChange/SmaCross 的 closes 数据源，封顶
+    /// ALERT_CLOSES_CAP）
+    alert_closes: Arc<Mutex<HashMap<String, Vec<f64>>>>,
+    /// 告警事件广播发送端（WS 侧 alerts 通道）
+    alert_sender: broadcast::Sender<AlertEvent>,
     /// 逐通道版本化发布状态：seq 递增 + 最近全量快照（增量基准）
     sync_state: Arc<Mutex<HashMap<String, ChannelSyncState>>>,
+}
+
+/// 每符号滚动收盘窗口封顶（够 SMA(30) 类规则回看，O(n) remove 可忽略）
+const ALERT_CLOSES_CAP: usize = 64;
+
+/// 告警规则装配（L503）：`ALPHA_ALERT_RULES` 为 AlertRule JSON 数组，
+/// 与 `alpha_core::alerts` 序列化形状一致（规则即数据）。
+/// 缺失/空/非法 = 无规则（评估面零行为，仅窗口滚动）。
+fn load_alert_rules() -> Vec<AlertRule> {
+    let raw = std::env::var("ALPHA_ALERT_RULES").unwrap_or_default();
+    load_alert_rules_from(&raw)
+}
+
+fn load_alert_rules_from(raw: &str) -> Vec<AlertRule> {
+    if raw.trim().is_empty() {
+        return Vec::new();
+    }
+    match serde_json::from_str::<Vec<AlertRule>>(raw) {
+        Ok(rules) => {
+            tracing::info!("Loaded {} alert rule(s)", rules.len());
+            rules
+        }
+        Err(err) => {
+            tracing::warn!("ALPHA_ALERT_RULES invalid, alerts disabled: {}", err);
+            Vec::new()
+        }
+    }
+}
+
+/// 业务告警评估（L503）：行情扇出同拍推进——滚动收盘窗口 → QuotePoint →
+/// 引擎评估，命中事件走 alerts 广播（`Data{channel:"alerts"}`，owner 贯穿
+/// 载荷；无订阅者/慢订阅者即丢弃，告警不回压行情面）。规则空时引擎恒
+/// 静默，仅窗口滚动（O(1)）。
+fn evaluate_alerts(app_state: &AppState, data: &RealTimeData) {
+    let closes = {
+        let mut windows = app_state.alert_closes.lock().unwrap();
+        let closes = windows.entry(data.symbol.clone()).or_default();
+        closes.push(data.price);
+        if closes.len() > ALERT_CLOSES_CAP {
+            closes.remove(0);
+        }
+        closes.clone()
+    };
+    let point = QuotePoint {
+        symbol: data.symbol.clone(),
+        price: data.price,
+        ts_ms: data.timestamp.timestamp_millis(),
+        closes,
+    };
+    let events = app_state.alert_engine.lock().unwrap().evaluate(&point);
+    for event in events {
+        let _ = app_state.alert_sender.send(event);
+    }
 }
 
 /// 服务端单通道同步状态（版本控制的服务端半边，见 [`next_versioned_frame`]）
@@ -187,11 +248,17 @@ async fn main() -> anyhow::Result<()> {
 
     // 创建广播通道
     let (data_sender, _data_receiver) = broadcast::channel(1000);
+    // 业务告警事件广播（L503）：与行情扇出平行的通道，WS 侧以 Data 帧
+    // （channel=alerts）推送；容量给足，无订阅者时 send 报错即丢弃。
+    let (alert_sender, _alert_receiver) = broadcast::channel(256);
 
     // 创建应用状态
     let app_state = Arc::new(AppState {
         connection_manager: ConnectionManager::new(),
         data_sender,
+        alert_engine: Arc::new(Mutex::new(AlertEngine::new(load_alert_rules()))),
+        alert_closes: Arc::new(Mutex::new(HashMap::new())),
+        alert_sender,
         sync_state: Arc::new(Mutex::new(HashMap::new())),
     });
 
@@ -283,6 +350,9 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
 
     // 为这个连接创建数据接收器
     let mut data_receiver = app_state.data_sender.subscribe();
+    // 告警事件接收器（L503）：连接即订阅（与行情面同原则）；规则空时
+    // 无事件，Data 帧只在命中时出现
+    let mut alert_receiver = app_state.alert_sender.subscribe();
 
     // 将连接添加到管理器
     app_state
@@ -295,7 +365,8 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
     let recv_connection_id = connection_id.clone();
 
     // 发送数据的任务：广播帧走版本化同步（首帧 Full、后续 Delta），
-    // 与 Resync 定向回复（mpsc 带外通道）合并到同一发送循环。
+    // Resync 定向回复（mpsc 带外通道）与业务告警事件（alerts 通道）
+    // 合并到同一发送循环。
     let send_sync_state = app_state.sync_state.clone();
     let recv_sync_state = app_state.sync_state.clone();
     let (resync_tx, mut resync_rx) = mpsc::unbounded_channel::<WsMessage>();
@@ -338,6 +409,30 @@ async fn handle_websocket(socket: WebSocket, app_state: Arc<AppState>) {
                         Ok(json) => Message::Text(json),
                         Err(e) => {
                             tracing::error!("Failed to serialize sync frame: {}", e);
+                            continue;
+                        }
+                    };
+                    if sender.send(message).await.is_err() {
+                        tracing::debug!("Send loop closed for {}", send_connection_id);
+                        break;
+                    }
+                }
+                alert = alert_receiver.recv() => {
+                    let event = match alert {
+                        Ok(event) => event,
+                        // 慢订阅 lagged：丢的是历史告警，连接保活继续收新事件
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    };
+                    let frame = WsMessage::Data(DataMessage {
+                        channel: channels::ALERTS.to_string(),
+                        data: serde_json::to_value(&event).unwrap_or_default(),
+                        timestamp: event.ts_ms,
+                    });
+                    let message = match serde_json::to_string(&frame) {
+                        Ok(json) => Message::Text(json),
+                        Err(e) => {
+                            tracing::error!("Failed to serialize alert frame: {}", e);
                             continue;
                         }
                     };
@@ -572,9 +667,11 @@ async fn process_realtime_message(
 ) {
     let stream_name = message.envelope.stream.clone();
     if let Some(data) = envelope_to_realtime(&message.envelope) {
-        if let Err(err) = app_state.data_sender.send(data) {
+        if let Err(err) = app_state.data_sender.send(data.clone()) {
             tracing::debug!("Failed to fan out realtime data: {}", err);
         }
+        // 告警评估与行情扇出同拍（L503）：不阻塞 ack 语义
+        evaluate_alerts(app_state, &data);
         if let Err(err) = queue.ack(&stream_name, REALTIME_GROUP, &message.id).await {
             tracing::warn!("Failed to ack stream message {}: {}", message.id, err);
         }
@@ -817,6 +914,79 @@ mod tests {
                 .unwrap()
                 .with_timezone(&chrono::Utc),
         }
+    }
+
+    /// 带告警面的测试态（其余字段与生产装配同构；timestamp 固定保证
+    /// 冷却窗口断言确定）
+    fn alert_app_state(rules: Vec<AlertRule>) -> (Arc<AppState>, broadcast::Receiver<AlertEvent>) {
+        let (alert_sender, alert_receiver) = broadcast::channel(16);
+        let state = Arc::new(AppState {
+            connection_manager: ConnectionManager::new(),
+            data_sender: broadcast::channel(16).0,
+            alert_engine: Arc::new(Mutex::new(AlertEngine::new(rules))),
+            alert_closes: Arc::new(Mutex::new(HashMap::new())),
+            alert_sender,
+            sync_state: Arc::new(Mutex::new(HashMap::new())),
+        });
+        (state, alert_receiver)
+    }
+
+    /// 规则装配：缺失/空白/非法一律回退空集（评估面零行为），合法 JSON
+    /// 按条件 flatten 形状解析
+    #[test]
+    fn test_alert_rules_loading() {
+        assert!(load_alert_rules_from("").is_empty());
+        assert!(load_alert_rules_from("   ").is_empty());
+        assert!(load_alert_rules_from("not json").is_empty());
+        let rules = load_alert_rules_from(
+            r#"[{"id":"r1","owner":"u1","type":"PriceAbove","symbol":"X","threshold":10.0,"cooldown_ms":60000}]"#,
+        );
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].id, "r1");
+    }
+
+    /// 告警评估：命中走 alerts 广播（owner 贯穿载荷），冷却窗口内重复
+    /// 越限抑制，滚动收盘窗口封顶
+    #[test]
+    fn test_alert_evaluation_broadcasts_and_suppresses() {
+        use alpha_core::alerts::AlertCondition;
+        let (state, mut rx) = alert_app_state(vec![AlertRule {
+            id: "r1".into(),
+            owner: "u1".into(),
+            condition: AlertCondition::PriceAbove {
+                symbol: "sz000001".into(),
+                threshold: 10.0,
+            },
+            cooldown_ms: 60_000,
+        }]);
+
+        evaluate_alerts(&state, &sample_data(11.0, 100));
+        let event = rx.try_recv().unwrap();
+        assert_eq!(event.rule_id, "r1");
+        assert_eq!(event.owner, "u1");
+        assert_eq!(event.symbol, "sz000001");
+
+        // timestamp 固定（同一拍）：重复越限被冷却抑制
+        evaluate_alerts(&state, &sample_data(12.0, 100));
+        assert!(rx.try_recv().is_err());
+
+        // 滚动收盘窗口封顶（后续价格在阈值下，不产生新事件）
+        for i in 0..(ALERT_CLOSES_CAP as u64 + 5) {
+            let mut d = sample_data(9.0 + i as f64 * 0.001, 1);
+            d.symbol = "sz000001".into();
+            evaluate_alerts(&state, &d);
+        }
+        let windows = state.alert_closes.lock().unwrap();
+        assert_eq!(windows["sz000001"].len(), ALERT_CLOSES_CAP);
+    }
+
+    /// 无规则（默认装配）：评估面零行为——窗口照常滚动但无事件产出
+    #[test]
+    fn test_alert_evaluation_no_rules_is_silent() {
+        let (state, mut rx) = alert_app_state(vec![]);
+        evaluate_alerts(&state, &sample_data(11.0, 100));
+        assert!(rx.try_recv().is_err());
+        assert_eq!(state.alert_closes.lock().unwrap()["sz000001"].len(), 1);
     }
 
     /// 首帧 Full（seq=1，含全字段），第二帧 Delta（seq=2，只含变化字段）

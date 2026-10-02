@@ -5,6 +5,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(unsafe_code)]
 
+pub mod alerts;
 pub mod alloc_tracking;
 pub mod analytics;
 pub mod backtest;
