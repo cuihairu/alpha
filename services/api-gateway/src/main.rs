@@ -25,6 +25,7 @@ use serde::Serialize;
 use alpha_storage::{RateDecision, RedisRateLimiter};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
+mod audit;
 mod auth;
 mod shield;
 use std::net::SocketAddr;
@@ -127,6 +128,8 @@ struct GatewayState {
     auth: auth::AuthConfig,
     /// 防爬虫/DDoS 护栏（L486：UA 分类 + 路径扫描检测 + 秒级 burst）
     shield: shield::ShieldState,
+    /// 安全审计与失败风暴检测（L487）
+    audit: audit::AuditState,
     /// Prometheus 指标渲染句柄（/metrics）
     metrics: PrometheusHandle,
 }
@@ -192,6 +195,7 @@ async fn main() -> anyhow::Result<()> {
         rate_limiter,
         rate_limit_per_minute: args.rate_limit_per_minute,
         shield: shield::ShieldState::from_env(),
+        audit: audit::AuditState::from_env(),
         metrics,
         auth: {
             let mode =
@@ -309,6 +313,14 @@ fn rate_limit_rejection(decision: &RateDecision) -> Response {
         .into_response()
 }
 
+/// 当前毫秒时间戳（审计/护栏判定面的时钟入参；纯逻辑保持可测）
+fn system_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// 护栏拒绝响应（与限流 429 同风格 JSON 错误体）
 fn shield_rejection(status: StatusCode, error: &str) -> Response {
     (
@@ -331,10 +343,8 @@ async fn shield_middleware(
     next: middleware::Next,
 ) -> Response {
     let shield = &state.shield;
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let now_ms = system_now_ms();
+    let identity = client_identity(req.headers());
 
     if shield.config.bot_deny {
         let class = shield::classify_user_agent(
@@ -344,15 +354,24 @@ async fn shield_middleware(
         );
         if class != shield::UaClass::Normal {
             metrics::counter!("alpha_gateway_shield_total", "mode" => "bot_denied").increment(1);
+            audit::emit(&audit::AuditEvent::AccessDenied {
+                identity: identity.clone(),
+                path: req.uri().path().to_string(),
+                reason: "bot".to_string(),
+            });
             return shield_rejection(StatusCode::FORBIDDEN, "blocked client signature");
         }
     }
 
-    let identity = client_identity(req.headers());
     if shield.config.burst_enabled {
         let allowed = shield.burst.lock().unwrap().try_acquire(&identity, now_ms);
         if !allowed {
             metrics::counter!("alpha_gateway_shield_total", "mode" => "burst_denied").increment(1);
+            audit::emit(&audit::AuditEvent::AccessDenied {
+                identity: identity.clone(),
+                path: req.uri().path().to_string(),
+                reason: "burst".to_string(),
+            });
             return shield_rejection(StatusCode::TOO_MANY_REQUESTS, "burst limit exceeded");
         }
     }
@@ -366,6 +385,11 @@ async fn shield_middleware(
             .observe(&identity, &path, now_ms);
         if suspicious {
             metrics::counter!("alpha_gateway_shield_total", "mode" => "scan_denied").increment(1);
+            audit::emit(&audit::AuditEvent::AccessDenied {
+                identity: identity.clone(),
+                path: req.uri().path().to_string(),
+                reason: "scan".to_string(),
+            });
             return shield_rejection(StatusCode::FORBIDDEN, "scanning behavior detected");
         }
     }
@@ -406,6 +430,11 @@ async fn rate_limit_middleware(
         next.run(req).await
     } else {
         metrics::counter!("alpha_gateway_rate_limit_total", "mode" => "denied").increment(1);
+        audit::emit(&audit::AuditEvent::AccessDenied {
+            identity: subject.clone(),
+            path: req.uri().path().to_string(),
+            reason: "rate_limit".to_string(),
+        });
         tracing::warn!(%subject, "rate limit exceeded");
         rate_limit_rejection(&decision)
     }
@@ -427,6 +456,7 @@ async fn auth_middleware(
     }
 
     let Some(token) = auth::extract_bearer(req.headers()) else {
+        // 缺失 token 是常规未认证流量，不进审计面（量纲归护栏/限流）
         return unauthorized();
     };
     match auth::verify_token(&state.auth.secret, &token) {
@@ -436,6 +466,11 @@ async fn auth_middleware(
             let path = req.uri().path().to_string();
             if !auth::authorize(&claims, &method, &path) {
                 metrics::counter!("alpha_gateway_auth_total", "mode" => "forbidden").increment(1);
+                audit::emit(&audit::AuditEvent::AccessDenied {
+                    identity: claims.sub.clone(),
+                    path,
+                    reason: "rbac".to_string(),
+                });
                 return forbidden();
             }
             metrics::counter!("alpha_gateway_auth_total", "mode" => "allowed").increment(1);
@@ -444,6 +479,11 @@ async fn auth_middleware(
         }
         Err(_) => {
             metrics::counter!("alpha_gateway_auth_total", "mode" => "denied").increment(1);
+            state.audit.observe_auth_failure(
+                &client_identity(req.headers()),
+                "invalid_token",
+                system_now_ms(),
+            );
             unauthorized()
         }
     }
@@ -473,6 +513,13 @@ async fn provision_token(
         .and_then(|v| v.to_str().ok())
         .is_some_and(|k| k == state.auth.provision_key);
     if !ok {
+        let identity = client_identity(&headers);
+        audit::emit(&audit::AuditEvent::TokenProvisionDenied {
+            identity: identity.clone(),
+        });
+        state
+            .audit
+            .note_failure_for_storm(&identity, system_now_ms());
         return unauthorized();
     }
     let sub = body
@@ -528,16 +575,21 @@ async fn provision_token(
         )
     };
     match minted {
-        Ok(token) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "success": true,
-                "access_token": token,
-                "token_type": "Bearer",
-                "expires_in": ttl_secs,
-            })),
-        )
-            .into_response(),
+        Ok(token) => {
+            audit::emit(&audit::AuditEvent::TokenProvisioned {
+                sub: sub.to_string(),
+            });
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "success": true,
+                    "access_token": token,
+                    "token_type": "Bearer",
+                    "expires_in": ttl_secs,
+                })),
+            )
+                .into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
@@ -548,6 +600,7 @@ async fn provision_token(
             .into_response(),
     }
 }
+
 /// 401 响应：WWW-Authenticate 头 + 最小 JSON 错误体（不泄露过期/伪造区分）
 fn unauthorized() -> Response {
     (
@@ -956,6 +1009,7 @@ mod tests {
             rate_limiter: None,
             rate_limit_per_minute: 120,
             shield: shield::ShieldState::from_config(shield::ShieldConfig::default()),
+            audit: audit::AuditState::new(60_000, 20),
             auth: auth::AuthConfig::disabled(),
             // build_recorder 不占全局 install（install_recorder 每进程一次，
             // 并行测试会冲突）；render 走本 recorder 快照
@@ -1135,6 +1189,55 @@ mod tests {
         assert!(
             generated.starts_with("tr-"),
             "缺失时应生成并回填: {generated}"
+        );
+    }
+
+    /// 审计面（L487）：错票据风暴 → AuthFailure 计数与风暴异常位在
+    /// /metrics 可见；rbac 拒绝 → AccessDenied 计数在位
+    #[tokio::test]
+    async fn audit_emits_on_auth_failures_and_storms() {
+        let mut state = test_state(
+            "http://127.0.0.1:1".to_string(),
+            "http://127.0.0.1:1".to_string(),
+        );
+        state.auth = auth::AuthConfig {
+            mode: auth::AuthMode::JwtRequired,
+            secret: "test-secret".to_string(),
+            expected_issuer: String::new(),
+            expected_audience: String::new(),
+            provision_key: String::new(),
+        };
+        // 阈值 3：3 次错票据即风暴
+        state.audit = audit::AuditState::new(60_000, 3);
+        let metrics_handle = state.metrics.clone();
+        let app = build_router(state);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/api/v1/stocks/X/history");
+        for _ in 0..3 {
+            let res = client
+                .get(&url)
+                .header("authorization", "Bearer not-a-token")
+                .header("x-forwarded-for", "10.9.9.9")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status().as_u16(), 401);
+        }
+        let rendered = metrics_handle.render();
+        assert!(
+            rendered.contains("alpha_gateway_audit_total"),
+            "AuthFailure 审计计数应在 /metrics 在位"
+        );
+        assert!(
+            rendered.contains("alpha_gateway_audit_anomaly_total"),
+            "风暴异常位应在 /metrics 在位：{rendered}"
         );
     }
 
