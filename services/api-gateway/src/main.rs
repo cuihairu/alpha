@@ -26,6 +26,7 @@ use alpha_storage::{RateDecision, RedisRateLimiter};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
 mod auth;
+mod shield;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
@@ -124,6 +125,8 @@ struct GatewayState {
     rate_limit_per_minute: u32,
     /// 认证配置（Off = 零行为变化直通）
     auth: auth::AuthConfig,
+    /// 防爬虫/DDoS 护栏（L486：UA 分类 + 路径扫描检测 + 秒级 burst）
+    shield: shield::ShieldState,
     /// Prometheus 指标渲染句柄（/metrics）
     metrics: PrometheusHandle,
 }
@@ -188,6 +191,7 @@ async fn main() -> anyhow::Result<()> {
         collector_url: resolve_url("ALPHA_GATEWAY_COLLECTOR_URL", &args.collector_url),
         rate_limiter,
         rate_limit_per_minute: args.rate_limit_per_minute,
+        shield: shield::ShieldState::from_env(),
         metrics,
         auth: {
             let mode =
@@ -219,14 +223,19 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn build_router(state: GatewayState) -> Router {
-    // /api 子路由：认证 + 限流中间件只包 REST 反代面（健康检查、指标、WS 与
-    // /auth/token 不占配额不鉴权）。layer 注册顺序注意：后注册先执行——auth
-    // 在 rate-limit 之后注册 → 先执行，未鉴权请求不消耗限流配额。
+    // /api 子路由：认证 + 护栏 + 限流中间件只包 REST 反代面（健康检查、
+    // 指标、WS 与 /auth/token 不占配额不鉴权）。layer 注册顺序注意：后注册
+    // 先执行——auth → shield → rate_limit：未鉴权请求不消耗护栏/限流预算，
+    // 护栏（bot/burst/扫描）挡下的流量不再消耗 Redis 限流配额。
     let api = Router::new()
         .route("/v1/*path", any(api_proxy))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            shield_middleware,
         ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -298,6 +307,70 @@ fn rate_limit_rejection(decision: &RateDecision) -> Response {
         })),
     )
         .into_response()
+}
+
+/// 护栏拒绝响应（与限流 429 同风格 JSON 错误体）
+fn shield_rejection(status: StatusCode, error: &str) -> Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "success": false,
+            "error": error,
+        })),
+    )
+        .into_response()
+}
+
+/// /api 防爬虫与 burst 护栏中间件（L486）：bot_deny 开启时拒绝空/已知
+/// 脚本 UA（403）；burst 令牌桶耗尽 429；同身份窗口内离散路径扫描超阈
+/// 403（后两者默认开启、宽阈值）。时钟只在 middleware 读（毫秒），
+/// 判定逻辑全部在 shield 纯函数面（可测、可回放）。
+async fn shield_middleware(
+    State(state): State<GatewayState>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> Response {
+    let shield = &state.shield;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    if shield.config.bot_deny {
+        let class = shield::classify_user_agent(
+            req.headers()
+                .get(header::USER_AGENT)
+                .and_then(|value| value.to_str().ok()),
+        );
+        if class != shield::UaClass::Normal {
+            metrics::counter!("alpha_gateway_shield_total", "mode" => "bot_denied").increment(1);
+            return shield_rejection(StatusCode::FORBIDDEN, "blocked client signature");
+        }
+    }
+
+    let identity = client_identity(req.headers());
+    if shield.config.burst_enabled {
+        let allowed = shield.burst.lock().unwrap().try_acquire(&identity, now_ms);
+        if !allowed {
+            metrics::counter!("alpha_gateway_shield_total", "mode" => "burst_denied").increment(1);
+            return shield_rejection(StatusCode::TOO_MANY_REQUESTS, "burst limit exceeded");
+        }
+    }
+
+    if shield.config.scan_enabled {
+        let path = req.uri().path().to_string();
+        let suspicious = shield
+            .scan
+            .lock()
+            .unwrap()
+            .observe(&identity, &path, now_ms);
+        if suspicious {
+            metrics::counter!("alpha_gateway_shield_total", "mode" => "scan_denied").increment(1);
+            return shield_rejection(StatusCode::FORBIDDEN, "scanning behavior detected");
+        }
+    }
+
+    next.run(req).await
 }
 
 /// /api 限流中间件：未启用直接放行；Redis 故障 fail-open（告警放行，
@@ -882,11 +955,122 @@ mod tests {
             collector_url: "http://127.0.0.1:1".to_string(),
             rate_limiter: None,
             rate_limit_per_minute: 120,
+            shield: shield::ShieldState::from_config(shield::ShieldConfig::default()),
             auth: auth::AuthConfig::disabled(),
             // build_recorder 不占全局 install（install_recorder 每进程一次，
             // 并行测试会冲突）；render 走本 recorder 快照
             metrics: global_metrics_handle(),
         }
+    }
+
+    /// 护栏面（L486）测试装配：上游不可达（透传 502），断言区分
+    /// 403/429 与透传状态
+    async fn spawn_shield_app(config: shield::ShieldConfig) -> String {
+        let mut state = test_state(
+            "http://127.0.0.1:1".to_string(),
+            "http://127.0.0.1:1".to_string(),
+        );
+        state.shield = shield::ShieldState::from_config(config);
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    /// burst 护栏：桶深耗尽 → 同身份 429；不同身份独立桶不受牵连
+    #[tokio::test]
+    async fn shield_burst_guard_rejects_flood_within_bucket_depth() {
+        let base = spawn_shield_app(shield::ShieldConfig {
+            burst_capacity: 1,
+            ..Default::default()
+        })
+        .await;
+        let client = reqwest::Client::new();
+        let url = format!("{base}/api/v1/stocks/X/history");
+        let first = client
+            .get(&url)
+            .header("x-forwarded-for", "10.1.1.1")
+            .send()
+            .await
+            .unwrap();
+        assert_ne!(first.status().as_u16(), 429, "桶深 1：首发放行");
+        let second = client
+            .get(&url)
+            .header("x-forwarded-for", "10.1.1.1")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(second.status().as_u16(), 429, "同身份秒级 burst 超桶拒绝");
+        let other = client
+            .get(&url)
+            .header("x-forwarded-for", "10.1.1.2")
+            .send()
+            .await
+            .unwrap();
+        assert_ne!(other.status().as_u16(), 429, "不同身份独立桶");
+    }
+
+    /// 扫描检测：同身份窗口内离散路径超阈 → 403；重复热点路径不误伤
+    #[tokio::test]
+    async fn shield_scan_detector_rejects_broad_crawling() {
+        let base = spawn_shield_app(shield::ShieldConfig {
+            scan_max_distinct: 2,
+            ..Default::default()
+        })
+        .await;
+        let client = reqwest::Client::new();
+        for path in ["/api/v1/a", "/api/v1/b"] {
+            let res = client
+                .get(format!("{base}{path}"))
+                .header("x-forwarded-for", "10.2.2.2")
+                .send()
+                .await
+                .unwrap();
+            assert_ne!(res.status().as_u16(), 403, "{path} 阈内放行");
+        }
+        let third = client
+            .get(format!("{base}/api/v1/c"))
+            .header("x-forwarded-for", "10.2.2.2")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(third.status().as_u16(), 403, "第 3 条离散路径越阈");
+    }
+
+    /// bot 拒绝：默认关（脚本 UA 透传不破坏既有调用方），开启后命中 403
+    #[tokio::test]
+    async fn shield_bot_deny_off_by_default_on_when_enabled() {
+        let client = reqwest::Client::new();
+        let base = spawn_shield_app(shield::ShieldConfig::default()).await;
+        let passthrough = client
+            .get(format!("{base}/api/v1/stocks/X/history"))
+            .header("user-agent", "curl/8.5.0")
+            .header("x-forwarded-for", "10.3.3.3")
+            .send()
+            .await
+            .unwrap();
+        assert_ne!(
+            passthrough.status().as_u16(),
+            403,
+            "默认 bot_deny 关，脚本 UA 不拒绝"
+        );
+
+        let base = spawn_shield_app(shield::ShieldConfig {
+            bot_deny: true,
+            ..Default::default()
+        })
+        .await;
+        let blocked = client
+            .get(format!("{base}/api/v1/stocks/X/history"))
+            .header("user-agent", "curl/8.5.0")
+            .header("x-forwarded-for", "10.3.3.4")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(blocked.status().as_u16(), 403);
     }
 
     #[test]

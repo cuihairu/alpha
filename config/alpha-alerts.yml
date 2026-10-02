@@ -14,6 +14,18 @@ groups:
           description: "检测到 API 请求被限流拒绝。最近 5 分钟内拒绝率>0，请检查客户端请求频率或配额设置。"
           runbook: "docs/alerting-and-diagnosis.md#gatewayratelimitexceeded"
 
+      - alert: GatewayShieldTriggered
+        # L486 护栏（bot/burst/扫描）任一模式拒绝即告警；mode ∈
+        # {bot_denied, burst_denied, scan_denied}
+        expr: rate(alpha_gateway_shield_total[5m]) > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "API 网关防护栏触发"
+          description: "护栏（UA 拒绝 / burst / 路径扫描检测）拒绝率>0，可能是爬虫或滥用流量，按 mode 标签甄别。"
+          runbook: "docs/alerting-and-diagnosis.md"
+
       - alert: GatewayUpstreamUnhealthy
         # 注意：health gauge 按 `upstream` 标签分桶（job 标签会被抓取覆盖，
         # 见 api-gateway probe_service 注释），规则必须用 upstream 而非 job。
