@@ -53,3 +53,28 @@ PWABuilder 套壳即得 MSIX，无需改代码；② 原生 MSIX：需 Windows �
 - 权限与隐私问卷答案源：`docs/platform-compliance.md` 四平台台账 +
   `docs/data-privacy.md`（数据收集声明「不收集」口径）；
 - 版本号：L472（各店展示版本与 versionCode 取发版号）。
+
+## 7. Play 自动提交器（`scripts/store-release.sh`，工程补充）
+
+§1 的 Play 入口由控制台手工操作升级为可自动化提交（后续补充件，与
+本篇「提交动作归发版时人工」的基线并存——人工仍是生产轨晋级的裁决面，
+脚本只自动化 internal 轨的机械上传）：
+
+```bash
+ALPHA_PLAY_SERVICE_ACCOUNT_JSON=/path/sa.json \
+  scripts/store-release.sh play app-play-release.aab            # 缺省 internal 轨
+scripts/store-release.sh play app.aab --dry-run                 # 无凭据演练
+scripts/store-release.sh play app.aab --track closed            # 只收 internal|closed|production
+```
+
+- **链路**：Play Developer API v3 直连（无第三方 CLI）——服务账号 JWT
+  （openssl RS256，`scope=androidpublisher`）→ token → `POST /edits`
+  （事务）→ AAB octet-stream 上传（响应 `versionCode`，即 §3 的唯一
+  判据）→ track 指派 → `:commit`（失败即弃，无残留）；
+- **验证方式**：本机 mock 服务全流程实测（token 表单/edit/bundle 字节
+  原样/track 载荷/commit 五点断言全命中）+ 缺凭据/坏凭据/坏 track 负
+  路径退出码 1；`ALPHA_PLAY_API_BASE`/`ALPHA_PLAY_TOKEN_URL` 可指向
+  mock 复现；
+- **边界**：production 晋级、staged rollout 百分比、halt/回滚仍全部在
+  Play Console（§3 灰度语义不变）；服务账号 JSON 绝不入库（§口径同
+  CI secret，接线归 L470）。
