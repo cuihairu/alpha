@@ -1,5 +1,6 @@
 import { demoQuotes } from '../demoData'
 import { useLiveQuotes } from '../hooks/useLiveQuotes'
+import { downloadCsv, quotesToCsv } from '../lib/exportCsv'
 import { changePct, type LiveQuote } from '../lib/liveFeed'
 import { fmtPrice, sma } from '../lib/indicators'
 
@@ -34,12 +35,30 @@ export function LiveQuoteBoard({
 }) {
   const { quotes, source, seq } = useLiveQuotes(symbols ?? DEFAULT_SYMBOLS)
 
+  /** L477 桌面文件导出：看板快照 → CSV 下载（桌面复用同一 web 应用） */
+  const onExport = () => {
+    const text = quotesToCsv(
+      quotes.map((q) => ({
+        symbol: q.symbol,
+        name: q.name,
+        price: q.price,
+        changePct: changePct(q),
+        volume: q.volume,
+        updatedAt: q.updatedAt,
+      })),
+    )
+    downloadCsv(`quotes-${new Date().toISOString().slice(0, 10)}.csv`, text)
+  }
+
   return (
     <div>
       <p>
         <span className={`live-pill live-pill-${source}`}>{SOURCE_LABEL[source]}</span>
         {seq !== null && <span className="live-seq">sync seq {seq}</span>}
         <span className="live-hint">地址覆盖：?feedWs=ws://host:port/ws</span>
+        <button type="button" onClick={onExport} style={{ marginLeft: 12 }}>
+          导出 CSV
+        </button>
       </p>
       <table>
         <thead>
