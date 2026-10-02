@@ -43,10 +43,19 @@ fn bench_indicators(c: &mut Criterion) {
         b.iter(|| ti.calculate_rsi(black_box(&prices_10k), black_box(14)))
     });
     group.bench_function("bollinger_10k_p20", |b| {
-        b.iter(|| ti.calculate_bollinger_bands(black_box(&prices_10k), black_box(20), black_box(2.0)))
+        b.iter(|| {
+            ti.calculate_bollinger_bands(black_box(&prices_10k), black_box(20), black_box(2.0))
+        })
     });
     group.bench_function("macd_10k", |b| {
-        b.iter(|| ti.calculate_macd(black_box(&prices_10k), black_box(12), black_box(26), black_box(9)))
+        b.iter(|| {
+            ti.calculate_macd(
+                black_box(&prices_10k),
+                black_box(12),
+                black_box(26),
+                black_box(9),
+            )
+        })
     });
     group.finish();
 }
@@ -96,7 +105,8 @@ fn bench_optimize(c: &mut Criterion) {
                 },
             ];
             let mut factory = |params: &[usize]| {
-                Box::new(SmaCrossStrategy::new(params[0], params[1])) as Box<dyn alpha_core::backtest::Strategy>
+                Box::new(SmaCrossStrategy::new(params[0], params[1]))
+                    as Box<dyn alpha_core::backtest::Strategy>
             };
             grid_search(black_box(&prices), &engine, &axes, &mut factory, 0.8).is_ok()
         })
