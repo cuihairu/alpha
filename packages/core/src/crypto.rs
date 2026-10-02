@@ -93,6 +93,13 @@ pub fn decrypt_storage(_encrypted_b64: &str) -> Result<Vec<u8>, StorageEncryptio
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::Mutex;
+
+    // 生产实现按调用读进程级 env（ALPHA_STORAGE_ENC_KEY），五条测试并发 set_var
+    // 会互相污染——登记过的偶发红：empty_payload_works 撞 decrypt_wrong_key_fails
+    // 的换键窗口（encrypt 用对键、decrypt 读到错键）。全部串行拿这把进程内锁；
+    // 锁中毒取内值继续，避免一条测试失败连锁污染其余四条。
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn set_test_key() {
         // 固定测试密钥（仅测试用，生产严禁硬编码）
@@ -102,6 +109,7 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt_roundtrip() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_test_key();
         let plaintext = b"sensitive market data: symbol=600519,price=1800.50,volume=12345";
         let encrypted = encrypt_storage(plaintext).expect("encrypt ok");
@@ -111,6 +119,7 @@ mod tests {
 
     #[test]
     fn encrypt_produces_different_ciphertext_each_time() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_test_key();
         let plaintext = b"same plaintext";
         let c1 = encrypt_storage(plaintext).expect("encrypt 1");
@@ -124,6 +133,7 @@ mod tests {
 
     #[test]
     fn decrypt_tampered_fails() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_test_key();
         let plaintext = b"data";
         let mut encrypted = encrypt_storage(plaintext).expect("encrypt");
@@ -137,6 +147,7 @@ mod tests {
 
     #[test]
     fn decrypt_wrong_key_fails() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_test_key();
         let plaintext = b"data";
         let encrypted = encrypt_storage(plaintext).expect("encrypt");
@@ -148,6 +159,7 @@ mod tests {
 
     #[test]
     fn empty_payload_works() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_test_key();
         let encrypted = encrypt_storage(b"").expect("encrypt empty");
         let decrypted = decrypt_storage(&encrypted).expect("decrypt empty");
