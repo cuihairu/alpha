@@ -37,10 +37,14 @@ fn load_key() -> Result<Key<Aes256Gcm>, StorageEncryptionError> {
     let key_bytes = BASE64
         .decode(key_b64)
         .map_err(|_| StorageEncryptionError::KeyInvalid)?;
-    if key_bytes.len() != 32 {
-        return Err(StorageEncryptionError::KeyInvalid);
-    }
-    Ok(*Key::<Aes256Gcm>::from_slice(&key_bytes))
+    // 32 字节 ⇄ [u8; 32] 的长度校验即 TryFrom 转换本身；经标准库
+    // TryFrom/From 路径构造——generic-array 0.14.9 起对 rustc ≥1.65 无条件
+    // crate 级弃用（build.rs 打 ga_is_deprecated），其固有方法（如
+    // from_slice）按 def-id 引用即触发弃用，在 `-D warnings` 门禁下编译失败
+    let key_arr: [u8; 32] = key_bytes
+        .try_into()
+        .map_err(|_| StorageEncryptionError::KeyInvalid)?;
+    Ok(Key::<Aes256Gcm>::from(key_arr))
 }
 
 /// 加密任意字节载荷（返回 IV || ciphertext || tag，Base64 编码便于存储为文本列）
@@ -70,10 +74,16 @@ pub fn decrypt_storage(encrypted_b64: &str) -> Result<Vec<u8>, StorageEncryption
     if data.len() < 12 + 16 {
         return Err(StorageEncryptionError::DecryptFailed);
     }
-    let nonce = Nonce::from_slice(&data[..12]);
+    // 同 load_key：固有方法 from_slice 在 generic-array 0.14.9 crate 级弃用
+    // 下被 `-D warnings` 拒，改走标准库 TryFrom/From；上面的 len ≥ 12+16
+    // 校验保证切片恰为 12 字节，expect 不可达
+    let nonce_arr: [u8; 12] = data[..12]
+        .try_into()
+        .expect("len >= 28 已校验，前 12 字节切片必恰为 12 字节");
+    let nonce = Nonce::from(nonce_arr);
     let ciphertext = &data[12..];
     cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|_| StorageEncryptionError::DecryptFailed)
 }
 
