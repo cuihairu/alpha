@@ -14,6 +14,15 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     pub clickhouse: ClickHouseSettings,
     pub sweeper: SweeperConfig,
+    /// 第三方集成鉴权（L504）：api_keys 非空时行情数据面统一要求 X-Api-Key
+    pub security: SecurityConfig,
+}
+
+/// API key 门配置：空表 = 关闭（内网默认形态，历史行为不变）。
+/// 运维面 /health、/metrics 不受本配置影响（存活探测与抓取器不带业务凭据）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct SecurityConfig {
+    pub api_keys: Vec<String>,
 }
 
 /// 消费组孤儿 pending 周期兜底（claim_stale：XPENDING 扫描 + XCLAIM 认领）配置
@@ -118,6 +127,8 @@ impl AppConfig {
             .expect("failed to set sweeper.interval_secs default")
             .set_default("sweeper.max_delivery_count", 5_u64)
             .expect("failed to set sweeper.max_delivery_count default")
+            .set_default("security.api_keys", Vec::<String>::new())
+            .expect("failed to set security.api_keys default")
     }
 
     fn load_from_builder(builder: ConfigBuilder<DefaultState>) -> Result<Self, ConfigError> {
@@ -169,6 +180,7 @@ mod tests {
         assert_eq!(cfg.sweeper.min_idle_ms, 30_000);
         assert_eq!(cfg.sweeper.interval_secs, 30);
         assert_eq!(cfg.sweeper.max_delivery_count, 5);
+        assert!(cfg.security.api_keys.is_empty());
     }
 
     #[test]
@@ -188,6 +200,8 @@ mod tests {
                 clickhouse:
                   enabled: true
                   url: "http://127.0.0.1:8123"
+                security:
+                  api_keys: ["third-party-key-a", "third-party-key-b"]
             "#,
             FileFormat::Yaml,
         ));
@@ -204,5 +218,9 @@ mod tests {
         );
         assert!(cfg.clickhouse.enabled);
         assert_eq!(cfg.clickhouse.url, "http://127.0.0.1:8123");
+        assert_eq!(
+            cfg.security.api_keys,
+            vec!["third-party-key-a", "third-party-key-b"]
+        );
     }
 }

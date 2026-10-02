@@ -23,7 +23,8 @@ use alpha_storage::{
 use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderValue, StatusCode},
-    response::IntoResponse,
+    middleware::Next,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -349,18 +350,29 @@ async fn main() -> anyhow::Result<()> {
 fn build_router(state: Arc<AppState>) -> Router {
     let enable_cors = state.config.server.enable_cors;
 
-    let mut router = Router::new()
-        .route("/health", get(health_check))
-        .route("/metrics", get(metrics_endpoint))
+    // 行情数据面（L504 第三方集成面）：security.api_keys 非空时统一过
+    // API key 门；/health 与 /metrics 运维面豁免（存活探测与抓取器不带
+    // 业务凭据）。空表 = 关闭，行为与历史版本一致。
+    let protected = Router::new()
         .route("/query", post(execute_query))
         .route("/clickhouse/exports", get(list_clickhouse_exports))
         .route("/clickhouse/export.parquet", get(get_clickhouse_export_parquet))
         // Back-compat (kept for existing links)
         .route("/clickhouse/market-data.parquet", get(get_clickhouse_market_data_parquet))
         .route("/stocks/:symbol/history", get(get_stock_history))
+        .route("/stocks/:symbol/history.csv", get(get_stock_history_csv))
         .route("/stocks/:symbol/indicators", get(get_stock_indicators))
         .route("/indicators/calculate", post(calculate_indicators))
         .route("/analytics/performance", post(calculate_performance))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_api_key,
+        ));
+
+    let mut router = Router::new()
+        .route("/health", get(health_check))
+        .route("/metrics", get(metrics_endpoint))
+        .merge(protected)
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
@@ -374,6 +386,53 @@ fn build_router(state: Arc<AppState>) -> Router {
     }
 
     router
+}
+
+/// 第三方集成鉴权门（L504）：`security.api_keys` 非空时要求请求携带
+/// `X-Api-Key` 且命中其一，否则 401。空表 = 关闭（内网默认形态，不带
+/// 凭据照常通行——这也是既有调用方/e2e 不受影响的原因）。
+async fn require_api_key(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Result<Response, ApiErrorResponse> {
+    let keys = state.config.security.api_keys.as_slice();
+    if keys.is_empty() {
+        return Ok(next.run(req).await);
+    }
+    let provided = req
+        .headers()
+        .get("X-Api-Key")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if api_key_matches(provided, keys) {
+        Ok(next.run(req).await)
+    } else {
+        Err(ApiErrorResponse::new(
+            StatusCode::UNAUTHORIZED,
+            "missing or invalid API key (X-Api-Key)",
+        ))
+    }
+}
+
+/// 常时形状比较：逐字节累积异或且循环走满；多 key 全量判定不因命中
+/// 提前返回（避免「第几个 key 正确」的时序侧信道）。长度不同直接不等
+/// ——长度不属秘密面（HTTP 头长度可观测），无需填充。
+fn api_key_matches(candidate: &str, keys: &[String]) -> bool {
+    let candidate = candidate.as_bytes();
+    let mut hit = false;
+    for key in keys {
+        let expected = key.as_bytes();
+        let mut diff = 1u8;
+        if candidate.len() == expected.len() {
+            diff = 0;
+            for i in 0..expected.len() {
+                diff |= candidate[i] ^ expected[i];
+            }
+        }
+        hit |= diff == 0;
+    }
+    hit
 }
 
 async fn initialize_clickhouse(settings: &ClickHouseSettings) -> Option<Arc<ClickHouseStorage>> {
@@ -961,6 +1020,32 @@ async fn execute_query(
     }))
 }
 
+/// 行情历史点集加载（JSON 与 CSV 导出两条面共用）：days 下限 1，
+/// limit 截断保留尾部（最新）窗口。
+async fn load_history_points(
+    state: &AppState,
+    symbol: &str,
+    days: u32,
+    limit: Option<usize>,
+) -> Result<Vec<TimeSeriesPoint>, ApiErrorResponse> {
+    let end_time = Utc::now();
+    let start_time = end_time - Duration::days(days as i64);
+
+    let mut points = state
+        .storage
+        .get_data_in_range(symbol, start_time, end_time)
+        .await
+        .map_err(ApiErrorResponse::from)?;
+
+    if let Some(limit) = limit {
+        if points.len() > limit {
+            points = points.split_off(points.len() - limit);
+        }
+    }
+
+    Ok(points)
+}
+
 /// 获取股票历史数据
 #[tracing::instrument(skip(state))]
 async fn get_stock_history(
@@ -970,20 +1055,7 @@ async fn get_stock_history(
 ) -> Result<Json<HistoryResponse>, ApiErrorResponse> {
     let default_days = state.config.data.lookback_days;
     let days = params.days.unwrap_or(default_days).max(1);
-    let end_time = Utc::now();
-    let start_time = end_time - Duration::days(days as i64);
-
-    let mut points = state
-        .storage
-        .get_data_in_range(&symbol, start_time, end_time)
-        .await
-        .map_err(ApiErrorResponse::from)?;
-
-    if let Some(limit) = params.limit {
-        if points.len() > limit {
-            points = points.split_off(points.len() - limit);
-        }
-    }
+    let points = load_history_points(&state, &symbol, days, params.limit).await?;
 
     let data = points
         .iter()
@@ -1004,6 +1076,33 @@ async fn get_stock_history(
         data_points: data.len(),
         data,
     }))
+}
+
+/// 第三方 CSV 导出（L504）：与 /stocks/:symbol/history 同源同参（days/
+/// limit），text/csv 输出 `timestamp,price,volume` 表头 + RFC3339 行。
+/// 三列均为无逗号类型（时间戳/浮点/整数），无需引号转义；metadata 等
+/// 富字段不进导出面（机器消费以 JSON /query 与 parquet 导出为准）。
+#[tracing::instrument(skip(state))]
+async fn get_stock_history_csv(
+    State(state): State<Arc<AppState>>,
+    Path(symbol): Path<String>,
+    Query(params): Query<HistoryParams>,
+) -> Result<impl IntoResponse, ApiErrorResponse> {
+    let default_days = state.config.data.lookback_days;
+    let days = params.days.unwrap_or(default_days).max(1);
+    let points = load_history_points(&state, &symbol, days, params.limit).await?;
+
+    let mut body = String::from("timestamp,price,volume\n");
+    for point in &points {
+        body.push_str(&point.timestamp.to_rfc3339());
+        body.push(',');
+        body.push_str(&point.value.to_string());
+        body.push(',');
+        body.push_str(&point.volume.unwrap_or(0).to_string());
+        body.push('\n');
+    }
+
+    Ok(([(header::CONTENT_TYPE, "text/csv; charset=utf-8")], body))
 }
 
 /// 获取股票指标快照
@@ -1547,6 +1646,152 @@ mod tests {
 
     fn test_config() -> Arc<AppConfig> {
         Arc::new(AppConfig::default())
+    }
+
+    #[test]
+    fn api_key_comparison_is_exact_and_full_scan() {
+        let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+
+        // 精确相等才命中（逐字节异或归零）
+        assert!(api_key_matches("secret-1", &keys(&["secret-1"])));
+        assert!(!api_key_matches("secret-2", &keys(&["secret-1"])));
+        // 长度不同直接不等（长度不属秘密面），且不 panic
+        assert!(!api_key_matches("short", &keys(&["a-much-longer-key"])));
+        // 多 key：任一命中即可；候选为空串/空表永不命中
+        assert!(api_key_matches("b", &keys(&["a", "b"])));
+        assert!(!api_key_matches("", &keys(&["a"])));
+        assert!(!api_key_matches("anything", &keys(&[])));
+    }
+
+    /// API key 门：默认关闭无感通行；配置后数据面 401/命中通行，
+    /// /health、/metrics 运维面豁免（不带业务凭据的存活探测不受影响）。
+    #[tokio::test]
+    async fn api_key_gate_off_by_default_and_enforced_when_configured() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let request = |app: Router, path: &'static str, key: Option<&str>| {
+            let mut builder = axum::http::Request::builder().uri(path);
+            if let Some(key) = key {
+                builder = builder.header("X-Api-Key", key);
+            }
+            app.oneshot(builder.body(Body::empty()).unwrap())
+        };
+
+        // 关闭态（默认配置）：无凭据照常通行
+        let off = build_router(Arc::new(AppState::new(test_config()).await));
+        let res = request(off, "/stocks/GATE/history", None).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // 开启态：数据面无凭据 401、错凭据 401、任一命中凭据 200
+        let mut config = (*test_config()).clone();
+        config.security.api_keys = vec!["k1".to_string(), "k2".to_string()];
+        let on = build_router(Arc::new(AppState::new(Arc::new(config)).await));
+        let res = request(on.clone(), "/stocks/GATE/history", None)
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        let res = request(on.clone(), "/stocks/GATE/history", Some("wrong-key"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        let res = request(on.clone(), "/stocks/GATE/history", Some("k2"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        // CSV 导出面同受门管控（任一命中 key 皆可）
+        let res = request(on.clone(), "/stocks/GATE/history.csv", Some("k1"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // 运维面豁免：无凭据的存活探测照常
+        let res = request(on, "/health", None).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    /// CSV 导出面：表头 + RFC3339 行 + 缺 volume 补 0；空数据只回表头。
+    #[tokio::test]
+    async fn history_csv_exports_header_rows_and_placeholder_volume() {
+        let state = Arc::new(AppState::new(test_config()).await);
+        let now = Utc::now();
+        state
+            .storage
+            .add_market_data_batch(&[
+                MarketData {
+                    symbol: "CSVT".to_string(),
+                    timestamp: now - Duration::minutes(2),
+                    price: 100.5,
+                    volume: 1000,
+                    bid: None,
+                    ask: None,
+                    open: None,
+                    high: None,
+                    low: None,
+                },
+                MarketData {
+                    symbol: "CSVT".to_string(),
+                    timestamp: now - Duration::minutes(1),
+                    price: 101.0,
+                    volume: 0,
+                    bid: None,
+                    ask: None,
+                    open: None,
+                    high: None,
+                    low: None,
+                },
+            ])
+            .await
+            .unwrap();
+
+        let response = get_stock_history_csv(
+            State(state.clone()),
+            Path("CSVT".to_string()),
+            Query(HistoryParams {
+                days: Some(1),
+                limit: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("text/csv; charset=utf-8"))
+        );
+        let body = String::from_utf8(
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        let lines: Vec<&str> = body.lines().collect();
+        assert_eq!(lines[0], "timestamp,price,volume");
+        assert_eq!(lines.len(), 3, "header + two seeded rows");
+        assert!(lines[1].ends_with(",100.5,1000"));
+        assert!(lines[2].ends_with(",101,0"), "zero volume exports as 0");
+
+        // 未播种 symbol：只回表头（空数据不报错，机器消费方按行数判空）
+        let response = get_stock_history_csv(
+            State(state),
+            Path("EMPTY".to_string()),
+            Query(HistoryParams {
+                days: Some(1),
+                limit: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let body = String::from_utf8(
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert_eq!(body, "timestamp,price,volume\n");
     }
 
     #[test]
