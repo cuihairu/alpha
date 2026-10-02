@@ -171,7 +171,7 @@ impl StorageBackend for CloudStorage {
             .upload(&self.config.bucket, &object_key, value)
             .await?;
 
-        let mut index = self.load_index().await?;
+        let mut index: BTreeSet<String> = self.load_index().await?;
         index.insert(key.trim_matches('/').to_string());
         self.save_index(&index).await?;
 
@@ -193,7 +193,7 @@ impl StorageBackend for CloudStorage {
             .await?;
 
         if deleted {
-            let mut index = self.load_index().await?;
+            let mut index: BTreeSet<String> = self.load_index().await?;
             index.remove(key.trim_matches('/'));
             self.save_index(&index).await?;
         }
@@ -210,9 +210,8 @@ impl StorageBackend for CloudStorage {
 
     async fn list_keys(&self, prefix: &str) -> AlphaResult<Vec<String>> {
         let prefix = prefix.trim_matches('/');
-        let mut keys = self
-            .load_index()
-            .await?
+        let index: BTreeSet<String> = self.load_index().await?;
+        let mut keys = index
             .into_iter()
             .filter(|key| key.starts_with(prefix))
             .collect::<Vec<_>>();
@@ -221,7 +220,7 @@ impl StorageBackend for CloudStorage {
     }
 
     async fn clear(&self) -> AlphaResult<()> {
-        let keys = self.load_index().await?;
+        let keys: BTreeSet<String> = self.load_index().await?;
         for key in &keys {
             let object_key = self.build_key(key)?;
             self.object_storage

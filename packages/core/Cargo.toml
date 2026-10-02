@@ -14,6 +14,9 @@ serde_json = { workspace = true }
 # 日期时间
 chrono = { workspace = true }
 
+# 监控指标
+metrics = "0.21"
+
 # UUID
 uuid = { workspace = true }
 
@@ -24,12 +27,17 @@ thiserror = { workspace = true }
 # 数值计算
 num-traits = "0.2"
 
+# 加密（存储侧静态加密 L485，std-only）
+aes-gcm = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+
 # 异步支持
 async-trait = { workspace = true }
 
 [features]
 default = ["std"]
 std = []
+crypto = ["std", "aes-gcm", "base64"]
 wasm = ["chrono/wasmbind", "uuid/js"]
 
 [dev-dependencies]

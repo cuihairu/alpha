@@ -260,13 +260,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connect_returns_error_without_db() {
+    async fn connect_returns_error_without_db() -> AlphaResult<()> {
         if database_url().is_some() {
-            return;
+            return Ok(());
         }
 
         let result = TimescaleTimeSeriesStorage::connect("postgres://invalid").await;
         assert!(result.is_err());
+        Ok(())
     }
 
     #[tokio::test]
@@ -276,36 +277,41 @@ mod tests {
             return Ok(());
         };
 
-        let storage = TimescaleTimeSeriesStorage::connect(&url).await?;
-        let symbol = format!("TEST-{}", uuid::Uuid::new_v4());
-        let data = MarketData {
-            symbol: symbol.clone(),
-            timestamp: Utc::now(),
-            price: 123.45,
-            volume: 100,
-            bid: Some(123.4),
-            ask: Some(123.5),
-            open: Some(120.0),
-            high: Some(124.0),
-            low: Some(119.5),
-        };
-        storage.insert_market_data(&data).await?;
+        // 使用内部异步块避免早期返回导致的类型推断问题
+        async fn run_test(url: String) -> AlphaResult<()> {
+            let storage = TimescaleTimeSeriesStorage::connect(&url).await?;
+            let symbol = format!("TEST-{}", uuid::Uuid::new_v4());
+            let data = MarketData {
+                symbol: symbol.clone(),
+                timestamp: Utc::now(),
+                price: 123.45,
+                volume: 100,
+                bid: Some(123.4),
+                ask: Some(123.5),
+                open: Some(120.0),
+                high: Some(124.0),
+                low: Some(119.5),
+            };
+            storage.insert_market_data(&data).await?;
 
-        let fetched = storage.latest(&symbol).await?;
-        assert!(fetched.is_some());
+            let fetched = storage.latest(&symbol).await?;
+            assert!(fetched.is_some());
 
-        let count = storage.count(&symbol).await?;
-        assert_eq!(count, 1);
+            let count = storage.count(&symbol).await?;
+            assert_eq!(count, 1);
 
-        let range = storage
-            .fetch_range(
-                &symbol,
-                data.timestamp - chrono::Duration::minutes(1),
-                data.timestamp + chrono::Duration::minutes(1),
-            )
-            .await?;
-        assert_eq!(range.len(), 1);
+            let range = storage
+                .fetch_range(
+                    &symbol,
+                    data.timestamp - chrono::Duration::minutes(1),
+                    data.timestamp + chrono::Duration::minutes(1),
+                )
+                .await?;
+            assert_eq!(range.len(), 1);
 
-        Ok(())
+            Ok(())
+        }
+
+        run_test(url).await
     }
 }

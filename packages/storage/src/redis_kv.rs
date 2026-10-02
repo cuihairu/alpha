@@ -125,13 +125,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connect_returns_error_without_redis() {
+    async fn connect_returns_error_without_redis() -> AlphaResult<()> {
         if redis_url().is_some() {
-            return;
+            return Ok(());
         }
 
         let result = RedisKvStorage::connect("redis://127.0.0.1:1", None).await;
         assert!(result.is_err());
+        Ok(())
     }
 
     #[tokio::test]
@@ -140,20 +141,25 @@ mod tests {
             return Ok(());
         };
 
-        let prefix = format!("alpha:test:{}:", uuid::Uuid::new_v4());
-        let storage = RedisKvStorage::connect(&url, Some(60)).await?;
-        let key = format!("{prefix}quote");
+        // 内部异步块避免早期返回类型推断问题
+        async fn run_test(url: String) -> AlphaResult<()> {
+            let prefix = format!("alpha:test:{}:", uuid::Uuid::new_v4());
+            let storage = RedisKvStorage::connect(&url, Some(60)).await?;
+            let key = format!("{prefix}quote");
 
-        storage.store(&key, b"hello".to_vec()).await?;
-        assert!(storage.exists(&key).await?);
-        assert_eq!(storage.retrieve(&key).await?, Some(b"hello".to_vec()));
+            storage.store(&key, b"hello".to_vec()).await?;
+            assert!(storage.exists(&key).await?);
+            assert_eq!(storage.retrieve(&key).await?, Some(b"hello".to_vec()));
 
-        let keys = storage.list_keys(&prefix).await?;
-        assert_eq!(keys, vec![key.clone()]);
+            let keys = storage.list_keys(&prefix).await?;
+            assert_eq!(keys, vec![key.clone()]);
 
-        assert!(storage.delete(&key).await?);
-        assert!(!storage.exists(&key).await?);
+            assert!(storage.delete(&key).await?);
+            assert!(!storage.exists(&key).await?);
 
-        Ok(())
+            Ok(())
+        }
+
+        run_test(url).await
     }
 }

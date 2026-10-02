@@ -108,6 +108,10 @@ config = "0.13"
 clap = { version = "4.4", features = ["derive"] }
 url = "2.5"
 
+# 加密（存储侧静态加密 L485）
+aes-gcm = "0.10"
+base64 = "0.22"
+
 # 测试
 tokio-test = "0.4"
 proptest = "1.4"

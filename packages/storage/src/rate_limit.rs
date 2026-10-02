@@ -137,26 +137,32 @@ mod tests {
         let Some(url) = redis_url() else {
             return Ok(());
         };
+
+        // 内部异步块避免早期返回类型推断问题
+        async fn run_test(url: String, prefix: String) -> AlphaResult<()> {
+            let limiter = RedisRateLimiter::connect(&url, &prefix).await?;
+
+            // 同主体 limit=2：两次放行、第三次拒绝
+            let d1 = limiter.check("client-a", 2, Duration::from_secs(1)).await?;
+            assert!(d1.allowed && d1.remaining == 1);
+            let d2 = limiter.check("client-a", 2, Duration::from_secs(1)).await?;
+            assert!(d2.allowed && d2.remaining == 0);
+            let d3 = limiter.check("client-a", 2, Duration::from_secs(1)).await?;
+            assert!(!d3.allowed);
+
+            // 主体隔离：client-b 配额不受 client-a 影响
+            let d4 = limiter.check("client-b", 2, Duration::from_secs(1)).await?;
+            assert!(d4.allowed);
+
+            // 窗口滚动（1s 窗口 + 睡过边界）：新窗口重新放行
+            tokio::time::sleep(Duration::from_millis(1100)).await;
+            let d5 = limiter.check("client-a", 2, Duration::from_secs(1)).await?;
+            assert!(d5.allowed);
+
+            Ok(())
+        }
+
         let prefix = format!("alpha:test:rl:{}:", uuid::Uuid::new_v4());
-        let limiter = RedisRateLimiter::connect(&url, &prefix).await?;
-
-        // 同主体 limit=2：两次放行、第三次拒绝
-        let d1 = limiter.check("client-a", 2, Duration::from_secs(1)).await?;
-        assert!(d1.allowed && d1.remaining == 1);
-        let d2 = limiter.check("client-a", 2, Duration::from_secs(1)).await?;
-        assert!(d2.allowed && d2.remaining == 0);
-        let d3 = limiter.check("client-a", 2, Duration::from_secs(1)).await?;
-        assert!(!d3.allowed);
-
-        // 主体隔离：client-b 配额不受 client-a 影响
-        let d4 = limiter.check("client-b", 2, Duration::from_secs(1)).await?;
-        assert!(d4.allowed);
-
-        // 窗口滚动（1s 窗口 + 睡过边界）：新窗口重新放行
-        tokio::time::sleep(Duration::from_millis(1100)).await;
-        let d5 = limiter.check("client-a", 2, Duration::from_secs(1)).await?;
-        assert!(d5.allowed);
-
-        Ok(())
+        run_test(url, prefix).await
     }
 }
