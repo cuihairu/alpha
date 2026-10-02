@@ -40,6 +40,10 @@
     "node": ">=18.0"
   },
   "pnpm": {
+    "ignoredBuiltDependencies": [
+      "core-js",
+      "core-js-pure"
+    ],
     "overrides": {
       "joi@^17": "17.13.7",
       "serialize-javascript": "7.0.5",
