@@ -43,5 +43,16 @@ module.exports = {
         },
       ],
     },
+    {
+      type: 'category',
+      label: '用户指南',
+      items: [
+        {
+          type: 'doc',
+          id: 'user-guide',
+          label: '日常操作',
+        },
+      ],
+    },
   ],
 };
