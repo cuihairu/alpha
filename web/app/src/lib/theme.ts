@@ -9,11 +9,8 @@ export type ResolvedTheme = 'light' | 'dark'
 
 export const THEME_STORAGE_KEY = 'alpha.theme'
 
-export const THEME_PREFS: Array<{ value: ThemePref; label: string }> = [
-  { value: 'system', label: '跟随系统' },
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' },
-]
+/** 三态偏好取值（展示标签走 i18n 字典 `theme.*`，本模块不持文案） */
+export const THEME_PREFS: ThemePref[] = ['system', 'light', 'dark']
 
 /** 偏好 → 生效主题：system 跟随系统深色检测，其余直取 */
 export function resolveTheme(pref: ThemePref, systemDark: boolean): ResolvedTheme {

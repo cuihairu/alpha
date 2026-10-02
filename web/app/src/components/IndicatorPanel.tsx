@@ -1,13 +1,11 @@
 import { useMemo, useState } from 'react'
 import { demoQuotes } from '../demoData'
+import { useLocale } from '../hooks/useLocale'
 import { ema, fmtPrice, sma } from '../lib/indicators'
 
 type IndicatorKind = 'sma' | 'ema'
 
-const INDICATORS: Array<{ value: IndicatorKind; label: string }> = [
-  { value: 'sma', label: 'SMA 简单移动平均' },
-  { value: 'ema', label: 'EMA 指数移动平均' },
-]
+const INDICATOR_VALUES: IndicatorKind[] = ['sma', 'ema']
 
 const PERIODS = [2, 3, 5, 10] as const
 
@@ -17,6 +15,7 @@ const PERIODS = [2, 3, 5, 10] as const
  * → 全序列对表。真值以 wasm 引擎为准，见 WasmProbe；图表化渲染归 L429。
  */
 export function IndicatorPanel() {
+  const { tr, trf } = useLocale()
   const [symbol, setSymbol] = useState(demoQuotes[0]!.symbol)
   const [indicator, setIndicator] = useState<IndicatorKind>('sma')
   const [period, setPeriod] = useState<number>(3)
@@ -30,10 +29,10 @@ export function IndicatorPanel() {
 
   return (
     <section>
-      <h2>指标分析</h2>
+      <h2>{tr('ind.title')}</h2>
       <p>
         <label>
-          代码{' '}
+          {tr('ind.symbol')}{' '}
           <select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
             {demoQuotes.map((q) => (
               <option key={q.symbol} value={q.symbol}>
@@ -43,20 +42,20 @@ export function IndicatorPanel() {
           </select>
         </label>{' '}
         <label>
-          指标{' '}
+          {tr('ind.indicator')}{' '}
           <select
             value={indicator}
             onChange={(e) => setIndicator(e.target.value as IndicatorKind)}
           >
-            {INDICATORS.map((it) => (
-              <option key={it.value} value={it.value}>
-                {it.label}
+            {INDICATOR_VALUES.map((v) => (
+              <option key={v} value={v}>
+                {tr(`ind.${v}`)}
               </option>
             ))}
           </select>
         </label>{' '}
         <label>
-          周期{' '}
+          {tr('ind.period')}{' '}
           <select value={period} onChange={(e) => setPeriod(Number(e.target.value))}>
             {PERIODS.map((p) => (
               <option key={p} value={p}>
@@ -67,14 +66,14 @@ export function IndicatorPanel() {
         </label>
       </p>
       <p>
-        末值：<b>{fmtPrice(last ?? NaN)}</b>
-        {indicator === 'sma' && '（SMA 前 period-1 位为 0.0 占位，非真实值）'}
+        {tr('ind.last')}<b>{fmtPrice(last ?? NaN)}</b>
+        {indicator === 'sma' && trf('ind.smaNote', { n: period - 1 })}
       </p>
       <table>
         <thead>
           <tr>
             <th>#</th>
-            <th>收盘</th>
+            <th>{tr('ind.colClose')}</th>
             <th>{indicator.toUpperCase()}({period})</th>
           </tr>
         </thead>

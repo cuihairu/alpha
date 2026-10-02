@@ -37,11 +37,11 @@ export function newWorkspaceId(): string {
 
 export const DEFAULT_WORKSPACE_NAME = '默认'
 
-/** 初始状态：单「默认」工作区（标的集由调用方注入演示/用户值） */
-export function initialWorkspaceState(symbols: string[]): WorkspaceState {
+/** 初始状态：单默认工作区（标的集由调用方注入演示/用户值；默认名可本地化覆盖） */
+export function initialWorkspaceState(symbols: string[], defaultName = DEFAULT_WORKSPACE_NAME): WorkspaceState {
   const id = newWorkspaceId()
   return {
-    workspaces: [{ id, name: DEFAULT_WORKSPACE_NAME, symbols: dedupe(symbols) }],
+    workspaces: [{ id, name: defaultName, symbols: dedupe(symbols) }],
     activeId: id,
   }
 }
@@ -54,9 +54,9 @@ function findByName(workspaces: Workspace[], name: string): Workspace | undefine
   return workspaces.find((w) => w.name === name)
 }
 
-/** 新建工作区：重名追加序号（「默认」→「默认 2」），新工作区空标的集 */
-export function createWorkspace(state: WorkspaceState, rawName: string): WorkspaceState {
-  const base = rawName.trim() === '' ? '工作区' : rawName.trim()
+/** 新建工作区：重名追加序号（「默认」→「默认 2」），新工作区空标的集；空名兜底可本地化覆盖 */
+export function createWorkspace(state: WorkspaceState, rawName: string, blankName = '工作区'): WorkspaceState {
+  const base = rawName.trim() === '' ? blankName : rawName.trim()
   let name = base
   let n = 2
   while (findByName(state.workspaces, name) !== undefined) {
@@ -153,12 +153,12 @@ export function serializeWorkspaceState(state: WorkspaceState): string {
   return JSON.stringify(state)
 }
 
-export function loadWorkspaceState(fallbackSymbols: string[]): WorkspaceState {
+export function loadWorkspaceState(fallbackSymbols: string[], defaultName = DEFAULT_WORKSPACE_NAME): WorkspaceState {
   try {
     return parseWorkspaceState(localStorage.getItem(WORKSPACE_STORAGE_KEY)) ??
-      initialWorkspaceState(fallbackSymbols)
+      initialWorkspaceState(fallbackSymbols, defaultName)
   } catch {
-    return initialWorkspaceState(fallbackSymbols)
+    return initialWorkspaceState(fallbackSymbols, defaultName)
   }
 }
 

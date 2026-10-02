@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { demoCandles } from '../lib/demoWalk'
+import { useLocale } from '../hooks/useLocale'
 import { loadDuckDb, seedSql, tableToRows, type DuckDbEngine } from '../lib/duckdb'
 import { capRows, type ResultTable } from '../lib/resultTable'
 import { ResultGrid } from './ResultGrid'
@@ -17,6 +18,7 @@ const DEFAULT_SQL = 'SELECT * FROM demo_quotes ORDER BY change_pct DESC'
  * 结果可视化 = ResultGrid 网格 + 行列/耗时摘要。引擎资产未拷入时明示降级。
  */
 export function SqlWorkbench() {
+  const { tr } = useLocale()
   const [state, setState] = useState<EngineState>('idle')
   const [error, setError] = useState<string>('')
   const [sql, setSql] = useState(DEFAULT_SQL)
@@ -55,24 +57,25 @@ export function SqlWorkbench() {
 
   return (
     <section>
-      <h2>SQL 工作台（DuckDB-WASM）</h2>
+      <h2>{tr('sql.title')}</h2>
       {state === 'idle' && (
         <p>
-          引擎未启用。先在 <code>web/</code> 执行 <code>npm run prepare:vendors</code>，再把{' '}
-          <code>web/vendor/duckdb/</code> 拷入 <code>web/app/public/vendor/duckdb/</code>，
-          然后加载。<button onClick={boot}>加载 SQL 引擎</button>
+          {tr('sql.idleA')}<code>web/</code>{tr('sql.idleB')}<code>npm run prepare:vendors</code>
+          {tr('sql.idleC')}<code>web/vendor/duckdb/</code>{tr('sql.idleD')}
+          <code>web/app/public/vendor/duckdb/</code>{tr('sql.idleE')}
+          <button onClick={boot}>{tr('sql.load')}</button>
         </p>
       )}
-      {state === 'loading' && <p>引擎加载中…</p>}
+      {state === 'loading' && <p>{tr('sql.loading')}</p>}
       {state === 'error' && (
         <p>
-          引擎/查询错误：<code>{error}</code>{' '}
-          <button onClick={boot}>重试加载</button>
+          {tr('sql.errorPrefix')}<code>{error}</code>{' '}
+          <button onClick={boot}>{tr('sql.retry')}</button>
         </p>
       )}
       {state === 'ready' && (
         <div>
-          <p>引擎就绪（演示表：demo_quotes / demo_candles）。编辑 SQL 后执行：</p>
+          <p>{tr('sql.ready')}</p>
           <textarea
             value={sql}
             onChange={(e) => setSql(e.target.value)}
@@ -82,7 +85,7 @@ export function SqlWorkbench() {
           />
           <p>
             <button onClick={run} disabled={running}>
-              {running ? '执行中…' : '执行查询'}
+              {running ? tr('sql.running') : tr('sql.run')}
             </button>
           </p>
           {result && <ResultGrid table={result} elapsedMs={elapsedMs} />}

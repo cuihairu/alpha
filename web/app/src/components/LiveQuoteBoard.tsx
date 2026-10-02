@@ -1,5 +1,6 @@
 import { demoQuotes } from '../demoData'
 import { useLiveQuotes } from '../hooks/useLiveQuotes'
+import { useLocale } from '../hooks/useLocale'
 import { downloadCsv, quotesToCsv } from '../lib/exportCsv'
 import { changePct, type LiveQuote } from '../lib/liveFeed'
 import { fmtPrice, sma } from '../lib/indicators'
@@ -11,14 +12,8 @@ export const DEFAULT_SYMBOLS = demoQuotes.map((q) => ({
   base: q.price,
 }))
 
-const SOURCE_LABEL: Record<string, string> = {
-  connecting: '连接 real-time-feed…',
-  feed: '实时已连接',
-  simulated: '模拟行情（feed 不可达，确定性序列）',
-}
-
-function updateTime(q: LiveQuote): string {
-  return q.updatedAt > 0 ? new Date(q.updatedAt).toLocaleTimeString() : '—'
+function updateTime(q: LiveQuote, tag: string): string {
+  return q.updatedAt > 0 ? new Date(q.updatedAt).toLocaleTimeString(tag) : '—'
 }
 
 /**
@@ -33,6 +28,7 @@ export function LiveQuoteBoard({
 }: {
   symbols?: Array<{ symbol: string; name?: string; base: number }>
 }) {
+  const { tr, trf, tag } = useLocale()
   const { quotes, source, seq } = useLiveQuotes(symbols ?? DEFAULT_SYMBOLS)
 
   /** L477 桌面文件导出：看板快照 → CSV 下载（桌面复用同一 web 应用） */
@@ -53,23 +49,23 @@ export function LiveQuoteBoard({
   return (
     <div>
       <p>
-        <span className={`live-pill live-pill-${source}`}>{SOURCE_LABEL[source]}</span>
-        {seq !== null && <span className="live-seq">sync seq {seq}</span>}
-        <span className="live-hint">地址覆盖：?feedWs=ws://host:port/ws</span>
+        <span className={`live-pill live-pill-${source}`}>{tr(`feed.${source}`)}</span>
+        {seq !== null && <span className="live-seq">{trf('feed.seq', { seq })}</span>}
+        <span className="live-hint">{tr('feed.hint')}</span>
         <button type="button" onClick={onExport} style={{ marginLeft: 12 }}>
-          导出 CSV
+          {tr('feed.export')}
         </button>
       </p>
       <table>
         <thead>
           <tr>
-            <th>代码</th>
-            <th>名称</th>
-            <th>最新价</th>
-            <th>涨跌%</th>
-            <th>SMA(5)</th>
-            <th>成交量</th>
-            <th>更新时间</th>
+            <th>{tr('feed.colSymbol')}</th>
+            <th>{tr('feed.colName')}</th>
+            <th>{tr('feed.colPrice')}</th>
+            <th>{tr('feed.colChange')}</th>
+            <th>{tr('feed.colSma')}</th>
+            <th>{tr('feed.colVolume')}</th>
+            <th>{tr('feed.colUpdated')}</th>
           </tr>
         </thead>
         <tbody>
@@ -93,8 +89,8 @@ export function LiveQuoteBoard({
                 <td>
                   {q.closes.length >= 5 ? fmtPrice(sma(q.closes, 5).at(-1) ?? NaN) : '—'}
                 </td>
-                <td>{q.volume > 0 ? q.volume.toLocaleString() : '—'}</td>
-                <td>{updateTime(q)}</td>
+                <td>{q.volume > 0 ? q.volume.toLocaleString(tag) : '—'}</td>
+                <td>{updateTime(q, tag)}</td>
               </tr>
             )
           })}

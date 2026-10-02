@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { useWorkspaces } from '../hooks/useWorkspaces'
+import { useLocale } from '../hooks/useLocale'
 import { MAX_SYMBOLS_PER_WORKSPACE, normalizeSymbol } from '../lib/workspaces'
 
 type WorkspaceActions = ReturnType<typeof useWorkspaces>
@@ -10,6 +11,7 @@ type WorkspaceActions = ReturnType<typeof useWorkspaces>
  * 活动工作区的标的集驱动实时行情看板（App 接线）。
  */
 export function WorkspaceTabs({ ws }: { ws: WorkspaceActions }) {
+  const { tr, trf } = useLocale()
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
   const [editing, setEditing] = useState(false)
@@ -34,15 +36,15 @@ export function WorkspaceTabs({ ws }: { ws: WorkspaceActions }) {
   const addSymbol = () => {
     const symbol = normalizeSymbol(symbolInput)
     if (symbol === null) {
-      setSymbolError('代码须为 6 位数字')
+      setSymbolError(tr('ws.symbolInvalid'))
       return
     }
     if (active.symbols.includes(symbol)) {
-      setSymbolError('代码已存在')
+      setSymbolError(tr('ws.symbolDup'))
       return
     }
     if (active.symbols.length >= MAX_SYMBOLS_PER_WORKSPACE) {
-      setSymbolError(`单工作区最多 ${MAX_SYMBOLS_PER_WORKSPACE} 只`)
+      setSymbolError(trf('ws.symbolCap', { max: MAX_SYMBOLS_PER_WORKSPACE }))
       return
     }
     ws.setSymbols(active.id, [...active.symbols, symbol])
@@ -67,7 +69,7 @@ export function WorkspaceTabs({ ws }: { ws: WorkspaceActions }) {
               <button
                 type="button"
                 className="workspace-tab-close"
-                aria-label={`删除 ${w.name}`}
+                aria-label={trf('ws.deleteTab', { name: w.name })}
                 onClick={() => ws.remove(w.id)}
               >
                 ×
@@ -80,18 +82,18 @@ export function WorkspaceTabs({ ws }: { ws: WorkspaceActions }) {
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="工作区名称"
+              placeholder={tr('ws.newPlaceholder')}
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') submitNew()
                 if (e.key === 'Escape') setAdding(false)
               }}
             />
-            <button type="button" onClick={submitNew}>确定</button>
+            <button type="button" onClick={submitNew}>{tr('ws.confirm')}</button>
           </span>
         ) : (
           <button type="button" className="workspace-add" onClick={() => setAdding(true)}>
-            ＋ 新建
+            {tr('ws.create')}
           </button>
         )}
       </div>
@@ -118,7 +120,7 @@ export function WorkspaceTabs({ ws }: { ws: WorkspaceActions }) {
                   setEditing(true)
                 }}
               >
-                重命名
+                {tr('ws.rename')}
               </button>
             </>
           )}
@@ -129,7 +131,7 @@ export function WorkspaceTabs({ ws }: { ws: WorkspaceActions }) {
               {s}
               <button
                 type="button"
-                aria-label={`移除 ${s}`}
+                aria-label={trf('ws.removeSymbol', { symbol: s })}
                 onClick={() => ws.setSymbols(active.id, active.symbols.filter((x) => x !== s))}
               >
                 ×
@@ -143,7 +145,7 @@ export function WorkspaceTabs({ ws }: { ws: WorkspaceActions }) {
               setSymbolInput(e.target.value)
               setSymbolError(null)
             }}
-            placeholder="加自选（6 位代码）"
+            placeholder={tr('ws.addSymbolPlaceholder')}
             onKeyDown={(e) => {
               if (e.key === 'Enter') addSymbol()
             }}

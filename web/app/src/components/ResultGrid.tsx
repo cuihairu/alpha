@@ -1,12 +1,18 @@
 import type { ResultTable } from '../lib/resultTable'
+import { useLocale } from '../hooks/useLocale'
 
 /** 查询结果网格（L430 结果可视化：表格 + 行数/截断/耗时摘要） */
 export function ResultGrid({ table, elapsedMs }: { table: ResultTable; elapsedMs: number }) {
+  const { trf, tag } = useLocale()
   return (
     <div>
       <p>
-        {table.total} 行 × {table.columns.length} 列 · {elapsedMs.toFixed(1)} ms
-        {table.truncated && `（仅显示前 ${table.rows.length} 行）`}
+        {trf('sql.summary', {
+          total: table.total.toLocaleString(tag),
+          cols: table.columns.length,
+          ms: elapsedMs.toFixed(1),
+        })}
+        {table.truncated && trf('sql.truncated', { n: table.rows.length.toLocaleString(tag) })}
       </p>
       <table>
         <thead>

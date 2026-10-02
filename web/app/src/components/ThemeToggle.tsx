@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocale } from '../hooks/useLocale'
 import {
   THEME_PREFS,
   loadThemePref,
@@ -17,6 +18,7 @@ function applyTheme(resolved: 'light' | 'dark') {
  * system 档跟随 prefers-color-scheme 实时变化；深浅令牌见 styles.css。
  */
 export function ThemeToggle() {
+  const { tr } = useLocale()
   const [pref, setPref] = useState<ThemePref>(() => loadThemePref())
 
   useEffect(() => {
@@ -31,11 +33,11 @@ export function ThemeToggle() {
 
   return (
     <label className="theme-toggle">
-      主题{' '}
+      {tr('theme.label')}{' '}
       <select value={pref} onChange={(e) => setPref(e.target.value as ThemePref)}>
-        {THEME_PREFS.map((t) => (
-          <option key={t.value} value={t.value}>
-            {t.label}
+        {THEME_PREFS.map((v) => (
+          <option key={v} value={v}>
+            {tr(`theme.${v}`)}
           </option>
         ))}
       </select>

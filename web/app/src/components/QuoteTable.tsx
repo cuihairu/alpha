@@ -1,17 +1,19 @@
 import type { QuoteSample } from '../demoData'
+import { useLocale } from '../hooks/useLocale'
 import { fmtPrice, sma } from '../lib/indicators'
 
 /** 行情演示表（L427 提取为组件，L428 起 props 驱动可复用） */
 export function QuoteTable({ quotes }: { quotes: QuoteSample[] }) {
+  const { tr } = useLocale()
   return (
     <table>
       <thead>
         <tr>
-          <th>代码</th>
-          <th>名称</th>
-          <th>价格</th>
-          <th>涨跌%</th>
-          <th>SMA(3) 末值（纯 TS）</th>
+          <th>{tr('feed.colSymbol')}</th>
+          <th>{tr('feed.colName')}</th>
+          <th>{tr('feed.colPrice')}</th>
+          <th>{tr('feed.colChange')}</th>
+          <th>{tr('feed.colSma3')}</th>
         </tr>
       </thead>
       <tbody>

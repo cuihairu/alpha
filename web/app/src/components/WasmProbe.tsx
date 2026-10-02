@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { demoQuotes } from '../demoData'
+import { useLocale } from '../hooks/useLocale'
 import { fmtPrice, sma } from '../lib/indicators'
 
 /** wasm-pack --target web 产物的最小消费面（与 wasm-analyzer 导出对齐） */
@@ -28,6 +29,7 @@ function sameSeries(a: ArrayLike<number>, b: number[]): boolean {
 
 /** WASM 引擎探针（L427 引入，L428 提取为组件）：动态 import 产物并把 wasm SMA 与纯 TS 口径对账 */
 export function WasmProbe() {
+  const { tr, trf } = useLocale()
   const [state, setState] = useState<ProbeState>('idle')
   const [wasmSma, setWasmSma] = useState<string>('')
   const [detail, setDetail] = useState<string>('')
@@ -43,9 +45,7 @@ export function WasmProbe() {
       const ts = sma(closes, 3)
       setWasmSma(fmtPrice(got[got.length - 1] ?? NaN))
       setMatches(sameSeries(got, ts))
-      setDetail(
-        `wasm 输出 ${got.length} 位 / 纯 TS 输出 ${ts.length} 位（口径：等长、前导 0.0 占位、4 位小数取整）`,
-      )
+      setDetail(trf('wasm.detail', { a: got.length, b: ts.length }))
       setState('loaded')
     } catch {
       // 产物未拷入 public/pkg（或路径不可达）：明示启用步骤，不掩盖
@@ -55,20 +55,20 @@ export function WasmProbe() {
 
   return (
     <section>
-      <h2>Rust WASM 引擎探针</h2>
+      <h2>{tr('wasm.title')}</h2>
       {state === 'idle' && (
         <p>
-          未加载。<button onClick={probe}>加载 WASM 引擎</button>
+          {tr('wasm.idle')}<button onClick={probe}>{tr('wasm.load')}</button>
         </p>
       )}
-      {state === 'loading' && <p>加载中…</p>}
+      {state === 'loading' && <p>{tr('wasm.loading')}</p>}
       {state === 'loaded' && (
         <p>
-          已加载。600519 SMA(3) 末值 = <b>{wasmSma}</b>，
+          {tr('wasm.loaded')}<b>{wasmSma}</b>{tr('wasm.sep')}
           {matches === true
-            ? '与纯 TS 口径逐位一致 ✔'
+            ? tr('wasm.match')
             : matches === false
-              ? '与纯 TS 口径不一致 ✘（请核对指标实现）'
+              ? tr('wasm.mismatch')
               : ''}
           <br />
           {detail}
@@ -76,9 +76,11 @@ export function WasmProbe() {
       )}
       {state === 'missing' && (
         <p>
-          未构建：先在 <code>web/</code> 执行 <code>npm run build:wasm</code>，再把{' '}
-          <code>web/pkg/*</code> 拷入 <code>web/app/public/pkg/</code> 后重试。
-          <button onClick={probe}>重试</button>
+          {tr('wasm.missingA')}<code>web/</code>{tr('wasm.missingB')}
+          <code>npm run build:wasm</code>{tr('wasm.missingC')}
+          <code>web/pkg/*</code>{tr('wasm.missingD')}
+          <code>web/app/public/pkg/</code>{tr('wasm.missingE')}
+          <button onClick={probe}>{tr('wasm.retry')}</button>
         </p>
       )}
     </section>

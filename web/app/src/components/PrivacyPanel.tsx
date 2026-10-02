@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useLocale } from '../hooks/useLocale'
 import {
   clearUserData,
   exportUserData,
@@ -14,6 +15,7 @@ import {
  * lib/privacy 纯函数（本组件只做装配与确认交互）。
  */
 export function PrivacyPanel() {
+  const { tr } = useLocale()
   const store = useMemo(() => localStorageStore(), [])
   const [presentKeys, setPresentKeys] = useState<string[]>(() => listUserDataKeys(store))
   const [cleared, setCleared] = useState(false)
@@ -30,7 +32,7 @@ export function PrivacyPanel() {
   }
 
   const clearAll = () => {
-    if (!window.confirm('清除全部应用本地数据（自选工作区与主题偏好）？此操作不可撤销。')) return
+    if (!window.confirm(tr('privacy.confirm'))) return
     const removed = clearUserData(store)
     setPresentKeys(listUserDataKeys(store))
     setCleared(removed.length > 0)
@@ -38,28 +40,28 @@ export function PrivacyPanel() {
 
   return (
     <section>
-      <h2>数据与隐私（L488：本地数据导出 / 清除，无账号体系）</h2>
+      <h2>{tr('privacy.title')}</h2>
       <p>
-        应用用户数据仅存本机（键清单 {USER_DATA_KEYS.length}
-        项：自选工作区、主题偏好），服务端不留存个人维度数据。义务映射见
-        <code> docs/data-privacy.md</code>。
+        {tr('privacy.descA')}{USER_DATA_KEYS.length}
+        {tr('privacy.descB')}
+        <code>docs/data-privacy.md</code>{tr('privacy.period')}
       </p>
       <ul>
         {USER_DATA_KEYS.map((key) => (
           <li key={key}>
             <code>{key}</code>
-            {presentKeys.includes(key) ? '（本机存在）' : '（未使用）'}
+            {presentKeys.includes(key) ? tr('privacy.present') : tr('privacy.absent')}
           </li>
         ))}
       </ul>
       <p>
         <button type="button" onClick={exportJson}>
-          导出我的数据（JSON）
+          {tr('privacy.export')}
         </button>{' '}
         <button type="button" onClick={clearAll}>
-          清除我的数据
+          {tr('privacy.clear')}
         </button>
-        {cleared && <span role="status"> 已清除本机应用数据。</span>}
+        {cleared && <span role="status">{tr('privacy.cleared')}</span>}
       </p>
     </section>
   )

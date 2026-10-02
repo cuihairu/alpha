@@ -8,6 +8,7 @@ import {
   type Time,
 } from 'lightweight-charts'
 import { demoCandles } from '../lib/demoWalk'
+import { useLocale } from '../hooks/useLocale'
 import { sma } from '../lib/indicators'
 
 const SMA_PERIOD = 5
@@ -18,6 +19,7 @@ const SMA_PERIOD = 5
  * A股配色：红涨绿跌。图表库选型理由见 docs/web-framework-selection.md §3。
  */
 export function PriceChart() {
+  const { trf, tr } = useLocale()
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -51,12 +53,9 @@ export function PriceChart() {
 
   return (
     <section>
-      <h2>K 线图（lightweight-charts · Canvas，红涨绿跌）</h2>
+      <h2>{tr('chart.title')}</h2>
       <div ref={containerRef} />
-      <p>
-        示例 K 线为确定性合成行情（LCG 种子生成，跳过周末，见 src/lib/demoWalk.ts）；
-        SMA({SMA_PERIOD}) 叠加线与指标面板同口径。
-      </p>
+      <p>{trf('chart.caption', { n: SMA_PERIOD })}</p>
     </section>
   )
 }

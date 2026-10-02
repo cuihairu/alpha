@@ -476,7 +476,7 @@
 - [ ] 实现统一的用户账户系统和数据同步
 - [x] 开发平台特色功能（桌面：文件导出，移动：推送通知）——桌面文件导出：`lib/exportCsv.ts` 纯函数（看板快照 → CSV：表头 `symbol,name,price,change_pct,volume,updated_at`、RFC4180 最小转义、涨跌% 两位、时间 ISO、非有限留空；空快照只回表头与服务端 `history.csv` 同形）+ `downloadCsv` Blob 下载（非浏览器环境返 false 降级）+ 看板「导出 CSV」按钮（桌面复用同一 web 应用零壳改动；与 L504 服务端单标历史导出分工=快照 vs 序列）。移动推送一半此前已由 L337（本地通知 + 可插拔通道 + FFI 六方法）与 L509（widget/快捷方式）交付，不重复造。4 个新 vitest（64/64 全绿），tsc + vite build 过（✅ 2026-10-02）
 - [x] 构建跨平台帮助文档和视频教程系统——文档站侧边栏引用的 intro/getting-started/installation/deployment 四页全部缺失（构建即断链），本项补齐 + 新增用户指南：`docs/intro.md`（产品能力总览与分流）、`getting-started.md`（环境矩阵 + 60 秒本地看板）、`installation.md`（Web PWA/桌面三平台产物/Android 双渠道/iOS 链路，各指 L516–L518 专属文档）、`deployment.md`（部署总览：最小生产拓扑 + 各场景分流表，不与 DEPLOYMENT.md/docker/web-cdn 重复写两遍）、`docs/user-guide.md`（日常操作唯一事实源：看板状态语义/工作区/CSV 导出/隐私面板/主题/移动端入口），sidebar 新增「用户指南」分类；python 核验 sidebar id 零缺失 + 站内相对链接零断链。边界：`docs/` 无 node_modules 且离线装不上依赖，docusaurus 整站构建验证归 CI；视频教程录制托管管线未立项，用户指南即文字版唯一事实源（✅ 2026-10-02）
-- [ ] 实现多语言国际化和本地化支持
+- [x] 实现多语言国际化和本地化支持——Web 端中英双语：`lib/i18n.ts` 字典基座（zh 为键全集、`en: Record<I18nKey,string>` 漏 key 编译期即拦 + 运行时非空测试 double-check；`tf` `{name}` 插值；`parseLocale` 优先级 `?lang=` > localStorage(`alpha.locale`) > `navigator.language` > 缺省 zh，非法值回退不抛错；数字/时间走 Intl tag 不在字典拼串；专有名词/机器契约/throw 文案不进字典）；`hooks/useLocale.tsx`（LocaleProvider 全树重渲染 + 持久化，隐私模式写失败不阻塞）；11 文件全量转换（App 标题/分区/语言切换器、主题三态、看板表头/状态/导出、演示表、工作区全串、指标/K 线/SQL/WASM/隐私面板；`THEME_PREFS` 去文案只留取值；工作区默认名/空名兜底可本地化注入，默认行为不变）；`toLocaleString/Time` 按语言选 tag。6 个新测试（70/70 全绿），tsc + vite build 过；残留中文仅代码注释与语言自名（中文/English）。边界：移动端（Android/iOS 字符串资源）与文档站英文版未做（✅ 2026-10-02）
 - [ ] 开发跨平台用户行为分析和产品优化系统
 
 ## 🔒 安全与合规
