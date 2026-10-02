@@ -1,0 +1,45 @@
+name: Miri
+
+# L496 Miri 内存安全静态分析：解释执行 alpha-core 全部测试（种子 0..5）。
+# unsafe 面集中地在 alpha-core（simd.rs / alloc_tracking.rs 舱位豁免），
+# 其余 crate 由 workspace 级 #![deny(unsafe_code)] 静态封死（见 ci.yml lint）。
+# 解释执行慢（≈20 分钟级），单独作业不挡常规 CI（不进 required）。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/core/**'
+      - 'scripts/check-miri.sh'
+      - '.github/workflows/miri.yml'
+  pull_request:
+    paths:
+      - 'packages/core/**'
+      - 'scripts/check-miri.sh'
+      - '.github/workflows/miri.yml'
+  # 每周例行全量跑一次（UB 与触发路径无关，时间会显形）
+  schedule:
+    - cron: '23 4 * * 1'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  miri:
+    name: Miri (alpha-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust nightly（含 miri）
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: miri-nightly
+
+      - name: Miri 门禁（种子 0..5）
+        run: scripts/check-miri.sh
