@@ -82,6 +82,20 @@ impl KeyValueStore for InMemoryKeyValueStore {
     }
 }
 
+/// `UserNotification` 的进程内回退实现：在无平台支撑时返回错误，
+/// 指引调用方退化为应用内提示（如弹窗、Banner）。符合「失败不致命，返回错误供调用方降级」口径。
+#[derive(Default)]
+pub struct InMemoryUserNotification;
+
+#[async_trait]
+impl UserNotification for InMemoryUserNotification {
+    async fn notify(&self, _title: &str, _body: &str) -> AlphaResult<()> {
+        Err(AlphaError::ConfigurationError(
+            "UserNotification: 平台实现未装配，建议在平台壳中接入系统通知（降级）".to_string(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +136,23 @@ mod tests {
         let clone = store.clone();
         let handle = tokio::spawn(async move { clone.get("shared").await.unwrap() });
         assert_eq!(handle.await.unwrap(), Some(b"1".to_vec()));
+    }
+
+    /// 契约测试：InMemoryUserNotification 始终返回错误并记录警告。
+    #[tokio::test]
+    async fn in_memory_user_notification_returns_error() {
+        let notifier = InMemoryUserNotification;
+        let result = notifier.notify("测试标题", "测试内容").await;
+        assert!(result.is_err(), "应始终返回错误");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("UserNotification"),
+            "错误信息应提及 UserNotification"
+        );
+        assert!(err_msg.contains("平台实现"), "错误信息应引导平台实现");
+        assert!(
+            err_msg.contains("建议在平台壳中接入系统通知"),
+            "错误信息应包含降级建议"
+        );
     }
 }
