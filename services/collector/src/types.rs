@@ -312,7 +312,7 @@ pub struct RequestConfig {
 }
 
 /// 解析配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParserConfig {
     /// 解析器类型
     pub parser_type: ParserType,
@@ -325,7 +325,7 @@ pub struct ParserConfig {
 }
 
 /// 存储配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StorageConfig {
     /// 存储类型
     pub storage_type: StorageType,
@@ -385,7 +385,7 @@ pub enum ParserType {
 }
 
 /// 解析规则
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParseRule {
     /// 规则名称
     pub name: String,
@@ -400,6 +400,7 @@ pub struct ParseRule {
     /// 默认值
     pub default: Option<String>,
     /// 是否必需
+    #[serde(default)]
     pub required: bool,
 }
 

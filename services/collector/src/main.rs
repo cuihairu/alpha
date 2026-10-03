@@ -22,6 +22,22 @@ async fn main() -> Result<()> {
     let collector = alpha_collector::main_simple::SimpleCollector::new(workspace_root);
     collector.start().await?;
 
+    // 任务模板（architecture §24 任务描述）：ALPHA_COLLECTOR_TASKS 指向 YAML/JSON
+    // 模板文件或目录即启动时装载登记；未设置时零行为变化。
+    // 示例见 config/collector.tasks.yaml
+    if let Ok(template_path) = std::env::var("ALPHA_COLLECTOR_TASKS") {
+        if !template_path.trim().is_empty() {
+            let (submitted, skipped) = collector
+                .submit_task_templates(std::path::Path::new(&template_path))
+                .await
+                .map_err(|e| anyhow::anyhow!("装载任务模板 {} 失败：{}", template_path, e))?;
+            info!(
+                "Collector task templates loaded: {} submitted, {} disabled-skipped",
+                submitted, skipped
+            );
+        }
+    }
+
     let router = alpha_collector::main_simple::build_router(Arc::new(collector));
 
     // 与 docker-compose/Dockerfile/dev-start 的约定一致（8083），可用 ALPHA_COLLECTOR_BIND 覆盖

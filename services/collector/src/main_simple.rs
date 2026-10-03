@@ -5,7 +5,7 @@
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -298,6 +298,43 @@ impl SimpleCollector {
             message: Some("Task submitted successfully".to_string()),
             created_at: now,
         })
+    }
+
+    /// 从 YAML/JSON 任务模板（文件或目录）批量登记任务（architecture §24 任务描述）
+    ///
+    /// 返回 `(已登记, 已跳过)`——`enabled: false` 的模板校验通过但不登记；
+    /// 每个登记的任务与 HTTP API 提交路径同事件面（广播 TaskSubmitted）。
+    pub async fn submit_task_templates<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Result<(usize, usize), String> {
+        let templates =
+            crate::task_templates::load_path(path.as_ref()).map_err(|e| e.to_string())?;
+        let mut submitted = 0;
+        let mut skipped = 0;
+        for template in templates {
+            if !template.enabled {
+                skipped += 1;
+                continue;
+            }
+            let source = self
+                .parse_task_source(&template.source_type, &template.url)
+                .await?;
+            let task = template.into_task_definition(source)?;
+            let task_id = task.id.clone();
+            {
+                let mut tasks = self.tasks.write().await;
+                tasks.insert(task_id.clone(), task.clone());
+            }
+            let event = CollectorEvent::TaskSubmitted {
+                task_id: task_id.clone(),
+                task,
+            };
+            let _ = self.event_tx.send(event);
+            info!("Task submitted from template: {}", task_id);
+            submitted += 1;
+        }
+        Ok((submitted, skipped))
     }
 
     /// 执行任务

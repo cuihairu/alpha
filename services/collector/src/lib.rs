@@ -27,6 +27,9 @@ pub mod metrics;
 // 存储层模块
 pub mod storage;
 
+// 采集任务模板（YAML/JSON 声明式任务定义，architecture §24）
+pub mod task_templates;
+
 // 预导出模块
 pub mod prelude;
 

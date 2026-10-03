@@ -1,0 +1,67 @@
+# 采集任务模板示例（architecture §24 任务描述）
+#
+# 用法：export ALPHA_COLLECTOR_TASKS=/path/to/collector.tasks.yaml（或整目录），
+# collector 启动时自动装载登记；enabled: false 的任务校验通过但不登记。
+# 字段与校验规则见 services/collector/src/task_templates.rs。
+
+version: 1
+tasks:
+  # A股日K线：东财接口，交易日 09:30 后拉取，落库 timescale
+  - id: ashare-kline-daily
+    name: A股日K线（东财）
+    description: 东财 kline 接口日频采集，前复权
+    source_type: ashare
+    url: "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    symbols: ["600519", "000001"]
+    params:
+      klt: "101"   # K线周期：日K
+      fqt: "1"     # 复权：前复权
+      fields1: "f1,f2,f3,f4,f5,f6"
+      fields2: "f51,f52,f53,f54,f55,f56,f57,f58"
+    schedule: "0 30 9 * * 1-5"
+    priority: high
+    timeout_secs: 30
+    max_retries: 5
+    request_interval_ms: 2000
+    tags: [kline, daily, eastmoney]
+    parser:
+      type: json
+      format: json
+      field_mapping:
+        close: close
+        volume: volume
+    storage:
+      type: database
+      target: timescale
+      table: kline_daily
+      batch_size: 500
+
+  # 新浪财经要闻：10 分钟一轮，内存暂存
+  - id: sina-news-roll
+    name: 新浪财经要闻
+    description: 新浪滚动财经新闻，中文
+    source_type: news
+    url: "https://feed.mix.sina.com.cn/api/roll/get"
+    params:
+      page: "1"
+      num: "50"
+    schedule: "0 */10 * * * *"
+    tags: [news, sina]
+
+  # 自定义源演示：默认停用，需要时置 enabled: true
+  - id: custom-api-demo
+    name: 自定义接口演示
+    source_type: custom
+    url: "https://example.com/api/market-data"
+    enabled: false
+    method: POST
+    body: '{"category": "index"}'
+    schedule: "0 */5 * * * *"
+    parser:
+      type: json
+      rules:
+        - name: price
+          regex: '"price":([0-9.]+)'
+        - name: symbol
+          selector: "$.data.symbol"
+          required: true
