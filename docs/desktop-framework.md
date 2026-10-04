@@ -20,8 +20,8 @@ Tauri 写死为直接依赖，整个包在 Linux CI 上无法编译——本仓�
 
 接线层的职责只有三件：解析平台路径/句柄 → 委派框架层 → 映射错误给前端。
 所有业务判断都在框架层，因此 macOS 作业覆盖的是极薄的胶水代码，而逻辑正确性
-由 124 个可在 Linux 上跑的框架层单测 + 10 个配置契约测试 + 9 个接线薄度契约测试
-保证（详见 §4.1；L113 落地后计数，见 §6）。
+由 192 个可在 Linux 上跑的框架层单测 + 11 个配置契约测试 + 17 个接线薄度契约测试
+保证（详见 §4.1；2026-10 对账实数，见 §6）。
 
 ```
 frontend (web/dist)  ──invoke──▶  gui.rs（#[tauri::command] 薄包装）
@@ -101,7 +101,7 @@ WebKitGTK，跑不了）——于是只能等 CI 的 `Desktop (macOS)` 作业变
 3. **框架层 clippy**：`cargo clippy -p alpha-desktop --no-default-features --all-targets -- -D warnings`。
 4. **框架层单测 + 配置契约测试**：`cargo test -p alpha-desktop --no-default-features --all-targets`。
 
-`desktop/tests/tauri_config.rs`（10 例）是第 1 步的**编译期加强版**：用
+`desktop/tests/tauri_config.rs`（11 例）是第 1 步的**编译期加强版**：用
 `tauri-utils` 走 `tauri_build::build()` 完全相同的解析路径
 （`config::parse::read_from` → `serde_json::from_value::<Config>`），把字段名/段位置
 是否匹配 Tauri 1.x schema 从「CI macOS 运行时才发现」前移到本地与常规 CI；另加
@@ -394,7 +394,8 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
 
 主题的真实边界（假设已注明）：Tauri 1.x **没有运行期 `Window::set_theme`**
 （v2 才有），原生窗口装饰的主题只能由 `tauri.conf.json` 创建期决定——本仓
-已配 `"theme": "System"`（跟随系统）。因此「配置强制 light/dark 覆盖」落在
+**不配该字段**（v1 schema 只收 `light/dark`，无 system 合法值；留空即创建期
+跟随 OS）。因此「配置强制 light/dark 覆盖」落在
 **内容层**：壳层 JS 按 `theme_pref` 语义在 `<html>` 落 `data-theme`
 （`system` 跟随 `prefers-color-scheme` 并监听实时切换，兼容旧 WebKit 的
 `addListener` 回退；配置返回前先按系统口径渲染），`index.html` 的 CSS 变量
@@ -430,7 +431,7 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
               ≠ 或本地无 → 落库 applied     拉取失败 → failed（本地保留）
 ```
 
-框架层断言（`desktop/src/offline.rs`，17 例，Linux 门禁可跑）：
+框架层断言（`desktop/src/offline.rs`，19 例，Linux 门禁可跑）：
 
 * `content_seq` 确定性指纹（价格位模式+成交量 FNV-1a）：同内容同指纹、
   价格/成交量任一变化指纹必变——增量的比较基准；

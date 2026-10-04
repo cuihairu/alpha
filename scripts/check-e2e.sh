@@ -158,9 +158,10 @@ ws.onmessage = (ev) => {
   seen.push(frame.type);
   if (frame.type === 'Sync') {
     // SyncMessage 契约：channel 回显 + seq 数值 + op ∈ {full, delta} + data 在位
+    // op 用大小写不敏感匹配：线上帧是 serde variant 原名 PascalCase（"Full"/"Delta"，无 rename_all）
     if (frame.channel !== 'real_time_quotes') fail(`sync.channel 未回显: ${frame.channel}`);
     if (typeof frame.seq !== 'number') fail(`sync.seq 非数值: ${frame.seq}`);
-    if (!['full', 'delta'].includes(frame.op)) fail(`sync.op 非法: ${frame.op}`);
+    if (!/^(full|delta)$/i.test(String(frame.op))) fail(`sync.op 非法: ${frame.op}`);
     if (frame.data === undefined) fail('sync.data 缺失');
     clearTimeout(timeout);
     console.log(`✅ WS 消息级：Resync → ${frame.op} 快照回帧（seq=${frame.seq}，全程帧型: ${seen.join(',')})`);

@@ -203,11 +203,6 @@ ExecStart=$WORK_DIR/target/release/alpha-api-gateway --bind 0.0.0.0:9080
 Restart=always
 RestartSec=10
 Environment=RUST_LOG=info
-Environment=CLICKHOUSE_HOST=localhost
-Environment=CLICKHOUSE_PORT=8123
-Environment=CLICKHOUSE_USER=admin
-Environment=CLICKHOUSE_PASSWORD=admin123
-Environment=CLICKHOUSE_DATABASE=alpha_finance
 
 [Install]
 WantedBy=multi-user.target
@@ -223,15 +218,12 @@ Requires=docker.service
 Type=simple
 User=$PROJECT_USER
 WorkingDirectory=$WORK_DIR
-ExecStart=$WORK_DIR/target/release/alpha-data-engine --bind 0.0.0.0:9082
+# data-engine 无 CLI 参数解析；绑址走配置覆盖（ALPHA__ 前缀 + __ 分隔）
+ExecStart=$WORK_DIR/target/release/alpha-data-engine
 Restart=always
 RestartSec=10
 Environment=RUST_LOG=info
-Environment=CLICKHOUSE_HOST=localhost
-Environment=CLICKHOUSE_PORT=8123
-Environment=CLICKHOUSE_USER=admin
-Environment=CLICKHOUSE_PASSWORD=admin123
-Environment=CLICKHOUSE_DATABASE=alpha_finance
+Environment=ALPHA__SERVER__ADDR=0.0.0.0:9082
 
 [Install]
 WantedBy=multi-user.target
@@ -247,15 +239,12 @@ Requires=docker.service
 Type=simple
 User=$PROJECT_USER
 WorkingDirectory=$WORK_DIR
-ExecStart=$WORK_DIR/target/release/alpha-real-time-feed --bind 0.0.0.0:9081
+# real-time-feed 无 CLI 参数解析；绑址走 env
+ExecStart=$WORK_DIR/target/release/alpha-real-time-feed
 Restart=always
 RestartSec=10
 Environment=RUST_LOG=info
-Environment=CLICKHOUSE_HOST=localhost
-Environment=CLICKHOUSE_PORT=8123
-Environment=CLICKHOUSE_USER=admin
-Environment=CLICKHOUSE_PASSWORD=admin123
-Environment=CLICKHOUSE_DATABASE=alpha_finance
+Environment=ALPHA_REALTIME_FEED_BIND=0.0.0.0:9081
 
 [Install]
 WantedBy=multi-user.target
@@ -388,10 +377,10 @@ echo ""
 echo "🌐 访问地址:"
 if [ -n "$SERVER_IP" ]; then
     echo "   Web 应用: http://$SERVER_IP"
-    echo "   API 文档: http://$SERVER_IP/api/docs"
+    echo "   API 网关: http://$SERVER_IP:9080/health"
 else
     echo "   Web 应用: http://localhost"
-    echo "   API 文档: http://localhost/api/docs"
+    echo "   API 网关: http://localhost:9080/health"
 fi
 echo ""
 echo "🗄️ 数据库管理:"
@@ -413,7 +402,6 @@ echo ""
 echo "🔧 维护命令:"
 echo "   更新项目: cd $WORK_DIR && sudo -u $PROJECT_USER git pull && sudo systemctl restart alpha-*"
 echo "   查看端口占用: netstat -tlnp | grep -E '9080|9081|9082|8123'"
-echo "   备份数据: ./scripts/backup.sh"
 echo ""
 
 if [ $success_count -ge 2 ]; then

@@ -15,8 +15,9 @@
   （`mobile/android/`，§9/§10.1）——绑定生成、arm64 交叉编译、Gradle
   assembleDebug 与 JVM 契约单测均在本机实证；真机/模拟器**运行**仍属边界
   （§12①）。
-* **仍不交付**（按 TODO 顺序留给后续项，见 §13）：Swift/SwiftUI 集成（271）、
-  推送/后台同步（272）、离线存储与同步（274）、触屏交互（273）。iOS 侧无
+* **仍不交付**（按 TODO 顺序留给后续项，见 §13）：L118 首轮清单中 272/273/274
+  已由 L337/L367/L390 落地，271 已有 L119 骨架（SwiftUI + UniFFI 绑定骨架 +
+  模型契约）；仍未交付的仅剩 iOS 工具链集成与真机运行。iOS 侧无
   Xcode 不可执行；Android 门禁化验证靠契约单测（CI 无 SDK 也能守结构）。
 
 ## 2. 架构总览
@@ -123,7 +124,7 @@ Kotlin/Swift 侧收到的是类型化异常（`MobileError.InvalidSymbol` 等）
 | 平台 | 产物 | 工具链 | 状态 |
 |---|---|---|---|
 | Android | `cdylib`（`libalpha_mobile.so`）+ Kotlin 绑定 | Rust + NDK clang linker + Gradle（wrapper 8.11.1 / AGP 8.9.0 / Kotlin 1.9.25） | **本机 assembleDebug 实证通过（L301）** |
-| iOS | `staticlib`（`.a`，Swift 侧经 uniffi 生成的 Swift 绑定链接） | Xcode + Swift Package（TODO 271） | 设计，无工具链 |
+| iOS | `staticlib`（`.a`，Swift 侧经 uniffi 生成的 Swift 绑定链接） | Xcode + Swift Package（TODO 271） | 骨架已落（L119：SwiftUI + UniFFI 绑定骨架 + 模型契约）；Xcode 工具链链路未启（无 macOS/Xcode） |
 
 Android 实际管线（`mobile/android/gen-bindings.sh`，两步都不需要 cargo-ndk——
 单 target 用 `CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER` 指到 NDK 的
@@ -167,7 +168,10 @@ JSON 载荷字段契约、`From<AlphaError>` 映射、空观察列表退化。
 
 ```
 mobile/android/
-├── gen-bindings.sh            绑定生成 + arm64 .so 交叉编译（§9 两步的脚本化）
+（L390 时点树；其后 L476/L509/L511/L512 又增 AccountSync/HomeWidget/Theme/
+ BiometricGate 四组件与对应测试——共 7 测试文件 54 例 @Test，见各自 docs）
+mobile/android/
+├── gen-bindings.sh            绑定生成 + 双 ABI（arm64-v8a/x86_64）.so 交叉编译（§9 两步的脚本化）
 ├── settings/build.gradle.kts  单模块 :app；AGP 8.9.0 + Kotlin 1.9.25（composeOptions 1.5.15 + serialization 插件）
 ├── gradle/wrapper/            Gradle 8.11.1（wrapper jar/属性入库）
 └── app/src/
@@ -179,9 +183,10 @@ mobile/android/
     │   ├── MarketModels.kt    FFI JSON 载荷 ↔ kotlinx-serialization（@SerialName 对齐 serde；L337 增推送/同步六载荷；L390 增离线四载荷）
     │   └── PushSyncSeam.kt    推送/同步壳层接缝（L337：NotificationDispatcher 送达口 + PeriodicSyncWorker + WorkManager 装配口径）
     ├── main/java/uniffi/alpha_mobile/alpha_mobile.kt   生成绑定（入库）
-    ├── main/jniLibs/arm64-v8a/                          .so（不入库）
-    └── test/java/.../  PayloadParsingTest.kt（10）+ GestureMappingTest.kt（3）+ OfflineSyncTest.kt（7）
-                         JVM 载荷/手势/离线契约单测（无需设备）
+    ├── main/jniLibs/{arm64-v8a,x86_64}/                .so（不入库）
+    └── test/java/.../  PayloadParsing（10）+ Gesture（3）+ OfflineSync（7）
+                         + AccountSync（15）+ Biometric（10）+ Widget（6）+ Theme（3）
+                         JVM 载荷/手势/离线契约单测 54 例（无需设备）
 ```
 
 分层纪律（由 `mobile/tests/android_shell_contract.rs` 12 例守门，CI 无 SDK 也
@@ -247,7 +252,7 @@ docs/mobile-offline.md §2——后者含产品红线：离线授权默认关闭
 | TODO 项 | 本文依托 | 状态 |
 |---|---|---|
 | 270 Android Kotlin 环境 | §9 管线 + §10.1 壳 | **L301 已落**（设计文档+骨架+契约单测；真机运行留 §12①） |
-| 271 iOS Swift 集成 | §9 staticlib + uniffi Swift 绑定 | 未启（无工具链） |
+| 271 iOS Swift 集成 | §9 staticlib + uniffi Swift 绑定 | 骨架已落（L119：SwiftUI + UniFFI 绑定骨架 + 模型契约，`mobile/ios/`）；Xcode 工程/真机工具链集成未启（无 Xcode） |
 | 272 推送/后台同步 | §5 错误分类 + `api_url` 配置槽 + JNI 回调 | **L337 已落**（决策面 notify/sync 进核心库 + FFI 六方法只增不改 + Android 接缝；见 docs/mobile-push-sync.md，真机送达/调度留其 §10） |
 | 273 触屏手势 | 平台壳职责，不在核心库 | **L367 已落**（手势集三选 + 刷新编排复用 L337 FFI，Rust 零改动；见 docs/mobile-gestures.md，真机手感留其 §8） |
 | 274 移动端离线存储与同步 | §7 `api_url` 起点；同步语义参考桌面 L116（kv 快照 + 指纹增量）同口径复用 | **L390 已落**（决策面 offline.rs + FFI 五方法只增不改 + 壳层执行面；产品红线三条款在核心库强制，见 docs/mobile-offline.md，真实网络执行/设置页留其 §9） |

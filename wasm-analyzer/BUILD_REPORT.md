@@ -1,5 +1,8 @@
 # WASM 构建报告
 
+> 本文件由 build-wasm-optimized.sh 自动生成，仅反映最后一次脚本构建
+> （当前快照 2025-11-27；web/pkg 实际产物更新，以构建时间为准）。
+
 构建时间: 2025年11月27日 星期四 23时25分42秒 CST
 构建模式: Release (最高优化)
 
@@ -7,7 +10,7 @@
 - opt-level: 3 (最高优化)
 - LTO: auto (遵循 Cargo profile 配置)
 - codegen-units: 1 (最佳优化，较慢编译)
-- SIMD: enabled (启用 SIMD 指令)
+- SIMD: wasm-opt 层面已启用（--enable-simd；rustc target-feature=+simd128 未开）
 - wasm-opt: 已使用 -Oz 优化
 
 ## 构建产物

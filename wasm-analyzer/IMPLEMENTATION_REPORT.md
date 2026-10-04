@@ -1,5 +1,8 @@
 # Alpha WASM 分析引擎完整实现报告
 
+> 历史快照（2025-11-24 时点）。当前状态以 `web/README.md`、`wasm-analyzer/src/`
+> 与 `pkg/` 实际构建产物为准；CI wasm 作业持续验证。
+
 ## 📋 项目概述
 
 已成功完善 Alpha Finance 的 WebAssembly 分析引擎，实现了生产级别的高性能数据处理能力。
@@ -7,7 +10,7 @@
 **构建时间:** 2025-11-24
 **版本:** 0.1.0
 **语言:** Rust + WebAssembly
-**优化级别:** Release (O3 + LTO)
+**优化级别:** Release（O3 + codegen-units=1；LTO 未启用，可在 profile 显式开启）
 
 ---
 
@@ -64,20 +67,17 @@ console.log(`行数: ${batch.numRows()}, 内存: ${batch.getByteSize()} bytes`);
 ```javascript
 import { IndexedDBStorage, HybridStorage } from './pkg/alpha_wasm_analyzer.js';
 
-// 初始化存储
+// 初始化存储（IndexedDBStorage 导出面：initDatabase/getStats 等）
 const storage = new IndexedDBStorage();
 await storage.initDatabase();
 
-// 存储市场数据
-await storage.storeMarketData("AAPL", marketDataArray);
-
-// 查询数据
-const data = await storage.queryMarketData("AAPL", 1000);
-
-// 使用混合存储
+// 持久化写入走 HybridStorage（putPrices/getPrices，miss 返回 NULL）
 const hybrid = new HybridStorage(10000);
 await hybrid.init();
-await hybrid.storeData("AAPL", data);
+await hybrid.putPrices("AAPL", float64Array);   // Float64Array 直写 LRU
+const prices = await hybrid.getPrices("AAPL");
+await hybrid.invalidateSymbol("AAPL");
+const stats = await hybrid.getStorageStats();   // lru_len/hits/misses/evictions
 ```
 
 ---
@@ -245,6 +245,7 @@ wasm-analyzer/
 ├── src/
 │   ├── lib.rs              # 主入口 + WasmAnalyzer
 │   ├── arrow_adapter.rs    # Arrow 零拷贝适配器
+│   ├── shared_buffer.rs    # 定长 f64 缓冲区（零拷贝直写/直读）
 │   ├── storage.rs          # IndexedDB 存储层
 │   ├── streaming.rs        # 流式处理引擎
 │   ├── worker.rs           # Web Workers 并行计算
@@ -339,13 +340,13 @@ wasm-opt = ["-O", "--enable-simd"]
 **编译优化标志:**
 ```bash
 -C opt-level=3          # 最高优化级别
--C lto=fat              # 完整链接时优化
 -C codegen-units=1      # 单编译单元 (最佳优化)
 ```
 
 **WASM 大小优化:**
-- 启用 LTO (Link Time Optimization)
-- 启用 SIMD 指令
+- LTO 未启用（可在 profile 显式开启，属未来项）
+- wasm-opt 已开 SIMD 处理（`--enable-simd`）；rustc 侧
+  `target-feature=+simd128` 未启用
 - 使用 wasm-opt -Oz 进一步压缩
 
 ---
@@ -380,12 +381,10 @@ wasm-pack test --firefox -- --test performance_tests
    - 预期性能提升: 2-4x
 
 2. **更多技术指标**
-   - KDJ, CCI, ATR, ADX
+   - KDJ, ADX（CCI/ATR 已上线，见 `lib.rs` calculateCCI/calculateATR）
    - 形态识别算法
 
-3. **策略回测引擎**
-   - 完整的回测框架
-   - 多策略并行回测
+3. ~~策略回测引擎~~（已交付：`backtestSmaCross`/`backtestSmaCrossPtr`）
 
 4. **更智能的缓存策略**
    - LRU 缓存
@@ -430,7 +429,7 @@ MIT License
 ## 📧 联系方式
 
 Alpha Finance Team
-GitHub: https://github.com/alpha-finance/platform
+GitHub: https://github.com/cuihairu/alpha
 
 ---
 

@@ -2,14 +2,15 @@
 
 ## 系统目标
 - 以自建内网集群为主，持续采集 A 股公开/免费的行情、公告、财报、新闻与舆情等数据。
-- 提供统一、低延迟、可订阅的 API（REST/gRPC/WebSocket），通过 Cloudflare Tunnel 暴露给外部客户端。
+- 提供统一、低延迟、可订阅的 API（REST/WebSocket 走网关，gRPC 由 data-engine 直接提供）；
+  通过 Cloudflare Tunnel 暴露给外部客户端为规划项，当前未配置。
 - 架构需要可扩展（轻松增加数据源）、易回放（可追溯原始数据）、并具备完善的监控与告警能力。
 
 ## 总体架构
 ```
-Crawler (Py/Rust) -> Redis Streams -> Rust Processor -> TimescaleDB/ClickHouse/Redis
-                                                   -> Object Storage (MinIO)
-                                        -> API Gateway (Rust) -> Cloudflare Tunnel
+Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB/ClickHouse/Redis
+                                                   -> 对象存储后端 (packages/storage，已备未接线)
+                                        -> API Gateway (Rust) -> Cloudflare Tunnel（规划）
 ```
 
 ### 功能分层
@@ -23,41 +24,50 @@ Crawler (Py/Rust) -> Redis Streams -> Rust Processor -> TimescaleDB/ClickHouse/R
 ### 1. 采集调度
 - **任务描述**：以 YAML/JSON 定义每个数据源（URL、请求参数、解析策略、刷新频率）。已落地：`services/collector/src/task_templates.rs`（装载/校验/转 `TaskDefinition`），`ALPHA_COLLECTOR_TASKS` 指向模板文件或目录即启动装载，示例见 `config/collector.tasks.yaml`。
 - **刷新频率执行面**：`services/collector/src/cron_scheduler.rs`（5/6 段 cron 解析 + 每秒扫描派发，`schedule` 到期自动执行，执行中不重入）；模板校验与调度执行共用同一解析器。执行链路复用 HTTP `POST /tasks/:id/execute`。
-- **执行引擎**：Python（requests/Playwright/asyncio）为主，部分场景可选 Go 或 Node.js。
-- **抗封策略**：UA/Headers 轮换、可插拔代理池、随机延迟、失败自动重试。
-- **产出**：遵循 Protobuf Schema 的结构化 JSON，写入 Kafka/NATS。
+- **执行引擎**：多语言执行器（Python/Node/Go/Rust/Shell，`multilang_simple.rs`），默认走模板解析器（json/database 等）；Playwright 未接入。
+- **抗封策略**：可插拔代理池（`ProxyPool`，可选）、失败自动重试（jittered backoff）；UA/Headers 轮换与调度级随机延迟未实现。
+- **产出**：结构化 JSON 写入 Redis Streams（`quotes.raw` 等）；Protobuf 仅用于 data-engine 的 gRPC 面。
 
 ### 2. 消息队列
-- 当前默认方案：Redis Streams（stream：`quotes.raw`/`quotes.normalized`/`news.raw`/`announcements.raw`/`quotes.dlq`）。
-- 第二阶段升级：NATS JetStream，适用于需要更强 replay、多消费者和消费位点管理的场景。
-- 第三阶段升级：Kafka，仅在吞吐、审计、回放需求明确后引入。
+- 当前默认方案：Redis Streams（stream：`quotes.raw`/`quotes.normalized`/`news.raw`/`announcements.raw`/`quotes.dlq`；实际在用的是 quotes 三流，公告/新闻域未实现）。
+- NATS JetStream / Kafka 为阶段化预留，architecture-review §2.4 已裁定不立项
+  （吞吐、审计、回放需求明确前不升级）。
 - 当前实现已支持 consumer group + ack，异常消息进入 dead-letter stream。
-- 当前 stream envelope 已统一包含：`source`、`version`、`ingest_ts`、`payload_hash`、`symbol`、`payload`，便于去重与审计。
+- 当前 stream envelope 采用 Envelope v2（`packages/protocols/src/events.rs`）：v1 十字段
+  （含 `source`、`version`、`ingest_ts`、`payload_hash`、`symbol`、`payload`）+ 加性字段
+  `source_event_id`/`market`/`event_time`/`process_time`/`sequence`/`trace_id`，便于去重与审计。
 
 ### 3. 数据处理/ETL（Rust）
-- **消费者**：当前使用 Redis Streams 轮询/消费组；后续可切换到 NATS JetStream 或 Kafka。
-- **校验**：Schema 校验、字段缺失补全、异常值（价格\<0等）隔离到 quarantine 表。
-- **衍生计算**：复权价、均线、波动率、行业/概念映射、资金流归集。
-- **批处理**：每日/每周任务校准前复权因子、同步行业分类、重算指标。
+- **消费者**：当前使用 Redis Streams 轮询/消费组；队列升级不立项（见 §2）。
+- **校验**：Schema 校验、字段缺失补全、异常值（价格\<0等）隔离到 DLQ
+  （`quarantine_invalid` → `quotes.dlq`，非数据库表）。
+- **衍生计算**：查询态指标（SMA/RSI/Bollinger 等）已实现；复权价、行业/概念映射、
+  资金流归集为规划项，无代码。
+- **批处理**：每日/每周任务（复权因子校准、行业分类同步）为规划项，无调度实现。
 
 ### 4. 存储
-- **TimescaleDB/PostgreSQL**：K 线、tick、指标，配合压缩与分区。
-- **ClickHouse**：公告/新闻/舆情，利用倒排索引和全文检索。
-- **Redis**：热点缓存、限流 token、去重锁、任务租约。
-- **对象存储（MinIO/S3）**：落地原始响应与快照，方便回溯。
+- **TimescaleDB/PostgreSQL**：K 线、tick、指标的可选镜像（`storage.persistence_enabled`）；
+  压缩与分区策略未配置（当前仅 `create_hypertable`）。
+- **ClickHouse**：parquet 导出归档（`/clickhouse/export.parquet` 等两个导出端点，无
+  INSERT 写路径）；公告/新闻/舆情主仓与倒排/全文索引为规划项。
+- **Redis**：热点缓存、限流 token、去重锁。
+- **对象存储（MinIO/S3）**：`packages/storage` 后端已实现，原始响应落盘未接线。
 
 ### 5. API 服务
-- **网关**：Rust (Axum + Tonic)，提供 REST/gRPC/WebSocket 三种接口。
-- **鉴权**：API Key + HMAC，可配置配额、限频（Redis）。
+- **网关**：Axum，REST（`/api/v1/*` 反代）+ WebSocket 反代 + 健康/指标面；网关不终结
+  gRPC，gRPC 由 data-engine（tonic，`:50051`）直接提供。
+- **鉴权**：JWT（HS256 自签 / OIDC）+ RBAC（viewer/operator/admin），配额限频走
+  RedisRateLimiter；data-engine 另有 X-Api-Key 门。均默认关闭。
 - **实时推送**：WebSocket 订阅 topic（如 `quotes.{symbol}`），内部使用发布/订阅。
-- **查询层**：对 TimescaleDB、ClickHouse 建立只读连接池，支持分页与多维过滤。
+- **查询层**：内存时序 + 可选 Timescale 镜像；ClickHouse 只读用于导出，不参与查询。
 
 ### 6. 监控与运维
 - **指标**：Prometheus + Grafana，观测爬虫成功率、队列积压、API 延迟、数据库资源。
-- **日志**：集中到 Loki/ELK，按 `trace_id`/`source` 关联。
-- **告警**：Alertmanager -> 钉钉/飞书/邮件。
-- **CI/CD**：GitHub Actions 打包 Go 静态二进制与 Docker 镜像；内网服务器使用 systemd 或容器编排。
-- **安全**：Cloudflare Tunnel 暴露网关；内部服务仅限内网访问；API 强制 TLS、配额/限频。
+- **日志**：集中到 Loki（promtail 抓取），按 `trace_id`/`source` 关联。
+- **告警**：Alertmanager -> 钉钉/企业微信/Slack/PagerDuty（`services/alert-webhook`）。
+- **CI/CD**：GitHub Actions 打包 Rust 多目标二进制与 Docker 镜像；内网服务器使用 systemd 或容器编排。
+- **安全**：Cloudflare Tunnel 暴露网关为规划项；内部服务仅限内网访问；TLS 由反代终结
+  （服务内 TLS 接线未落，见 deployment-runbook §8）。
 
 ## 数据流
 1. 调度器触发采集任务，爬虫访问数据源并写入 Redis stream，如 `quotes.raw`。
@@ -67,19 +77,25 @@ Crawler (Py/Rust) -> Redis Streams -> Rust Processor -> TimescaleDB/ClickHouse/R
 5. 监控系统实时收集各组件指标，触发自动化告警。
 
 ## 技术选型摘要
-- **语言**：Rust（核心处理、API、调度器）、Python/Node（爬虫）。
-- **通信**：Redis Streams（当前） -> NATS/Kafka（后续）、gRPC + Protobuf、HTTP/JSON。
-- **存储**：TimescaleDB/PostgreSQL、ClickHouse、Redis、MinIO。
-- **其他**：Grafana/Prometheus/Loki、Cloudflare Tunnel、GitHub Actions。
+- **语言**：Rust（核心处理、API、调度器）；采集模板支持 Python/Node/Go/Rust/Shell。
+- **通信**：Redis Streams（当前，唯一在用）；NATS/Kafka 不立项（review §2.4）；
+  gRPC + Protobuf（data-engine）；HTTP/JSON（网关与 REST 面）。
+- **存储**：TimescaleDB/PostgreSQL、ClickHouse、Redis；MinIO/S3 后端已备未接线。
+- **其他**：Grafana/Prometheus/Loki、GitHub Actions。
 
 ## 部署策略
-- 单机 PoC：Docker Compose（Redis、TimescaleDB、ClickHouse、MinIO、Prometheus、Grafana）。
-- 生产：多节点（采集节点、处理节点、存储集群）；systemd or K8s；Cloudflare Tunnel 部署在 API 节点。
-- 灰度能力：Kafka topic 与数据库 schema 带版本号；API 通过路由实现 v1/v2 并行。
+- 单机 PoC：Docker Compose（15 服务：应用 5 + TimescaleDB/ClickHouse/Redis +
+  Prometheus/Grafana/Loki/promtail/Alertmanager/alert-webhook + web-origin）。
+- 生产：多节点（采集节点、处理节点、存储集群）为规划口径；systemd 单机为当前唯一
+  生产路径（`scripts/deploy-ubuntu.sh`），K8s 不立项；Cloudflare Tunnel 部署在 API
+  节点为规划项。
+- 灰度能力：API 通过路由实现 v1/v2 并行；Kafka topic 版本号随队列不立项而作废。
 
 ## 后续路线
-1. 完成 Redis Streams 消息 envelope 与 stream 命名约定。
-2. 初始化 Rust 模块（`services`：collector、data-engine、api-gateway、real-time-feed；`packages`：protocols、storage、core）。
-3. 构建采集框架（任务模板、代理池、调度）。
-4. 上线最小可用数据集（指数/主板行情 + 公告）。
-5. 补齐监控与自动告警，结合 Cloudflare Tunnel 发布外部访问地址。
+1. ✅ 完成 Redis Streams 消息 envelope 与 stream 命名约定（Envelope v2，0af6fe0）。
+2. ✅ 初始化 Rust 模块（`services`：collector、data-engine、api-gateway、real-time-feed、
+   alert-webhook；`packages`：protocols、storage、core）。
+3. ✅ 构建采集框架（任务模板、代理池、调度）。
+4. 上线最小可用数据集（指数/主板行情 + 公告）——公告域未实现。
+5. 补齐监控与自动告警（告警 9 条规则已上线）；结合 Cloudflare Tunnel 发布外部访问
+   地址（未配置）。

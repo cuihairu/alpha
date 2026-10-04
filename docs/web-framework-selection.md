@@ -58,12 +58,17 @@ Yew/Leptos 是从零自行开发。
 
 ## 4. Web 骨架落地（本单 ②）
 
+结构表为 L427 时点快照——`App.tsx` 此后已演进为工作台看板（L428 组件化
+→ L432 主题 → L499 实时行情 → L508 工作区标签 → L488 隐私面板）。
+另：`web/app` 构建产物不部署、不进桌面 `distDir`，线上与桌面用户面
+始终是 `web/` 根原生页；React 端由 CI 测试与构建覆盖。
+
 ```
 web/app/                    Vite + React 18 + TypeScript（独立工程，不动 web/ 根）
 ├── index.html              #root 挂载点
 ├── src/main.tsx            createRoot 挂载
-├── src/App.tsx             最小可运行示例页：品牌头 + 行情演示表 + SMA 展示
-│                           + WASM 引擎探针（三态：已加载/未构建/失败）
+├── src/App.tsx             （L427 时点：品牌头 + 行情演示表 + SMA 展示
+│                           + WASM 引擎探针；现为多面板工作台，见上注）
 ├── src/lib/indicators.ts   纯 TS 指标函数（sma），口径**对齐** Rust 侧
 │                           `TechnicalIndicators::calculate_sma`（等长输出/
 │                           前导 0.0 占位/样本不足全 0/4 位小数取整），
@@ -120,6 +125,7 @@ CI 侧观察（登记，非阻塞）：`web/app` 引入 npm 依赖后，GitHub �
 4. `web/app/` 独立 npm 工程（不复用 `web/package.json`）：旧演示页依赖图
    （duckdb-wasm/vendor 脚本）零污染，两工程演进互不牵制。
 5. CI 挂在既有 `wasm` 作业尾部（runner 自带 node，免新增作业/矩阵改动）。
-6. 示例页数据为内置静态样本（`src/demoData.ts`）：真实数据面（REST/WS）归
-   services 接入 TODO，骨架期不碰网络。
+6. 示例页数据为内置静态样本（`src/demoData.ts`）——L427 时点口径；
+   L499 起 `LiveQuoteBoard` 已接 `real-time-feed` WebSocket（不可达
+   重试两次回退演示数据），其余面板仍走样本。
 7. `web/pkg/` 不入 git（既有约定）；`public/pkg/` 同策略，拷入后探针可用。

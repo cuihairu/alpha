@@ -24,7 +24,7 @@ glib-sys was not found`。
 
 因此 `scripts/check-desktop.sh` 的 [5/5] 步额外把 `PKG_CONFIG_LIBDIR` 指到一个空目录
 （`target/desktop-fake-pc-system/`），彻底屏蔽系统 `.pc`：**这个目录列全了，任何
-Linux 机器（包括 CI）结果都一样**。代价是目录从 8 个涨到 18 个。
+Linux 机器（包括 CI）结果都一样**。代价是目录从 8 个涨到 17 个。
 
 `Requires` 也要照抄真实关系（如 `atk` → `glib-2.0, gobject-2.0`）：pkg-config 会
 递归解析 `Requires`，写漏了就会在屏蔽系统 `.pc` 后报出「`Package 'gobject-2.0',

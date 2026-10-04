@@ -14,16 +14,20 @@ data-engine（`:8081`）承载行情数据 REST 面；第三方两条接入路�
 | GET | `/stocks/:symbol/indicators` | 指标快照（RSI/SMA/MACD…参数可选） |
 | POST | `/indicators/calculate` | 指标计算（显式参数集） |
 | POST | `/analytics/performance` | 绩效归因（收益/波动/回撤） |
+| GET | `/instruments` | Instrument 目录查询（`?exchange=&type=&symbol=&q=` 组合过滤） |
+| GET | `/instruments/:id` | 单 Instrument 精确查（`cn.sse.000001` 全局键） |
 | GET | `/clickhouse/exports` | Parquet 导出清单 |
 | GET | `/clickhouse/export.parquet` | Parquet 导出下载 |
+| GET | `/clickhouse/market-data.parquet` | 同上（back-compat 别名，保留既有链接） |
 | GET | `/health`、`/metrics` | 运维面（不受 API key 门管控） |
 
 ## 2. 第三方直连鉴权：API key
 
 ```yaml
-# services/data-engine/config 或 env：ALPHA__SECURITY__API_KEYS=key-a,key-b
-security:
-  api_keys: ["third-party-key-a", "third-party-key-b"]
+# 配置文件（可选源，仓内 services/data-engine/config 不存在，相对进程 CWD）：
+#   security:
+#     api_keys: ["third-party-key-a", "third-party-key-b"]
+# 在库下发走 env：ALPHA__SECURITY__API_KEYS=key-a,key-b（ALPHA 前缀 + __ 分隔）
 ```
 
 - **空表 = 关闭**（内网默认形态，历史行为不变）；非空后数据面一律要求

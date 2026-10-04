@@ -8,17 +8,17 @@
 ## 1. 格式化：rustfmt 是唯一格式化权威
 
 * 提交前 `cargo fmt --all`，门禁 `cargo fmt --all -- --check`（差异即失败）。
-* 仓库根 `rustfmt.toml` 声明了部分 nightly-only 选项（wrap_comments 等）：
-  stable 工具链忽略并告警，属预期；换用 nightly 工具链时自动生效。
+* 仓库根 `.rustfmt.toml` 仅含稳定版选项（7afd542 起移除 nightly-only 项），
+  stable 工具链无告警；若将来需要 wrap_comments 等 nightly 选项，显式立项。
 * 已知风险：不同 rustfmt 版本输出可能有漂移；如出现，引入 `rust-toolchain.toml`
   统一工具链版本（本规范不预设，出现即决策）。
 
 ## 2. Clippy：零警告，allow 必须留痕
 
 * 门禁：`cargo clippy --workspace --all-targets --exclude alpha-desktop -- -D warnings`。
-* 任何 `#[allow(...)]` 必须附同行注释说明理由（示例见
-  `wasm-analyzer/src/worker.rs` 的路线图预留 API、
-  `services/collector/src/scheduler.rs` 的共享状态句柄传参）。
+* 新增 `#[allow(...)]` 必须附相邻注释说明理由（现行范本：
+  `packages/protocols/src/lib.rs` 的 `result_large_err` + 同行理由）；存量
+  allow 逐步补注释，新增一律拦住。
 * 禁止 crate 级一把梭 `#![allow(...)]`、禁止 `#![deny(warnings)]`（避免工具链
   升级时把新 lint 变成编译失败；统一由 CI `-D warnings` 把关）。
 * lint 名称以 clippy 当前版本为准（曾把 `result_large_err` 误写为
@@ -61,7 +61,9 @@
   * `debug`：热路径与逐条消息。
 * 服务启动必须显式初始化订阅器并设默认级别（`ALPHA_LOG_LEVEL` → `RUST_LOG`
   → `info`），禁止依赖 `fmt::init()` 的隐式 ERROR-only 行为（历史教训：
-  未设 RUST_LOG 时 WARN 级兜底日志不可见）。
+  未设 RUST_LOG 时 WARN 级兜底日志不可见）。接线进度：real-time-feed 已按此链
+  实现；collector 硬编码 INFO、data-engine 走 `telemetry.level`、api-gateway 与
+  alert-webhook 口径各异，统一接线待立项。
 * 关键路径带结构化字段（`stream = %stream, entry_id = %id, delivery_count`）。
 
 ## 7. 平台与依赖（详见 docs/cross-platform-architecture.md）
@@ -128,11 +130,12 @@ CI（.github/workflows/ci.yml）：`lint` 作业 = §11 前两命令；
 `e2e` 作业 = Redis 启动 + `scripts/check-e2e.sh`（Linux/macOS 矩阵；Windows 运行期
 缺 Redis 简单获取途径，其编译面由 `build` 覆盖，运行期矩阵归 TODO L469 后续登记）；
 `security` 作业 = cargo audit（**报告型**，`continue-on-error: true` 不阻塞——
-现存 8 个 cargo 依赖漏洞属依赖升级债，另行立项，避免长期红灯淹没真信号）。
+依赖漏洞属升级债，另行立项，避免长期红灯淹没真信号）。
 
 ## 12. 已知债务（按立项顺序消化）
 
-* cargo audit 8 个依赖漏洞、docs/ npm 侧 ~102 个 dependabot 告警：依赖升级专项；
+* 依赖升级专项：dependabot open 告警已收敛至个位数（a7e3e54 清掉 braces high，
+  余 braces CVE-2026-93687 无上游修复版、持有待发）；cargo audit 余项随专项消化；
 * data-engine/real-time-feed/storage/collector 尚有历史遗留的结构性
   clippy 债务已于 2026-09-28 一并清零；后续新增代码直接被 `-D warnings` 拦截；
 * fmt 工具链版本漂移风险（§1）：出现首个漂移案例时引入 rust-toolchain.toml。

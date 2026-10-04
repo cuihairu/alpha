@@ -18,9 +18,10 @@ Xcode 工程与 Info.plist 的落地点在脚本守卫中显式报缺。
 
 ## 2. 构建链路（脚本四阶段）
 
-1. **bindings**：`mobile/ios/gen-bindings.sh`——aarch64-apple-ios 交叉编译
-   `libalpha_mobile`（L118 FFI 面）+ UniFFI 产 Swift 绑定进 `gen/`（产物
-   随提交可审，L301 约定）；
+1. **bindings**：`mobile/ios/gen-bindings.sh`——UniFFI 产 Swift 绑定进 `gen/`
+   （运行时生成，暂未入库；L301 约定产物可审）；aarch64-apple-ios 交叉编译
+   `libalpha_mobile`（L118 FFI 面）在脚本内为注释占位，归 CI macOS 作业
+   （L470）；
 2. **archive**：`xcodebuild archive`（Release、`generic/platform=iOS`）；
    工程缺失时守卫报「工程创建归 L470」；
 3. **export**：`exportArchive` + ExportOptions（`method: app-store-connect`、

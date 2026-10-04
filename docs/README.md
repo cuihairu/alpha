@@ -25,7 +25,7 @@ pnpm start     # 开发热重载
 pnpm build     # 产出 build/（同时校验死链）
 ```
 
-Node 18+；CI（`.github/workflows/docs.yml`）用 pnpm + Node 22。
+Node 18+ 起站；CI（`.github/workflows/docs.yml`）用 pnpm + Node 24。
 
 ## 写作约定
 

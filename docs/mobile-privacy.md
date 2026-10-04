@@ -56,7 +56,8 @@ IV）/位翻转篡改→null/换钥→null/delete·keys 透传）。Keystore 与
 BiometricPrompt 只在设备路径实例化（`MobileKeys` / `promptBiometricGate`），
 单测不触 Android 框架类。
 
-实测：`:app:testPlayDebugUnitTest` 40 用例全绿（含本项 10 个）。
+实测：`:app:testPlayDebugUnitTest` 40 用例全绿（L512 时点，含本项 10 个；
+现测试目录 7 文件共 54 例）。
 
 ## 6. iOS 边界（登记，不动）
 

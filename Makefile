@@ -136,7 +136,7 @@ release-prep: check security-audit deps-check
 # Docker 构建
 docker-build:
 	@echo "🐳 构建 Docker 镜像..."
-	docker-compose -f infrastructure/docker-compose.yml build
+	docker-compose -f docker-compose.yml build
 	@echo "✅ Docker 镜像构建完成"
 
 # 安装依赖

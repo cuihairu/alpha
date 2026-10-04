@@ -12,7 +12,7 @@
 | 服务端 | `services/*` | Axum/gRPC 微服务（Linux 容器） |
 | Web | `web/` + `wasm-analyzer/` | 静态前端 + Rust→WASM 分析引擎 |
 | 桌面 | `desktop/` | Tauri 1.5（Windows/macOS/Linux） |
-| 移动 | `mobile/`（规划中，尚不存在） | Kotlin/Swift 壳 + Rust 核心库（JNI/UniFFI） |
+| 移动 | `mobile/`（骨架已落地：alpha-mobile workspace 成员 + android/ios 壳 + 契约测试） | Kotlin/Swift 壳 + Rust 核心库（UniFFI；裸 JNI 仅作 SDK 回调逃生舱） |
 
 原则：**业务逻辑下沉共享库，平台能力走适配层**。任何一层不反向依赖交付面。
 
@@ -20,14 +20,14 @@
 
 | 模块 | 技术栈 | 平台约束 | 现状 |
 |---|---|---|---|
-| `packages/core` | serde/uuid/chrono + 纯计算（models/indicators/analytics/platform） | 无 tokio/reqwest/sqlx/redis/tonic | **wasm32 编译通过**（需 `--features wasm`：`chrono/wasmbind` + `uuid/js`，见 `packages/core/Cargo.toml:33`）；`errors.rs` 已有 `cfg(target_arch = "wasm32")` 分支 |
+| `packages/core` | serde/uuid/chrono + 纯计算（models/indicators/analytics/platform） | 无 tokio/reqwest/sqlx/redis/tonic | **wasm32 编译通过**（需 `--features wasm`：`chrono/wasmbind` + `uuid/js`，见 `packages/core/Cargo.toml:41`）；`errors.rs` 已有 `cfg(target_arch = "wasm32")` 分支 |
 | `packages/protocols` | tonic/prost + serde | tonic 默认特性拉 tokio/net | **wasm32 编译失败**（mio 不支持 wasm；见 §5 差距） |
 | `packages/storage` | sqlx/redis/clickhouse + DataFusion | 服务端专属 | 按 L1 设计即不追求 wasm |
 | `services/*` | Axum + Tokio + DataFusion | 服务端专属 | 已落地（P0–P3 行动清单全绿） |
 | `wasm-analyzer` | wasm-bindgen + Arrow | 浏览器 | 已有 arrow_adapter/streaming/websocket/worker 模块 |
 | `web/` | 原生 JS + duckdb-wasm vendor + WebSocket | 浏览器 | 已接 real-time-feed WS 与 data-engine REST（见 TODO P3-2） |
 | `desktop/` | Tauri 1.5（fs/dialog/tray/notification/global-shortcut 特性） | 桌面三 OS | 已有壳；gate 中以 `--exclude alpha-desktop` 排除 |
-| `mobile/` | — | — | **不存在**，本设计预留接口 |
+| `mobile/` | alpha-mobile（UniFFI proc-macro 桥 + 确定性行情） | Android/iOS 壳；绑定生成需 SDK（无 Xcode 时 iOS 未跑） | 骨架已落地（Rust 核心随 lint/test 门禁；android 契约测试 + 54 个 JVM 单测在跑） |
 
 ## 3. 统一分层架构
 
@@ -54,7 +54,8 @@
 各交付面给出实现；Rust 业务代码面向 trait，不直接摸平台 API：
 
 ```rust
-// packages/core/platform.rs（草案，随 mobile 立项时落地）
+// packages/core/platform.rs（已落地：trait + InMemory 参考实现，f6b44cd/9e46658；
+// 桌面/移动侧的真实实现仍缺——桌面走 desktop/src 内自有实现，移动端留待接线）
 pub trait KeyValueStore {            // 桌面: 文件/SQLite；Web: IndexedDB(wasm 侧)；
     async fn get(&self, key: &str) -> Option<Vec<u8>>;   // 服务端: Redis
     async fn set(&self, key: &str, value: &[u8]);
@@ -101,7 +102,7 @@ grpc 零改动；wasm 侧取 `--no-default-features` 契约层，wasm32 编译�
 2. `cargo wasm-build`（alpha-wasm-analyzer @ wasm32 cdylib 构建）必须通过；
 3. `packages/core` 默认依赖黑名单扫描（tokio/reqwest/sqlx/redis/tonic/native-tls/
    rustls/notify/directories/dirs）——命中即失败，新增平台能力先放 L1 或加 feature 门控；
-4. alpha-protocols 现状 informational 输出（差距消除后升级为门禁，见 §5）。
+4. alpha-protocols wasm32 `--no-default-features` 契约层编译门禁（脚本第 4 步，硬失败）。
 
 编码规范（评审口径，配合脚本执行）：
 
@@ -116,6 +117,6 @@ grpc 零改动；wasm 侧取 `--no-default-features` 契约层，wasm32 编译�
 |---|---|---|
 | Cargo workspace 多目标构建配置 | 本设计 | ✅ 已落地：`.cargo/config.toml` alias（wasm-check/wasm-build）+ 检查脚本纳入 wasm-analyzer wasm32 构建；CI 矩阵随「CI/CD」节推进 |
 | 跨平台共享核心库（core/protocols/storage） | §5 | ✅ 已落地：core wasm-clean（wasm feature）；protocols grpc feature 门控后 wasm32 契约层编译通过；storage 按设计属 L1 服务端专属（移动端经 REST/WS 访问 services，不直连 storage） |
-| 平台适配层抽象接口 | §4 草案 | 随 Tauri 文件导出 / mobile 立项落地 `platform.rs` |
+| 平台适配层抽象接口 | §4 草案 | ✅ trait + InMemory 参考实现已落地（`platform.rs`，f6b44cd/9e46658）；桌面/移动侧真实实现待接 |
 | 统一 Rust 代码规范与兼容性检查 | 本设计 §6 | 脚本已落地，CI 集成随「CI/CD」节推进 |
 | Web UI 框架选型与集成（L427） | 本设计 §3 L2 | ✅ 已落地：docs/web-framework-selection.md 定论 **React 18 + TS + Vite**（Yew/Leptos 不选作主框架），`web/app/` 骨架 + `scripts/check-web.sh` 接入 CI `wasm` 作业；旧演示页零回退；Desktop/Mobile 接入边界登记于该文档 §6 |

@@ -102,14 +102,16 @@ echo -e "${BLUE}📈 生成性能报告...${NC}"
 cat > wasm-analyzer/BUILD_REPORT.md << EOF
 # WASM 构建报告
 
+> 本文件由 build-wasm-optimized.sh 自动生成，仅反映最后一次脚本构建。
+
 构建时间: $(date)
 构建模式: Release (最高优化)
 
 ## 优化配置
 - opt-level: 3 (最高优化)
-- LTO: auto (遵循 Cargo profile 配置)
+- LTO: auto (遵循 Cargo profile 配置；当前无显式 LTO 配置)
 - codegen-units: 1 (最佳优化，较慢编译)
-- SIMD: enabled (启用 SIMD 指令)
+- SIMD: wasm-opt 层面已启用（--enable-simd；rustc target-feature=+simd128 未开）
 - wasm-opt: $(command -v wasm-opt &> /dev/null && echo "已使用 -Oz 优化" || echo "未安装")
 
 ## 构建产物

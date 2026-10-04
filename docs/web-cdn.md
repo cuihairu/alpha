@@ -64,8 +64,11 @@ TTL（≤60s）或走源站 no-cache 协商。
 - **L519 更新 feed**：`latest.json` 与桌面安装包可托管同一 CDN
   （updater endpoint 指向同源 `/releases/` 前缀）；
 - **L520 隐私政策**：政策页托管于本 CDN（App Store 提审 URL 引用）；
-- **L470 发布流水线**：`npm run build` → `web-cdn-deploy.sh` 接进
-  web 作业；源站容器镜像化（nginx + dist COPY）归容器化项 L468。
+- **L470 发布流水线**：已落地——`release.yml` web 作业
+  `npm run build` → `web-cdn-deploy.sh`（`ALPHA_S3_BUCKET` 等 secrets
+  齐则真发，缺则 dry-run 走查计划）；源站仍为 compose 挂载形态
+  （`web-origin` 卷挂 `web/dist`），镜像化（nginx + dist COPY）归
+  容器化项 L468。
 
 ## 6. 非交互假设
 

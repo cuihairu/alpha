@@ -49,7 +49,7 @@ real-time-feed 广播路径与 wasm 侧绑定均调用它，两端协议不漂�
   `seq <= last_seq+1` 且帧间无空洞）→ 返回缺失帧按序重放即拉齐；
   已追平返回空序列。
 * `CatchUp::Resync { latest_seq }`：落后超出保留窗口或通道无历史 →
-  服务端以当前最新状态回 Full 快照（携带 `latest_seq`）。
+  服务端以当前最新状态回 Full 快照（携带 `latest_seq`；通道未知/无历史时为 `None`）。
 
 关键不变量：**窗口边缘追平要求 `last_seq` 恰好落在窗口首帧前一版**——
 重放的 Delta 依赖其前置状态，缺前置必须走 Full（回环集成测试

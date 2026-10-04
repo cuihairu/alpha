@@ -1,6 +1,6 @@
 # alpha-storage
 
-统一存储抽象层，提供内存、时间序列、PostgreSQL KV、Redis KV、本地磁盘 KV 和对象存储后端。
+统一存储抽象层，提供内存、PostgreSQL KV、Redis KV、本地磁盘 KV 和对象存储五种 `StorageFactory` 后端；时间序列走独立 Timescale 模块，不经工厂创建。
 
 ## 已实现后端
 
@@ -14,6 +14,16 @@
   - 适合热点缓存、锁、令牌桶、短 TTL 数据。
 - `S3`
   - 当前实现为兼容简单 HTTP 对象接口的最小可用对象存储层，适合 MinIO 或自控兼容网关。
+
+## 其他模块（不经 `StorageFactory`）
+
+- `redis_streams.rs` — Redis Streams 队列（消费组 + ack + DLQ + 孤儿认领，全管线消息面）
+- `timescale.rs` — TimescaleDB 时序镜像（hypertable + UPSERT 幂等写）
+- `clickhouse.rs` — ClickHouse 导出归档（parquet 面）
+- `cache.rs` / `rate_limit.rs` / `encryption.rs` / `prefetch.rs` — 缓存、令牌桶限流、加密、预取
+- `columnar.rs` / `partition.rs` — 列式与分区辅助
+- `diagnosis.rs` — 告警指纹+窗口诊断引擎（规则知识库，纯函数；当前未接线）
+- `dal.rs` — `DataAccessLayer` 组合入口（见下）
 
 ## `StorageFactory` 用法
 

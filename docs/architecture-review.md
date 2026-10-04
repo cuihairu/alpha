@@ -26,15 +26,15 @@
 | # | 外部评审论断 | 核查结果 | 证据 |
 |---|---|---|---|
 | 1 | 存储抽象过多 | ✅ 坐实 | `packages/storage` 17 个模块：4 种 KV（memory/disk_kv/redis_kv/postgres_kv）+ 2 种时序（timeseries/timescale）+ clickhouse/cloud/dal/cache/… |
-| 2 | Event Envelope 应升级 | ✅ 部分 | `StreamEnvelope` 已有 `id/stream/version/event_type/source/symbol/ingest_ts/payload_hash/payload`；缺 `trace_id`、`sequence`、`source_event_id` |
-| 3 | Instrument 统一模型缺失 | ✅ 坐实 | 全仓无 Instrument 实体（仅 timescale.rs 出现标识字符串）；A股多形态符号风险真实存在 |
-| 4 | 时间三模型（event/ingest/process） | ✅ 缺 process_time | envelope 只有 `ingest_ts` + payload 内嵌行情 `timestamp`；normalized 层无处理时间戳 |
-| 5 | Timescale 应该弱化、ClickHouse 第一 | ✅ 方向成立 | data-engine 活跃写路径 = Timescale 持久化镜像；ClickHouse 现仅 `/clickhouse/export.parquet` 导出归档（非主仓写路径） |
+| 2 | Event Envelope 应升级 | ✅ 部分 | `StreamEnvelope` 已有 `id/stream/version/event_type/source/symbol/ingest_ts/payload_hash/payload`；缺 `trace_id`、`sequence`、`source_event_id`（✅ 已修复，commit 0af6fe0：v2 六字段加性迁移） |
+| 3 | Instrument 统一模型缺失 | ✅ 坐实 | 全仓无 Instrument 实体（仅 timescale.rs 出现标识字符串）；A股多形态符号风险真实存在（✅ 已修复，commit 024a63d：`protocols/src/instrument.rs` + `/instruments` 端点） |
+| 4 | 时间三模型（event/ingest/process） | ✅ 缺 process_time | envelope 只有 `ingest_ts` + payload 内嵌行情 `timestamp`；normalized 层无处理时间戳（✅ 已修复，commit 0af6fe0） |
+| 5 | Timescale 应该弱化、ClickHouse 第一 | ✅ 方向成立 | data-engine 活跃写路径 = Timescale 持久化镜像；ClickHouse 现仅两个导出端点（`/clickhouse/export.parquet`、`/clickhouse/market-data.parquet`）归档，无 INSERT 写路径 |
 | 6 | Redis 只做缓存/流 | ✅ 现状符合但需守住 | cache/rate_limit/redis_streams ✓；redis_kv 属抽象债（见 §2.1） |
 | 7 | Realtime 订阅收敛（fanout 去重） | ✅ 现状为「连接即订阅」 | real-time-feed 757 行注释：当前不区分动作；连接-级订阅，无按 symbol 的共享订阅 |
 | 8 | API 三层（Public/Research/Internal） | ✅ 未分层 | 网关单层 `/api/v1/*` 反代 + `/ws` |
 | 9 | 反爬不设为核心 | ✅ 已天然降级 | README 保留 proxy pool 描述；代码中代理池为可选组件（ProxyPool），UA 轮换在 RequestConfig |
-| 10 | PROJECT_SUMMARY 宣传口径 | ❌ 严重过时 | 仍写 trading.rs（已删）、Tauri/JNI「计划中」（已有骨架）、WASM 高性能表述需按 §3.4 校准措辞 |
+| 10 | PROJECT_SUMMARY 宣传口径 | ❌ 严重过时 | 仍写 trading.rs（已删）、Tauri/JNI「计划中」（已有骨架）、WASM 高性能表述需按 §3.4 校准措辞（✅ P0 已处理：已按定位声明重写） |
 
 ## 2. 问题清单（按级别，附证据与建议动作）
 
@@ -42,7 +42,7 @@
 
 **问题**：`memory.rs / disk_kv.rs / redis_kv.rs / postgres_kv.rs` 四套 KV 并存各自导出，`timeseries.rs / timescale.rs` 两套时序抽象并存，`dal.rs` + 各 Storage 自带头。抽象面比产品需要多。
 
-**证据**：`packages/storage/src/lib.rs` 20 个 pub use 全量重新导出——消费者（data-engine/collector）实际只用到 redis_streams / cache / timescale / clickhouse / cloud / columnar / partition。
+**证据**：`packages/storage/src/lib.rs` 17 个模块、pub use 现为 17 条且仍全量 `pub use x::*` 重新导出〔现注：白名单化未执行，行动项登记在 TODO〕——消费者（data-engine/collector）实际只用到 redis_streams / cache / timescale / clickhouse / cloud / columnar / partition。
 
 **建议（收敛、不删除）**：
 1. 确立**三个权威后端**：ClickHouse（主数据仓）、Redis（缓存/流/限流/锁）、MinIO/S3（原始归档 + parquet 数据集）。Timescale 保留为可选后端（性能/回退），不再进入新功能默认路径。
@@ -63,7 +63,7 @@
 
 ### 2.3 文档债
 
-**问题**：`PROJECT_SUMMARY.md` 与仓库现状脱节（trading.rs 已删、desktop 已有骨架、wasm-analyzer 已存在、结构图过时）；README 的 roadmap 未反映已完成的采集框架（task templates + cron 调度已在 architecture §1 标注，README 未同步）。
+**问题**：`PROJECT_SUMMARY.md` 与仓库现状脱节（trading.rs 已删、desktop 已有骨架、wasm-analyzer 已存在、结构图过时）；README 的 roadmap 未反映已完成的采集框架（task templates + cron 调度已在 architecture §1 标注，README 未同步）。（✅ P0 已处理：两者均已重写/勾选）
 
 **建议**：PROJECT_SUMMARY 按本次定位声明重写结构图与状态节（独立小任务）；README 的 Roadmap 第 3 项勾选完成。
 
@@ -146,6 +146,8 @@ Timescale 保留为可选 TimescaleDB 后端（data-engine persistence 已是三
 
 ### 4.1 存储层收敛动作（立即可做，纯导出面）
 
+〔现注：尚未执行——pub use 仍全量导出；行动项已登记 TODO。〕
+
 ```text
 packages/storage/src/lib.rs
   - pub use 白名单化（保留：cache/clickhouse/cloud/columnar/dal/encryption/
@@ -170,13 +172,13 @@ Collector = Data Source Runtime
 
 ## 5. 分期
 
-| 阶段 | 内容 | 性质 |
-|---|---|---|
-| P0（立即，docs-only 可先行） | 定位声明落 README/PROJECT_SUMMARY；本文入文档站 | 文档收敛 |
-| P1（下一开发轮） | envelope v2 字段 + protocols 迁移 + process_time；Instrument 契约 + /instruments | 数据模型 |
-| P2 | 数据质量系统（完整性/连续性/异常/重复/Source Divergence）+ sequence 断档告警 | 可靠性 |
-| P3 | 三级 API 分层；Research Dataset + Experiment 登记表；MCP 慢启动 | 能力面 |
-| P4 | UI 回归 API consumer 定位（不设独立路线图） | 收敛 |
+| 阶段 | 内容 | 性质 | 状态 |
+|---|---|---|---|
+| P0（立即，docs-only 可先行） | 定位声明落 README/PROJECT_SUMMARY；本文入文档站 | 文档收敛 | ✅ 已落（6968e57 + 后续对账批） |
+| P1（下一开发轮） | envelope v2 字段 + protocols 迁移 + process_time；Instrument 契约 + /instruments | 数据模型 | ✅ 已落（0af6fe0、024a63d） |
+| P2 | 数据质量系统（完整性/连续性/异常/重复/Source Divergence）+ sequence 断档告警 | 可靠性 | 进行中——首件 sequence 断档告警已落（9254efe） |
+| P3 | 三级 API 分层；Research Dataset + Experiment 登记表；MCP 慢启动 | 能力面 | 未开始 |
+| P4 | UI 回归 API consumer 定位（不设独立路线图） | 收敛 | 未开始 |
 
 **不做清单在此文档 §2.4（Kafka/K8s/AI 预测/反爬核心化/iOS 主线）——后续评审以此为对齐锚。**
 
@@ -189,5 +191,5 @@ Collector = Data Source Runtime
 ## 7. 附带发现（审查中顺手记录的独立小债）
 
 - `docs/sidebars.js` 手写登记已覆盖本仓库文档；新增文档必须登记，否则 orphan 警告。
-- PROJECT_SUMMARY 结构图与 `ls packages services` 实际布局已有偏差（wasm-analyzer 未列、trading.rs 已删仍列）。
-- README 的 roadmap 第 3 项（crawler framework with scheduling + proxy rotation）实际已完成（task templates + cron 调度 + ProxyPool），未勾选。
+- PROJECT_SUMMARY 结构图与 `ls packages services` 实际布局已有偏差（wasm-analyzer 未列、trading.rs 已删仍列）。（✅ P0 重写已纠正）
+- README 的 roadmap 第 3 项（crawler framework with scheduling + proxy rotation）实际已完成（task templates + cron 调度 + ProxyPool），未勾选。（✅ 已勾选）

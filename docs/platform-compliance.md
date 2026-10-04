@@ -4,8 +4,9 @@
 **隐私政策文本**（工程草案，见 §1）。检查器：`scripts/check-compliance.sh`，
 基线：`config/compliance/permissions-registry.txt`（`[allow]` 为检查白名单、
 `[planned]` 留档计划权限；新增 allow 条目 = conscious ack，与
-`packages/core` safety_audit 的 unsafe 预算同一纪律）。CI 接线归 L467
-（GitHub Actions）。
+`packages/core` safety_audit 的 unsafe 预算同一纪律）。CI 接线现状：
+`check-compliance.sh` 尚未接入任何 workflow（L467 是多目标构建项、已完结
+且不含此项——接入登记为待办，挂靠新编号）。
 
 ## 1. 隐私政策（应用内展示文本 · 工程草案）
 
@@ -14,7 +15,9 @@
 
 1. **数据最小化**：本应用不要求注册、不收集手机号/邮箱等个人身份信息；
    自选列表、图表配置等用户数据仅存本地（Android SharedPreferences /
-   桌面 Tauri fs 用户目录 / Web localStorage），不上传服务器。
+   桌面 Tauri fs 用户目录 / Web localStorage），当前不上传服务器——
+   账户同步服务端面已就绪（L476），客户端接线时本条随
+   `docs/data-privacy.md` §1 数据清单重写。
 2. **市场数据**：行情、K 线、财务数据均为公开市场信息的缓存展示，
    数据源为公开接口与授权供应商，不含任何用户生成内容。
 3. **无遥测上报**：当前构建不内置任何统计分析/埋点 SDK；崩溃日志仅在
@@ -23,23 +26,23 @@
    不在后台扫描其他应用、不读取通讯录/位置/存储中与功能无关的数据。
 5. **权限用途**：逐条见 §2 注册表——每个权限都对应一个可关停的功能，
    拒绝授权只降级对应功能，不锁死应用。
-6. **数据删除**：清除应用数据/卸载即完全删除本地数据；服务端不留存
-   用户维度数据（无账号体系）。
+6. **数据删除**：清除应用数据/卸载即完全删除本地数据；服务端无账号体系
+   留存（账户同步面 L476 落地但客户端未接线，删除端点归其接线前置项）。
 
 ## 2. 权限台账（注册表的人读版）
 
 ### 2.1 Android（`mobile/android/app/src/main/AndroidManifest.xml`）
 
-现状：**零权限最小清单**——骨架期 FFI 全本地（演示数据由 Rust 侧生成），
-见清单头注释。注册表 android 段现为空 = 任何 `<uses-permission>` 新增
-都过不了检查器，接入真实数据/推送/生物识别时按 `[planned]` 触发条件
-登记抬基线：
+现状：`USE_BIOMETRIC` 已入注册表 `[allow]`（L512 落地，BiometricGate.kt +
+10 个 JVM 测试），android 段对账基数 1 = 清单零权限之外仅生物识别一项；
+`INTERNET`/`POST_NOTIFICATIONS` 仍留档 `[planned]`，触发时按
+`[planned]` → `[allow]` 登记抬基线：
 
-| 权限 | 类型 | 申请语义 | 触发条件 |
+| 权限 | 类型 | 申请语义 | 状态/触发条件 |
 |---|---|---|---|
-| `INTERNET` | normal（安装期授予） | 拉取行情 | api-gateway 接入 |
-| `POST_NOTIFICATIONS` | **runtime（API 33+ 运行时申请）** | 推送/告警通知 | L337 推送落地；拒绝 → 降级站内告警 |
-| `USE_BIOMETRIC` | normal（安装期授予） | 启动/敏感操作认证 | L512 生物识别落地 |
+| `USE_BIOMETRIC` | normal（安装期授予） | 启动/敏感操作认证 | ✅ 已入清单（L512 生物识别落地） |
+| `INTERNET` | normal（安装期授予） | 拉取行情 | planned：api-gateway 接入 |
+| `POST_NOTIFICATIONS` | **runtime（API 33+ 运行时申请）** | 推送/告警通知 | planned：L337 推送落地；拒绝 → 降级站内告警 |
 
 ### 2.2 iOS（**仅登记边界——`mobile/ios/` 属 L119 交付面，本仓不动**）
 

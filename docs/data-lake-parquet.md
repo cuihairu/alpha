@@ -57,7 +57,7 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
 | `timestamp` | Timestamp(ms, UTC) | 与 ClickHouse `timestamp` 对齐 |
 | `symbol` | Dictionary(Int32, Utf8) | 六位代码；字典编码 |
 | `open_price/high_price/low_price/close_price` | Float64 | 列名与 storage 层现 SQL 完全一致 |
-| `volume` | Float64 | 与现 schema 对齐（手数口径注于表属性） |
+| `volume` | Float64 | 列名对齐；类型按 §4 演进规则由现 UInt64 放宽为 Float64（手数口径注于表属性） |
 | （Bronze 附加）`_raw` / `_ingested_at` | Utf8 / Timestamp(ms) | 原始报文与入库时间 |
 
 - **演进规则**：列只增不删、类型只放宽不收窄；破坏性变更 → 新表名版本

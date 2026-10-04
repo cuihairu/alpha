@@ -9,14 +9,14 @@
 
 核心数据平面已打通并有测试覆盖；文档站与架构审查详见 `docs/`。平台持续开发中，
 按 `docs/architecture-review.md` §5 的分期推进（P0 文档收敛 ✅ → P1 数据模型 ✅ →
-P2 数据质量 → P3 API 分层/数据集/Experiment → P4 UI 收敛）。
+P2 数据质量（首项 sequence 断档告警已落）→ P3 API 分层/数据集/Experiment → P4 UI 收敛）。
 
 ## 五个核心域
 
 | 域 | 落点 |
 |---|---|
 | ingestion（采集） | `services/collector`：task templates（YAML/JSON 声明式数据源）+ cron 调度 + 东方财富行情源 + cleaner + rate_limiter + 重试策略 |
-| data（数据仓） | `packages/storage` + `services/data-engine`：Redis Streams 消息契约 + 内存/内存镜像时序 + ClickHouse 导出归档 + Parquet 数据湖 |
+| data（数据仓） | `packages/storage` + `services/data-engine`：Redis Streams 消息契约 + 内存/内存镜像时序 + ClickHouse 导出归档（Parquet 数据湖为设计稿，未立项） |
 | research（研究） | `packages/core`：indicators（RSI/MACD/SMA/EMA/布林带/ATR…）/ backtest / optimize / risk / parallel + `wasm-analyzer`（WASM 契约层） |
 | realtime（实时） | `services/real-time-feed`：Redis Streams 消费 + WebSocket 连接级订阅 + DLQ 兜底 |
 | access（访问） | `services/api-gateway` + `services/data-engine` HTTP 面：REST/WS + API key 门 + 追踪 + Prometheus 指标 |
@@ -35,12 +35,12 @@ services/
   api-gateway/       外部访问面：REST/WS 反代 + 鉴权 + 追踪
   alert-webhook/     告警出口
   crawlers/          采集脚本（Python/多语言）
-desktop/             Tauri 桌面骨架（跨端契约）
-mobile/              Android（JNI）+ iOS（UniFFI）骨架
+desktop/             Tauri 桌面（框架层零 Tauri 依赖 + 接线层，跨端契约）
+mobile/              alpha-mobile（UniFFI proc-macro 桥 + 确定性行情骨架，workspace 成员）
 wasm-analyzer/       WASM 客户端分析契约（--no-default-features 纯 serde）
 web/                 Web 前端（状态：UI 收敛为 API consumer，见 architecture-review §P4）
 docs/                Docusaurus 文档站（architecture / architecture-review 等 42+ 篇）
-scripts/             CI 门禁四件套：check-lint / check-cross-platform / check-desktop
+scripts/             门禁脚本 10 个：check-lint / check-cross-platform / check-desktop / check-e2e 等
 ```
 
 ## 已交付能力
@@ -82,7 +82,9 @@ scripts/             CI 门禁四件套：check-lint / check-cross-platform / ch
 
 ## 下一步（按分期）
 
-- **P2 数据质量**：完整性/连续性/异常/重复检测 + sequence 断档告警（契约字段已就位）
+- **P2 数据质量**：sequence 断档告警已落地（9254efe：collector `next_source_sequence`
+  发布侧编号 + data-engine `SequenceGapMonitor` 断档/回退计数指标）；完整性/连续性/
+  异常/重复检测待做
 - **P3**：三级 API 分层（Public/Research/Internal）；Research Dataset + Experiment 登记表；MCP 慢启动
 - **P4**：UI 回归 API consumer 定位
 

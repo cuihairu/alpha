@@ -21,6 +21,7 @@ mobile/android/
         │   └── MarketModels.kt    # FFI JSON 载荷 ↔ kotlinx-serialization 模型
         ├── java/uniffi/alpha_mobile/alpha_mobile.kt   # uniffi 0.25 生成（入库）
         ├── jniLibs/arm64-v8a/     # libalpha_mobile.so（生成，不入库）
+        ├── jniLibs/x86_64/        # 模拟器 ABI（gen-bindings.sh 双目标，L517）
         └── ...
 ```
 
@@ -57,6 +58,6 @@ cd mobile/android && ./gradlew :app:assembleDebug
 ## 边界（真机/发布归后续 TODO）
 
 - 真机加载 `.so` 与运行时验证：本机无设备，模拟器/真机验收归后续 TODO；
-  x86 模拟器镜像需补 `x86_64` ABI（gen-bindings.sh 加一个目标即可）。
+  x86_64 ABI 已落地（L517：gen-bindings.sh 双目标 + abiFilters 双列入）。
 - 发布流水线（签名/R8 规则/AAB 分包）：TODO「多平台发布流水线」。
 - JNI 直接回调（SDK 推送/生命周期）：TODO 272 逃生舱，当前纯 UniFFI 面。

@@ -5,7 +5,8 @@ OIDC 校验核（库函数级，IdP 接线归下一增量）。
 
 ## 1. 模式
 
-`--auth-mode off|jwt`（env `ALPHA_GATEWAY_AUTH_MODE` 优先，默认 off）：
+`--auth-mode off|jwt`（env `ALPHA_GATEWAY_AUTH_MODE` 优先，默认 off；
+解析另接受 `required`/`on` 作为 `jwt` 别名）：
 
 - `off`：零行为变化，所有路由直通（既有部署/测试不受影响）。
 - `jwt`：`/api/*` 强制 `Authorization: Bearer <jwt>` 校验；
@@ -48,7 +49,7 @@ Bearer`，不区分过期/伪造/缺头（防用户枚举）。
 归前端 + IdP（Keycloak/Auth0），网关只做资源侧校验——网关不存会话、
 不签发刷新令牌。
 
-## 6. RBAC（L484）
+## 5. RBAC（L484）
 
 角色三档：`viewer`（空 roles 旧票据亦然——只读 GET/HEAD/OPTIONS）、
 `operator`（写方法 POST/PUT/DELETE）、`admin`（全通）。
@@ -64,7 +65,7 @@ Bearer`，不区分过期/伪造/缺头（防用户枚举）。
 - 指标 `auth_total{mode="forbidden"}` 与 allowed/denied 同源，
   可直接告警“403 突增 = 越权探测”。
 
-## 7. 非交互假设
+## 6. 非交互假设
 
 1. 生产 secret 经 env/secret 卷注入，绝不进 repo（compose 占位符为空）。
 2. scope 本单只透传不断言；细粒度 RBAC 归 L484。

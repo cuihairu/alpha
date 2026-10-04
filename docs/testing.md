@@ -19,13 +19,14 @@
 - vitest 单测：`web/app/src/lib/*.test.ts`（纯函数：指标口径/liveFeed 协议
   解析/工作区归约器/PWA 策略），node 环境，`npx vitest run`；
 - `npx tsc -b` 类型面 + `vite build` 构建门禁（`scripts/check-web.sh`）；
-- Android JVM：`:app:testPlayDebugUnitTest`（39 用例，纯逻辑不触框架类）。
+- Android JVM：`:app:testPlayDebugUnitTest`（54 用例，纯逻辑不触框架类）。
 
 ## 3. WS 消息级契约（L491 补深，L469 缺口闭环）
 
 `check-e2e.sh` 断言 3b：连 `/ws` → Subscribe + Resync(from_seq=0) →
 **无论通道是否有数据必须回帧**（Sync Full 快照或显式 Error），超时静默 =
-协议破坏；Sync 帧校验 channel 回显/seq 数值/op ∈ \{full,delta\}/data 在位。
+协议破坏；Sync 帧校验 channel 回显/seq 数值/op ∈ \{full,delta\}/data 在位
+（op 大小写不敏感匹配——线上帧是 PascalCase variant 名）。
 线上帧型 = serde variant 原名 **PascalCase**（`WsMessage` tag 无 rename，
 探针实测 `{"type":"Resync",...}`）——该事实同时修正了 web liveFeed 的入站
 解析（大小写不敏感）与出站帧型（L499 修复面）。

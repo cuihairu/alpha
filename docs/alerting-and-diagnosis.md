@@ -12,11 +12,12 @@ Webhook 多渠道分发 + 诊断引擎纯函数库。Jaeger OTLP 全量 span
     → 钉钉/企微/Slack/PagerDuty（env 注入缺失则仅日志）+ 结构化日志 → Loki
 ```
 
-## 2. 规则（config/alpha-alerts.yml，8 条）
+## 2. 规则（config/alpha-alerts.yml，9 条）
 
 | 告警 | 数据源（埋点位置） |
 |---|---|
 | GatewayRateLimitExceeded | gateway `alpha_gateway_rate_limit_total{mode="denied"}`（L446） |
+| GatewayShieldTriggered | gateway `alpha_gateway_shield_total{mode="bot_denied\|burst_denied\|scan_denied"}`（L486，cae1f1c） |
 | GatewayUpstreamUnhealthy | gateway `alpha_gateway_service_health{upstream=…}`（L459/L464） |
 | GatewayErrorRateHigh | gateway `alpha_gateway_requests_total{method,status}`（L459） |
 | DataEngineQueryLatencyHigh | data-engine `alpha_dataengine_query_duration_seconds` histogram（L464） |
@@ -60,22 +61,26 @@ Webhook 多渠道分发 + 诊断引擎纯函数库。Jaeger OTLP 全量 span
 - Label 取值走 `label_or` helper——`unwrap_or(&"...".to_string())`
   借用函数内临时值（E0716/E0515），是本文件最高频的编译坑。
 
-## 5. 诊断引擎（packages/storage/src/diagnosis.rs + tools/diagnose）
+## 5. 诊断（两套并存，分工不同）
 
-- `DiagnosisEngine` 纯函数库（零 IO）：告警指纹+时间窗口输入，
-  规则知识库（`DiagnosisRule`：告警通配/必需指标异常/日志模式/
-  追踪特征/根因分类/基础置信分/修复动作）匹配 → `DiagnosisReport`
-  （根因评估+去重排序动作+平均置信分）。
-- 查询执行（Prometheus/Loki/Jaeger 拉数）归调用方
-  （webhook/CLI/定时任务），引擎只做判定——可单测、无 tuple。
-- CLI：`cargo run -p alpha-diagnose -- --help`（随 workspace 成员）。
+- **CLI 实际消费的**：`alpha_core::diagnosis`（`packages/core/src/diagnosis.rs`）
+  ——指标快照（ServiceMetrics/Snapshot）→ Finding，阈值常量与 §2 告警规则同源。
+  CLI `tools/diagnose`（`cargo run -p alpha-diagnose -- --help`）从 Prometheus
+  拉快照（唯一 env `ALPHA_PROMETHEUS_URL`）→ JSON 报告，退出码 0/1/2/3。
+- **未接线的规则知识库**：`packages/storage/src/diagnosis.rs` 的 `DiagnosisEngine`
+  ——告警指纹+时间窗口输入 → `DiagnosisReport`（`DiagnosisRule`：告警通配/必需
+  指标异常/日志模式/追踪特征/根因分类/基础置信分/修复动作），纯函数零 IO、
+  builtin 规则在档，但全仓当前零消费方，登记为待接线项。
+- 拉数归属：当前唯一调用方是 CLI（仅 Prometheus）；Loki/Jaeger 拉数随
+  DiagnosisEngine 接线，alert-webhook 只转发不诊断。
 
 ## 6. 非交互假设（自行判定，已注明）
 
 1. 通知渠道只做到 Webhook 转发层；短信/电话升级链归运维侧。
 2. `repeat_interval` 默认 4h（critical 1h）：告警风暴与打扰度的折中，
    随 on-call 制度调。
-3. 诊断引擎知识库首批规则覆盖 8 条 Prometheus 告警；新故障模式
-   按 `DiagnosisRule` 结构增量登记，置信分人工复核。
+3. 诊断引擎知识库首批规则覆盖现配置 9 条告警中的 8 条
+   （`GatewayShieldTriggered` 槽位待补）；新故障模式按 `DiagnosisRule`
+   结构增量登记，置信分人工复核。
 4. alert-webhook 用 reqwest 0.12（需 rustls-tls），与网关的 0.11
    并存——服务独立构建，版本不强制统一。

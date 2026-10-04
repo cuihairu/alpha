@@ -1,5 +1,9 @@
 # ✅ Alpha WASM 分析引擎 - 完成总结
 
+> 历史快照（2025-11-24 22:45 时点，当时 pkg 待构建、测试待运行）。现状：
+> pkg 已构建、CI wasm 作业（check-cross-platform + wasm-pack）持续绿，
+> 当前状态见 `web/README.md`、`wasm-analyzer/IMPLEMENTATION_REPORT.md`。
+
 ## 📅 完成时间
 2025-11-24 22:45
 
@@ -151,7 +155,7 @@ wasm-analyzer/
 ## 🔧 构建工具
 
 - ✅ `build-wasm-optimized.sh`: 优化构建脚本
-- ✅ 编译配置: Release (O3 + LTO + SIMD)
+- ✅ 编译配置: Release (O3 + codegen-units=1；LTO/SIMD 为未来项)
 - ✅ 性能测试套件
 - ✅ Web 演示页面: `web/wasm-demo.html`
 
@@ -204,9 +208,9 @@ wasm-analyzer/
    ```
 
 ### 未来增强:
-- [ ] SIMD 向量化优化 (2-4x 性能提升)
-- [ ] 更多技术指标 (KDJ, CCI, ATR)
-- [ ] 策略回测引擎
+- [ ] SIMD 向量化优化 (rustc target-feature=+simd128)
+- [ ] 更多技术指标 (KDJ, ADX)——CCI/ATR 已上线
+- [x] 策略回测引擎（backtestSmaCross/backtestSmaCrossPtr 已交付）
 - [ ] WebGPU 加速
 
 ---

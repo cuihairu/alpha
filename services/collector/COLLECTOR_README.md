@@ -156,14 +156,29 @@ services/collector/
 │   ├── cleaner.rs        # 数据清洗
 │   ├── rate_limiter.rs   # 限流和代理池
 │   ├── source_scheduler.rs  # 任务调度
+│   ├── scheduler.rs      # 调度器（共享状态句柄）
 │   ├── metrics.rs        # 监控指标
 │   ├── storage.rs        # 存储层
+│   ├── types.rs          # 公共类型
+│   ├── task_templates.rs # YAML/JSON 任务模板装载/校验
+│   ├── cron_scheduler.rs # cron 调度（5/6 段 + 每秒 tick）
+│   ├── multilang_simple.rs  # 多语言执行器
+│   ├── main_simple.rs    # 服务入口（HTTP 面 + Redis Streams 发布）
+│   ├── main.rs           # 二进制入口
 │   ├── prelude.rs        # 预导出模块
 │   └── lib.rs            # 库入口
 ├── examples/
 │   └── collector_usage_demo.rs  # 使用示例
 └── Cargo.toml
 ```
+
+## 任务模板与 cron 调度
+
+数据源可写成 YAML/JSON 声明文件（source_type/url/schedule/retry/storage），
+`ALPHA_COLLECTOR_TASKS` 指向模板文件或目录即启动装载，示例见
+`config/collector.tasks.yaml`；cron 5/6 段解析、到期自动执行、执行中不重入，
+手动触发走 `POST /tasks/:id/execute`（详见 `docs/architecture.md` §1 与
+`docs/deployment-runbook.md` §6）。
 
 ## 依赖
 
@@ -178,14 +193,12 @@ services/collector/
 
 ## 注意事项
 
-1. 原有的 `scheduler.rs` 文件存在一些编译错误，需要后续修复
-2. 部分数据解析逻辑需要根据实际 API 响应格式调整
-3. Redis 和数据库连接需要正确的配置
+1. 部分数据解析逻辑需要根据实际 API 响应格式调整
+2. Redis 和数据库连接需要正确的配置
 
 ## 下一步
 
-1. 修复现有编译错误
-2. 添加更多单元测试
-3. 完善数据解析逻辑
+1. 添加更多单元测试
+2. 完善数据解析逻辑
 4. 添加更多数据源
 5. 集成到完整的 Alpha Finance 系统

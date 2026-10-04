@@ -5,13 +5,13 @@ sidebar_position: 1
 # Alpha Finance 简介
 
 Alpha Finance 是 A 股低延迟行情数据与分析平台：一套 Rust 核心（指标、
-形态、回测、风控），多端消费——Web 实时看板、桌面应用（复用同一 Web 前端）、
-Android 应用。
+形态、回测、风控），多端消费——Web 实时看板、桌面应用（Tauri 窗口装同一
+web/dist 静态页，另带原生导出/通知/托盘）、Android（alpha-mobile UniFFI 骨架）。
 
 ## 你能用它做什么
 
-- **看实时行情**：Web 看板订阅 `real-time-feed`，价格跳变闪烁（A 股红涨绿跌），
-  断线自动降级为确定性模拟盘，界面永远可开。
+- **看实时行情**：看板订阅 `real-time-feed` WebSocket 推送，价格与成交量实时刷新；
+  后端不可达回退演示数据并在状态栏注明，断线出复位按钮可重连。
 - **做技术分析**：SMA/EMA/RSI/Bollinger/MACD、K 线与线形形态、Elliott 波浪校验、
   网格寻优 + 滚动前推回测、VaR/夏普/索提诺等风险度量。
 - **管自选与工作区**：多工作区标签页，各存一套自选标的集，浏览器本地持久化。

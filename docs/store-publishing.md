@@ -8,7 +8,7 @@
 | 商店 | 喂入产物 | 产出脚本 |
 |---|---|---|
 | Google Play | `app-play-release.aab`（Play 动态分包） | `scripts/android-release.sh` |
-| App Store | archive → `.ipa`（ExportOptions app-store-connect） | `scripts/ios-release.sh`（真机在 L470 macOS 作业） |
+| App Store | archive → `.ipa`（ExportOptions app-store-connect） | `scripts/ios-release.sh`——脚本可执行登记，**ipa 产线未实现**：Xcode 工程未入库（`mobile/ios/` 属 L119 交付面），archive 阶段守卫拦截显式报缺；真机在 release.yml macOS 作业时归发布前置项 |
 | Microsoft Store | 见 §4（PWA 备选 / MSIX 后续） | — |
 
 ## 2. 商店元数据（本仓 `store/`，中英双语，L479 字典口径一致）

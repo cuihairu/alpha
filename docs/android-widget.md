@@ -19,7 +19,8 @@ RemoteViews 免新依赖）与**静态快捷方式**（`shortcuts.xml` 深链预
 判定（UP/DOWN/FLAT/NO_DATA，色彩映射归 Provider 设备路径）、过期灰显
 （120s 阈值与 docs/ios-live-activities.md staleDate 同口径；时间戳解析
 失败按过期 fail-safe）。RemoteViews/PendingIntent/AppWidgetManager 只
-在设备路径，单测不触框架类。实测 `:app:testPlayDebugUnitTest` 39/39。
+在设备路径，单测不触框架类。实测 `:app:testPlayDebugUnitTest` 39/39
+（L509 时点；现测试目录共 54 例）。
 
 ## 3. 深链契约（widget 点击与快捷方式同一入口）
 

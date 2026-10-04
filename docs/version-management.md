@@ -19,8 +19,9 @@
 默认拒绝脏树、`mobile/ios` 绝不动（L119，脚本末尾打印人工提醒）。
 
 门禁 `scripts/check-version.sh`（CI `version` 作业）：五处同值 + versionCode
-为正整数，否则 exit 1。注意首推前 SW 缓存名为历史 `v1` 形态，门禁会红——
-第一次 `bump-version.sh` 即拉齐。
+为正整数，否则 exit 1。SW 缓存曾为历史 `v1` 形态（首推门禁红过一次），
+`bump-version.sh` 首推已拉齐为 `alpha-shell-v0.1.0`，与 `package.json`
+0.1.0 同值。
 
 ## 2. 热更新通道（各形态已交付，本项只做版本接缝）
 

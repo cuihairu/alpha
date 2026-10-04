@@ -97,7 +97,8 @@ FFI 六方法（**只增不改**，L118 三方法与构造器签名原样——L
 
 - **Android（本轮实现）**：`AlphaBridge` 加六方法透传（JSON ↔ kotlinx-serialization
   载荷模型）；`PushSyncSeam.kt` 给出接缝面——`NotificationDispatcher` 接口（平台
-  送达实现留真机 TODO）+ 同步触发入口注释（WorkManager 映射见 §3）。
+  送达实现留真机 TODO）+ WorkManager 装配面（`PeriodicSyncWorker` + enqueue 帮助
+  函数已实现，尚未在壳入口接线，归真机 TODO，映射见 §3）。
   结构由 `mobile/tests/android_shell_contract.rs` 守门（CI 无 Android SDK）。
 - **iOS（本轮不实现，文档定接缝）**：L119 壳在其轨道内按同一六方法模式接
   `UNUserNotificationCenter`/`BGTaskScheduler`；接缝 = `AlphaViewModel` 持
@@ -130,7 +131,8 @@ mobile/src/notify.rs   AlertRule / NotificationSpec / NotificationChannel(trait)
 mobile/src/sync.rs     SyncTrigger / SyncConfig / BackgroundSync / fingerprint（+单测 10 例）
 mobile/src/state.rs    MobileCore 挂 Mutex<Notifier>+Mutex<BackgroundSync>，FFI 六方法（+单测 6 例）
 mobile/android/.../    MarketModels 六载荷 + AlphaBridge 六透传（含 TRIGGER_* 常量）+ PushSyncSeam.kt
-mobile/tests/          android_shell_contract.rs 追加接缝守门（+1 例，共 10 例）
+mobile/tests/          android_shell_contract.rs 追加接缝守门（+1 例，共 10 例；
+                       L367/L390 各再 +1，现 12 例）
 ```
 
 ## 10. 真机验收边界（本环境不可观察，登记）

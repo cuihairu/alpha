@@ -2,7 +2,9 @@
 
 编排入口 `scripts/desktop-release.sh`（按宿主 OS 出对应面；macOS dmg/app、
 Windows NSIS/WiX 归 CI 矩阵对应作业，本机明确不支持跨 OS 打包——tauri
-bundler 单宿主单面，接线归 L470；Linux 本机实测止步见 §6.1）。打包
+bundler 单宿主单面，跨宿主已由 `release.yml` desktop 作业承接
+（ubuntu-22.04/macos-latest/windows-latest 三矩阵）；Linux 本机实测
+止步见 §6.1）。打包
 配置全部由 `desktop/tauri.conf.json` `bundle` 段驱动（identifier
 `com.alpha.finance`、category Finance、四平台 icon 已就位）。
 
@@ -16,7 +18,10 @@ bundler 单宿主单面，接线归 L470；Linux 本机实测止步见 §6.1）�
 
 `--bundles` 可任选子集，`--debug` 出调试包（体积大、无优化，不分发）。
 
-## 2. 签名与公证（登记，随 L470 CI 落地）
+## 2. 签名与公证（登记，未实现）
+
+L470 流水线已落地且不含签名环节——证书/公证需
+`secrets.*` 资产到位后另行立项，以下为届时落点：
 
 - **macOS**：Developer ID Application 证书 codesign → notarytool 公证
   → staple。未签名 AppImage…未签名 .dmg 在 Gatekeeper 下需右键绕行，
@@ -51,15 +56,18 @@ platforms[target].signature/url。即：**安装包构建一次，分发与自�
 1. deb 的桌面入口/图标已由 bundler 从 conf 生成；rpm/flatpak 不做
    （用户面窄，登记不实现）；
 2. 自动更新侧载渠道的 AppImage 差分（zsync）登记归 L519 复核项；
-3. 跨 OS 打包作业的 runner 规格与缓存（cargo/web 产物）归 L470 流水线。
+3. 跨 OS 打包已由 `release.yml` desktop 作业承接（三宿主矩阵 +
+   `Swatinem/rust-cache` + npm cache；本项原登记项已闭环）。
 
 ## 6. 非交互假设与实测边界
 
 1. **本机实测止步于「conf 校验通过 + web 构建」**：开发机 Ubuntu 26.04
    只提供 webkit2gtk-4.1（soup3），tauri v1 链接需要 webkit2gtk-4.0
    （soup2）——与仓内 CI「Linux runner 缺 WebKitGTK」既有边界同因。
-   真机 AppImage 验证归 L470 的 Linux 作业（老基底镜像，如
-   ubuntu-22.04）或 tauri v2 升级项（v2 支持 4.1）——两者登记不实现；
+   真机验证已由 `release.yml` Linux 作业（ubuntu-22.04，自带
+   webkit2gtk-4.0）承接至**解包冒烟**（`--appimage-extract` +
+   AppRun 在场检查）；GUI 真机运行仍为人工步骤（登记），
+   tauri v2 升级项（支持 4.1）登记不实现；
    顺手修掉暴露的真 bug：`windows[0].theme: "System"` 非法（v1 合法值
    仅 Light/Dark），移除该字段（缺省即跟随系统，等价原意）——该 bug
    能存活至今正因本仓从未真跑过 tauri build；

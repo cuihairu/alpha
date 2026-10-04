@@ -83,7 +83,8 @@ npm run build   # 类型检查 + 生产构建
 
 ### ⚡ 实时功能
 - **实时价格监控**: 多股票价格跟踪
-- **自动刷新**: 每5秒更新数据
+- **实时推送**: 经 WebSocket 订阅 real-time-feed（需启动该服务并配置 WS 地址；
+  后端不可达回退演示数据并在状态栏注明）
 - **性能监控**: 实时性能指标展示
 
 ### 🎨 用户界面
@@ -111,14 +112,27 @@ web/
 ├── app/                # React 骨架（L427，独立 npm 工程）
 ├── index.html          # 主页面
 ├── app.js             # 主要应用逻辑
+├── style.css          # 全局样式（index.html <link> 引入，check-web 守门文件）
+├── demo-data.js       # 演示数据（回退数据源，check-web 守门文件）
+├── wasm-demo.html     # WASM 演示页
+├── duckdb-ui.mjs      # DuckDB-WASM 读 parquet 的 legacy SQL 演示
 ├── server.js          # Node.js 开发服务器
-├── package.json       # 项目依赖配置
+├── scripts/           # 前端自检脚本
+├── vendor/            # 第三方静态资源
+├── dist/              # 构建产物（桌面 distDir 与 web-origin 共用）
+├── package.json       # 项目依赖（唯一运行时依赖 @duckdb/duckdb-wasm）
 ├── README.md          # 说明文档
 └── pkg/               # WASM 构建输出
     ├── alpha_wasm_analyzer.js    # WASM JavaScript 绑定
     ├── alpha_wasm_analyzer_bg.wasm # WASM 二进制文件
     └── ...                        # 其他构建文件
 ```
+
+### DuckDB-WASM SQL 工作台
+
+根页 `duckdb-ui.mjs` 与 React 端 `app/src/lib/duckdb.ts` + `SqlWorkbench.tsx`
+提供浏览器内 SQL 面：读 Parquet 导出（`read_parquet()`）即席查询，
+与 data-engine 的 `/query` 面互补——本地文件走 DuckDB，服务端表走 API。
 
 ## 🔧 开发指南
 
@@ -131,7 +145,7 @@ web/
 
 ### 自定义样式
 
-编辑 `index.html` 中的 CSS 样式，或创建单独的 CSS 文件。
+编辑 `style.css`（全局样式），或在 `index.html` 内联局部规则。
 
 ### 添加新页面
 
@@ -156,9 +170,9 @@ web/
 ## 📈 性能优化
 
 ### WASM 优化
-- 使用 `wasm-opt` 进行代码优化
-- 启用 SIMD 指令集支持
-- 减少内存分配
+- 使用 `wasm-opt` 进行代码优化（`--enable-simd` 为 wasm-opt 层面的 SIMD 处理，
+  rustc `target-feature=+simd128` 未启用）
+- 减少内存分配（零拷贝 `SharedF64Buffer` 直写直读）
 
 ### 前端优化
 - 代码分割和懒加载

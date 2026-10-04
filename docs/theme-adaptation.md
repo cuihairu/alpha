@@ -6,7 +6,7 @@
 | 平台 | 实现位 | 偏好持久化 | 系统跟随 | 状态 |
 |---|---|---|---|---|
 | Web | `web/app/src/lib/theme.ts` + ThemeToggle（L432） | localStorage `alpha.theme` | `matchMedia('prefers-color-scheme: dark')` + change 监听 | ✅ L432 |
-| Desktop | 复用 web 应用（tauri 装同一前端）；窗口 chrome 跟随 OS 默认（tauri v1 `theme` 仅 Light/Dark 无 system 档，L516 实测过 schema，故留空走 OS 决定） | 同 web（webview localStorage） | 同 web | ✅ 随 L432/L516 |
+| Desktop | 兜底壳 `web/dist/desktop-shell.js` 的 `applyTheme`（窗口装 web/dist 原生页，非 React 工程）；`tauri.conf.json` 不配 `theme` 字段——v1 schema 只收 `light/dark` 无 system 档，留空即跟随 OS | Rust `AppConfig.theme`（`config.rs:29`，默认 `system`，非法值校验拦下），随 `initialize_app` payload 下发——零 localStorage | `matchMedia('prefers-color-scheme: dark')` + change 监听（`desktop-shell.js:97-116`） | ✅ L115 |
 | Android | `mobile/android/.../Theme.kt`（本项）：`AlphaTheme` 切 Material3 light/dark | `ThemeSettingsStore`（KeyValueStore 单键，损坏回 SYSTEM） | `isSystemInDarkTheme()` | ✅ L511 |
 | iOS | 目录属 L119 交付面不动；对应物登记：`.preferredColorScheme` + `@Environment(\.colorScheme)`，偏好入 App Storage | 留档待 iOS 解封 | `UITraitCollection.userInterfaceStyle` | 登记 |
 
