@@ -3,6 +3,7 @@
 //! 定义所有服务间的通信协议和数据格式
 
 pub mod grpc;
+pub mod instrument;
 pub mod rest;
 pub mod websocket;
 // proto 代码生成依赖 tonic transport（服务端专属）；wasm 侧 --no-default-features 时不存在
@@ -16,6 +17,7 @@ pub mod proto {
 
 // 重新导出主要类型
 pub use grpc::*;
+pub use instrument::*;
 pub use rest::*;
 pub use websocket::*;
 

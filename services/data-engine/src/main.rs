@@ -5,8 +5,12 @@
 use std::{
     collections::{HashMap, VecDeque},
     net::SocketAddr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::Instant,
+};
+
+use alpha_protocols::instrument::{
+    instrument_id, parse_instrument_id, Exchange, Instrument, InstrumentType,
 };
 
 use alpha_core::{
@@ -179,6 +183,9 @@ struct AppState {
     config: Arc<AppConfig>,
     /// Prometheus 指标渲染句柄（/metrics）
     metrics: PrometheusHandle,
+    /// 证券主数据注册表（instrument_id → Instrument；见 architecture-review §3.2）。
+    /// 当前为启动时种子装载，后续可接权威源的增量刷新。
+    instruments: Arc<RwLock<HashMap<String, Instrument>>>,
 }
 
 /// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
@@ -209,6 +216,7 @@ impl AppState {
             analysis: AnalysisEngine::new(),
             config,
             metrics: global_metrics_handle().clone(),
+            instruments: Arc::new(RwLock::new(seed_instruments())),
         }
     }
 
@@ -347,6 +355,189 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 证券主数据种子注册表（architecture-review §3.2）。
+///
+/// 内置 A 股代表标的：双交易所、覆盖 equity/index/etf 三类，并刻意收录
+/// 000001 消歧示范对（cn.sse.000001 = 上证指数 / cn.szse.000001 = 平安银行）。
+/// listed_at 为真实上市日期，作为契约样例。
+fn seed_instruments() -> HashMap<String, Instrument> {
+    use chrono::NaiveDate;
+
+    let seeds = [
+        (
+            Exchange::Sse,
+            "600519",
+            "贵州茅台",
+            InstrumentType::Equity,
+            Some((2001, 8, 27)),
+        ),
+        (
+            Exchange::Sse,
+            "600036",
+            "招商银行",
+            InstrumentType::Equity,
+            Some((2002, 4, 9)),
+        ),
+        (
+            Exchange::Szse,
+            "000001",
+            "平安银行",
+            InstrumentType::Equity,
+            Some((1991, 4, 3)),
+        ),
+        (
+            Exchange::Szse,
+            "300750",
+            "宁德时代",
+            InstrumentType::Equity,
+            Some((2018, 6, 11)),
+        ),
+        (
+            Exchange::Sse,
+            "000001",
+            "上证指数",
+            InstrumentType::Index,
+            Some((1990, 12, 19)),
+        ),
+        (
+            Exchange::Sse,
+            "000300",
+            "沪深300",
+            InstrumentType::Index,
+            Some((2005, 4, 8)),
+        ),
+        (
+            Exchange::Szse,
+            "399001",
+            "深证成指",
+            InstrumentType::Index,
+            Some((1995, 1, 23)),
+        ),
+        (
+            Exchange::Sse,
+            "510300",
+            "沪深300ETF",
+            InstrumentType::Etf,
+            Some((2012, 5, 28)),
+        ),
+        (
+            Exchange::Szse,
+            "159915",
+            "创业板ETF",
+            InstrumentType::Etf,
+            Some((2011, 9, 20)),
+        ),
+    ];
+
+    seeds
+        .into_iter()
+        .map(|(exchange, symbol, name, instrument_type, listed)| {
+            let mut instrument = Instrument::new(exchange, symbol, name, instrument_type);
+            instrument.listed_at = listed.map(|(y, m, d)| {
+                NaiveDate::from_ymd_opt(y, m, d).expect("seed listed date must be valid")
+            });
+            (instrument.instrument_id.clone(), instrument)
+        })
+        .collect()
+}
+
+fn parse_instrument_type(raw: &str) -> Result<InstrumentType, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "equity" => Ok(InstrumentType::Equity),
+        "index" => Ok(InstrumentType::Index),
+        "fund" => Ok(InstrumentType::Fund),
+        "bond" => Ok(InstrumentType::Bond),
+        "etf" => Ok(InstrumentType::Etf),
+        "other" => Ok(InstrumentType::Other),
+        other => Err(format!(
+            "未知证券类型「{other}」（可选 equity/index/fund/bond/etf/other）"
+        )),
+    }
+}
+
+/// GET /instruments 查询参数（均可选；exchange/type 传了就必须合法）
+#[derive(Debug, Deserialize)]
+struct InstrumentQueryParams {
+    /// 按交易所过滤（大小写不敏感；SSE/SH 或 SZSE/SZ）
+    exchange: Option<String>,
+    /// 按证券类型过滤（equity/index/fund/bond/etf/other）
+    #[serde(rename = "type")]
+    instrument_type: Option<String>,
+    /// 按符号子串过滤（大小写不敏感）
+    symbol: Option<String>,
+    /// 按名称子串过滤（大小写不敏感）
+    q: Option<String>,
+}
+
+/// GET /instruments：列出注册表（可选组合过滤）
+#[tracing::instrument(skip(state))]
+async fn list_instruments(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<InstrumentQueryParams>,
+) -> Result<Json<serde_json::Value>, ApiErrorResponse> {
+    let exchange = match params.exchange {
+        None => None,
+        Some(raw) => Some(Exchange::parse_token(&raw).map_err(ApiErrorResponse::bad_request)?),
+    };
+    let instrument_type = match params.instrument_type {
+        None => None,
+        Some(raw) => Some(parse_instrument_type(&raw).map_err(ApiErrorResponse::bad_request)?),
+    };
+    let symbol_lc = params.symbol.as_deref().map(str::to_lowercase);
+    let name_lc = params.q.as_deref().map(str::to_lowercase);
+
+    let registry = state
+        .instruments
+        .read()
+        .expect("instrument registry poisoned");
+    let instruments: Vec<&Instrument> = registry
+        .values()
+        .filter(|inst| exchange.map_or(true, |e| inst.exchange == e))
+        .filter(|inst| instrument_type.map_or(true, |t| inst.instrument_type == t))
+        .filter(|inst| {
+            symbol_lc
+                .as_deref()
+                .map_or(true, |q| inst.symbol.to_lowercase().contains(q))
+        })
+        .filter(|inst| {
+            name_lc.as_deref().map_or(true, |q| {
+                inst.name.to_lowercase().contains(q) || inst.symbol.to_lowercase().contains(q)
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "total": instruments.len(),
+        "instruments": instruments,
+    })))
+}
+
+/// GET /instruments/:id：按 instrument_id 精确查询（容忍大小写/空白，
+/// 经 parse_instrument_id 规范后再查键）
+#[tracing::instrument(skip(state))]
+async fn get_instrument(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiErrorResponse> {
+    let (market, exchange, symbol) =
+        parse_instrument_id(&id).map_err(ApiErrorResponse::bad_request)?;
+    let canonical = instrument_id(market, exchange, &symbol);
+    let registry = state
+        .instruments
+        .read()
+        .expect("instrument registry poisoned");
+    match registry.get(&canonical) {
+        Some(instrument) => Ok(Json(serde_json::json!({
+            "success": true,
+            "instrument": instrument,
+        }))),
+        None => Err(ApiErrorResponse::not_found(format!(
+            "instrument {id} 未登记"
+        ))),
+    }
+}
+
 fn build_router(state: Arc<AppState>) -> Router {
     let enable_cors = state.config.server.enable_cors;
 
@@ -362,6 +553,8 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/stocks/:symbol/history", get(get_stock_history))
         .route("/stocks/:symbol/history.csv", get(get_stock_history_csv))
         .route("/stocks/:symbol/indicators", get(get_stock_indicators))
+        .route("/instruments", get(list_instruments))
+        .route("/instruments/:id", get(get_instrument))
         .route("/indicators/calculate", post(calculate_indicators))
         .route("/analytics/performance", post(calculate_performance))
         .layer(axum::middleware::from_fn_with_state(
@@ -2205,6 +2398,7 @@ mod tests {
             analysis: AnalysisEngine::new(),
             config: test_config(),
             metrics: global_metrics_handle().clone(),
+            instruments: Arc::new(RwLock::new(seed_instruments())),
         });
 
         let symbol = format!("E2E-{}", uuid::Uuid::new_v4());
@@ -2233,5 +2427,88 @@ mod tests {
         assert_eq!(latest.price, 43.0);
 
         Ok(())
+    }
+
+    /// /instruments（architecture-review §3.2 数据契约面）：
+    /// 列表可组合过滤（exchange/type/symbol/q）；单条按规范键精确命中；
+    /// 000001 双市场消歧键共存；未知 id 404、非法参数 400。
+    #[tokio::test]
+    async fn instruments_endpoints_list_filter_and_get() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let app = build_router(Arc::new(AppState::new(test_config()).await));
+        let get_json = |app: Router, uri: String| {
+            let app = app.clone();
+            async move {
+                let res = app
+                    .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                let status = res.status();
+                let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                (
+                    status,
+                    serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+                )
+            }
+        };
+
+        // 列表：种子全覆盖（9 条 + 双交易所 + 三种类型）
+        let (status, body) = get_json(app.clone(), "/instruments".to_string()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["total"], 9, "种子注册表数量");
+        let ids: Vec<&str> = body["instruments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v["instrument_id"].as_str().unwrap())
+            .collect();
+        // 000001 双市场消歧键必须共存
+        assert!(ids.contains(&"cn.sse.000001"), "上证指数");
+        assert!(ids.contains(&"cn.szse.000001"), "平安银行");
+        assert!(ids.contains(&"cn.sse.600519"), "贵州茅台");
+
+        // 组合过滤
+        let (status, body) = get_json(app.clone(), "/instruments?exchange=sse".to_string()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["instruments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|v| v["exchange"] == "SSE"));
+
+        let (status, body) = get_json(app.clone(), "/instruments?type=etf".to_string()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["total"], 2, "两只 ETF 种子");
+
+        let (status, body) = get_json(app.clone(), "/instruments?q=茅台".to_string()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["total"], 1);
+        assert_eq!(body["instruments"][0]["symbol"], "600519");
+
+        // 非法参数 → 400（exchange 未知、type 未知）
+        let (status, _) = get_json(app.clone(), "/instruments?exchange=NASD".to_string()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = get_json(app.clone(), "/instruments?type=option".to_string()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // 单条：规范键命中（含大小写宽容）；未知 404；格式非法 400
+        let (status, body) = get_json(app.clone(), "/instruments/cn.sse.600519".to_string()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["instrument"]["name"], "贵州茅台");
+        assert_eq!(body["instrument"]["currency"], "CNY");
+
+        let (status, body) = get_json(app.clone(), "/instruments/CN.szse.000001".to_string()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["instrument"]["symbol"], "000001");
+        assert_eq!(body["instrument"]["name"], "平安银行");
+
+        let (status, _) = get_json(app.clone(), "/instruments/cn.sse.999999".to_string()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = get_json(app.clone(), "/instruments/not-an-id".to_string()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }
