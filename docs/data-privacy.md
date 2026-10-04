@@ -27,7 +27,7 @@
 | 义务（GDPR / CCPA） | 落地面 | 状态 |
 |---|---|---|
 | 访问权 / 可携权（Art.15/20，CCPA 右至副本） | `web/app/src/lib/privacy.ts` `exportUserData`：`alpha.` 键全量 JSON 快照 + PrivacyPanel 一键下载 | ✅ web/桌面 |
-| 删除权 / 被遗忘权（Art.17，CCPA 右至删除） | `clearUserData`：仅删 `alpha.` 应用键（显式清单 ∪ 前缀扫描），非应用存储不动，幂等 | ✅ web/桌面 |
+| 删除权 / 被遗忘权（Art.17，CCPA 右至删除） | 本地 `clearUserData`：仅删 `alpha.` 应用键（显式清单 ∪ 前缀扫描），非应用存储不动，幂等；服务端 `DELETE /api/v1/account` 整账户清除（account-sync §2.5），幂等 + 审计留痕 | ✅ web/桌面 + 服务端 |
 | 撤回同意（Art.7(3)） | 无非必要处理面（无遥测/无第三方 tracker/无 cookie 同意需求）；生物识别门可关闭（L512，默认关，opt-in） | ✅ |
 | 数据最小化（Art.5(1)(c)） | 本地即最小化；服务端只收查询参数；隐私政策 §1.1 | ✅ |
 | 存储限制（Art.5(1)(e)） | §3 保留期限表；无长期用户维度存储 | ✅ |
@@ -51,8 +51,9 @@
   （隐私政策 §1.6），应用内导出/清除归后续项（登记）；
 - **iOS**：`mobile/ios/` 属 L119 会话交付面绝不动，同步登记；
 - **服务端响应数据主体请求**：L476 账户面已落（本表已重评）——存储对象为
-  profile 与工作区 KV；**删除端点尚未实现**（登记为接线发布前必办项），
-  未配 Postgres 时默认内存形态重启即清。
+  profile 与工作区 KV；删除走 `DELETE /api/v1/account`（account-sync §2.5，
+  2026-10 落地：持久层先删/内存后删、幂等 204、`AccountDataDeleted` 审计
+  留痕），未配 Postgres 时默认内存形态重启即清。
 
 ## 5. 泄露响应（Art.33，72h 通知链）
 

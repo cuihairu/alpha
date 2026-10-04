@@ -35,6 +35,8 @@ pub enum AuditEvent {
     TokenProvisionDenied { identity: String },
     /// bootstrap 签发成功（状态变更，必记）
     TokenProvisioned { sub: String },
+    /// 账户服务端数据删除（GDPR Art.17 行使记录；状态变更，必记）
+    AccountDataDeleted { account_id: String },
 }
 
 impl AuditEvent {
@@ -45,6 +47,7 @@ impl AuditEvent {
             AuditEvent::AccessDenied { .. } => "access_denied",
             AuditEvent::TokenProvisionDenied { .. } => "token_provision_denied",
             AuditEvent::TokenProvisioned { .. } => "token_provisioned",
+            AuditEvent::AccountDataDeleted { .. } => "account_data_deleted",
         }
     }
 }

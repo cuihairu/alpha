@@ -266,6 +266,7 @@ fn build_router(state: GatewayState) -> Router {
         // 账户与跨端同步（L476）：走 /api 前缀与上游反代同级，故与反代面
         // 共用同一道 auth → shield → rate_limit 链（认证后才知账户 id）
         .route("/v1/account/profile", get(get_account_profile).put(put_account_profile))
+        .route("/v1/account", axum::routing::delete(delete_account))
         .route("/v1/account/sync", axum::routing::post(post_account_sync))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -591,6 +592,32 @@ async fn put_account_profile(
             .into_response(),
         Err(err) => (
             StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "success": false,
+                "error": err,
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// `DELETE /api/v1/account`：删除当前账户的全部服务端数据（档案 + 同步
+/// 记录），data-privacy §4（GDPR Art.17 / CCPA 删除权）的服务端落实面。
+/// 幂等：重复删/无数据都 204；后端删除失败 500（不假称已删）。
+async fn delete_account(
+    State(state): State<GatewayState>,
+    axum::Extension(claims): axum::Extension<Option<auth::Claims>>,
+) -> Response {
+    let account_id = request_account_id(claims.as_ref());
+    match state.account_store.delete(&account_id).await {
+        Ok(_) => {
+            audit::emit(&audit::AuditEvent::AccountDataDeleted {
+                account_id: account_id.clone(),
+            });
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
                 "success": false,
                 "error": err,
@@ -1167,8 +1194,12 @@ mod tests {
     /// burst 护栏：桶深耗尽 → 同身份 429；不同身份独立桶不受牵连
     #[tokio::test]
     async fn shield_burst_guard_rejects_flood_within_bucket_depth() {
+        // refill 取近零值：默认 50/s（20ms 回一枚）会让隔调度间隙的两发
+        // 请求被补出的令牌放行——本测只锁「桶深耗尽即拒」，refill 行为
+        // 由 BurstGuard 单测（burst_guard_absorbs_burst_then_refills）覆盖
         let base = spawn_shield_app(shield::ShieldConfig {
             burst_capacity: 1,
+            burst_refill_per_sec: 0.001,
             ..Default::default()
         })
         .await;
@@ -1951,6 +1982,97 @@ mod tests {
             )
             .await;
         assert_eq!(response.accepted.len(), 1, "后端写失败不应拒绝同步请求");
+    }
+
+    /// DELETE 账户面（data-privacy §4）：档案与同步记录整体清除，幂等；
+    /// 删后 GET 复建的是缺省档案，改名不复活
+    #[tokio::test]
+    async fn account_delete_is_idempotent_and_resets_profile() {
+        let base = spawn_account_app(account_test_state()).await;
+        let client = reqwest::Client::new();
+        let profile_url = format!("{base}/api/v1/account/profile");
+        let sync_url = format!("{base}/api/v1/account/sync");
+        let delete_url = format!("{base}/api/v1/account");
+
+        // 建档案 + 改名 + 留一条同步记录，让删除前后可分辨
+        let created: serde_json::Value =
+            client.get(&profile_url).send().await.unwrap().json().await.unwrap();
+        assert_eq!(created["rev"], 1);
+        let patched: serde_json::Value = client
+            .put(&profile_url)
+            .header("content-type", "application/json")
+            .body(r#"{"display_name":"待删用户"}"#)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(patched["rev"], 2);
+        let pushed = post_json(
+            &client,
+            &sync_url,
+            r#"{"cursor":0,"base":{},"pushes":[{"key":"workspace:a","base_rev":0,"payload":{"name":"盯盘"}}]}"#,
+        )
+        .await;
+        assert_eq!(
+            pushed["cursor"], 2,
+            "档案改名占一个增量位 + 推送占一个（update_profile 触碰水位）"
+        );
+
+        let deleted = client.delete(&delete_url).send().await.unwrap();
+        assert_eq!(deleted.status().as_u16(), 204, "删除成功无响应体");
+
+        // 复建的档案 = 缺省（rev 归 1、展示名回「本机用户」），同步水位归零
+        let fresh: serde_json::Value =
+            client.get(&profile_url).send().await.unwrap().json().await.unwrap();
+        assert_eq!(fresh["rev"], 1, "删除后档案应重建为缺省，不复用旧 rev");
+        assert_eq!(fresh["display_name"], "本机用户", "改名不复活");
+        let cleared = post_json(&client, &sync_url, r#"{"cursor":0,"base":{},"pushes":[]}"#).await;
+        assert!(
+            cleared["changes"].as_array().unwrap().is_empty(),
+            "同步记录应一并清除: {cleared}"
+        );
+        assert_eq!(cleared["cursor"], 0, "同步水位随删除归零");
+
+        // 幂等：重复删仍 204（无数据可删不是错误）
+        let again = client.delete(&delete_url).send().await.unwrap();
+        assert_eq!(again.status().as_u16(), 204);
+    }
+
+    /// 删除清的是持久层快照：写穿快照删净后，换一份空内存存储（等价重启）
+    /// 懒加载到的是缺省档案而非旧快照——绝不出现「声称已删而快照还在」
+    #[tokio::test]
+    async fn account_delete_clears_persisted_snapshot() {
+        let backend = Arc::new(alpha_storage::MemoryStorage::new());
+        let store = account::AccountStore::with_persistence(backend.clone());
+        store.profile("alice", 100).await;
+        store
+            .update_profile(
+                "alice",
+                &account::ProfilePatch {
+                    display_name: Some("改名".into()),
+                    email: None,
+                    locale: None,
+                },
+                150,
+            )
+            .await
+            .unwrap();
+
+        let removed = store.delete("alice").await.unwrap();
+        assert!(removed, "有数据可删应返回 true");
+        let keys = backend.list_keys("alpha:account:").await.unwrap();
+        assert!(keys.is_empty(), "持久层快照应删净: {keys:?}");
+
+        // 空内存 + 同一后端 = 等价重启：懒加载不复活旧快照
+        let fresh = account::AccountStore::with_persistence(backend);
+        let profile = fresh.profile("alice", 300).await;
+        assert_eq!(profile.rev, 1, "删除后懒加载应重建缺省档案而非旧快照");
+        assert_eq!(profile.display_name, "alice", "改名不复活");
+
+        // 幂等：无数据可删返回 false，不是错误
+        assert!(!store.delete("alice").await.unwrap());
     }
 
     /// 写失败后端（账户写穿 fail-open 测试桩；`store` 恒失败）

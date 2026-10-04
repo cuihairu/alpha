@@ -282,6 +282,26 @@ impl AccountStore {
         updated
     }
 
+    /// 账户数据删除（`DELETE /api/v1/account`，data-privacy §4 / account-sync
+    /// §6 登记的 purge 端点）：档案 + 同步记录整体清除。持久层先删、内存后
+    /// 删——后端删除失败时内存态保持原样并上抛错误，绝不出现「声称已删而
+    /// 快照还在持久层、懒加载一碰就复活」的半删状态。幂等：重复删或删不
+    /// 存在的账户都返回 false（无数据可删），不是错误。
+    pub async fn delete(&self, account_id: &str) -> Result<bool, String> {
+        let existed_backend = match self.persistence.as_ref() {
+            Some(backend) => backend
+                .delete(&Self::store_key(account_id))
+                .await
+                .map_err(|err| {
+                    tracing::warn!(%account_id, %err, "account snapshot delete failed");
+                    err.to_string()
+                })?,
+            None => false,
+        };
+        let had_memory = self.lock().remove(account_id).is_some();
+        Ok(had_memory || existed_backend)
+    }
+
     /// 同步往返：接受推送 + 回传增量。
     ///
     /// 接受条件：键/载荷校验通过 且（服务端无该键 或 `base_rev` 等于
