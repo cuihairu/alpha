@@ -229,6 +229,15 @@ textarea {
   color: #27ae60;
 }
 
+/* 动效降级（ux-consistency §4 登记项）：用户偏好减弱动效时停用 flash
+   动画，方向色（color）保留——跳变反馈的语义不丢，只去掉 0.8s 闪烁 */
+@media (prefers-reduced-motion: reduce) {
+  .flash-up,
+  .flash-down {
+    animation: none;
+  }
+}
+
 /* ── L508 多标签页工作区 ─────────────────────────────── */
 .workspace-bar {
   margin: 12px 0;
