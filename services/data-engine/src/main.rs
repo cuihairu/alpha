@@ -896,6 +896,14 @@ async fn process_normalizer_message(
         Some(market_data) => {
             let payload_hash = message.envelope.payload_hash.clone();
             if state.payload_hash_seen(&payload_hash) {
+                // 数据质量（P2「重复」维度）：窗口内重放/重复发布计数——
+                // 静默丢弃面必须有量纲，否则去重窗口异常只能靠猜
+                metrics::counter!(
+                    "alpha_dataquality_duplicates_total",
+                    "stream" => message.envelope.stream.clone(),
+                    "source" => message.envelope.source.as_str().to_string(),
+                )
+                .increment(1);
                 tracing::debug!(
                     "Skipping duplicate payload {} (entry {})",
                     payload_hash,
@@ -932,6 +940,14 @@ async fn process_normalizer_message(
             }
         }
         None => {
+            // 数据质量（P2「完整性」维度）：无法规范化的载荷（缺 symbol/price
+            // 等必需字段）计数——直接 ack 跳过的静默面，掉了多少数据要可见
+            metrics::counter!(
+                "alpha_dataquality_invalid_payloads_total",
+                "stream" => message.envelope.stream.clone(),
+                "source" => message.envelope.source.as_str().to_string(),
+            )
+            .increment(1);
             tracing::warn!("Skipping invalid raw quote message {}", message.id);
             let _ = queue
                 .ack(RAW_QUOTES_STREAM, NORMALIZER_GROUP, &message.id)
@@ -943,6 +959,12 @@ async fn process_normalizer_message(
 /// 无法解码的条目：按 DLQ 契约隔离（quotes.dlq）并 ack，
 /// 避免滞留消费组 PEL 永不清理；DLQ 发布失败则不 ack，留待下轮重试。
 async fn quarantine_invalid(queue: &RedisStreamQueue, invalid: &InvalidMessage) {
+    // 数据质量（P2「完整性」维度，stream 层）：解码失败的隔离计数
+    metrics::counter!(
+        "alpha_dataquality_quarantined_total",
+        "stream" => invalid.stream.clone(),
+    )
+    .increment(1);
     tracing::warn!(
         "Quarantining undecodable message {} on {}: {}",
         invalid.id,

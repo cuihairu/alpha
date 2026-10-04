@@ -135,7 +135,11 @@ real-time-feed:8082、collector:8083 各自 `/metrics`，10s 间隔。
 - 实时：`alpha_realtime_messages_total`、`alpha_realtime_feed_connected`
 - 数据面：`alpha_dataengine_memory_bytes`、`alpha_dataengine_query_duration_seconds`
 - 数据质量：`alpha_dataquality_sequence_gaps_total`、
-  `alpha_dataquality_sequence_regressions_total`（sequence 断档/回退，见 architecture-review §5 P2）
+  `alpha_dataquality_sequence_regressions_total`（sequence 断档/回退）、
+  `alpha_dataquality_duplicates_total`（去重窗口命中）、
+  `alpha_dataquality_invalid_payloads_total`（规范化失败丢弃）、
+  `alpha_dataquality_quarantined_total`（解码失败入 DLQ），见
+  architecture-review §5 P2
 
 告警规则 9 条（`config/alpha-alerts.yml`）：GatewayRateLimitExceeded、
 GatewayShieldTriggered、GatewayUpstreamUnhealthy、GatewayErrorRateHigh、
