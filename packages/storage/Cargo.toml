@@ -22,6 +22,8 @@ chrono = { workspace = true }
 
 # 内部包
 alpha-core = { workspace = true, features = ["crypto"] }
+# 消息契约（EventEnvelope；不带 grpc 传输面）
+alpha-protocols = { workspace = true, default-features = false }
 
 # 序列化
 bincode = "1.3"

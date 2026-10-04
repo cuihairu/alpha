@@ -122,7 +122,7 @@ prometheus = "0.13"
 
 # 内部包引用
 alpha-core = { path = "packages/core" }
-alpha-protocols = { path = "packages/protocols" }
+alpha-protocols = { path = "packages/protocols", default-features = false }
 alpha-storage = { path = "packages/storage" }
 
 [patch.crates-io]

@@ -865,13 +865,7 @@ async fn process_normalizer_message(
                 return; // 不 ack：留待 claim_stale 兜底重放；指纹未记录，重试不会被去重吞掉
             }
 
-            let normalized = StreamEnvelope::new(
-                NORMALIZED_QUOTES_STREAM,
-                "normalized_quote",
-                "data-engine",
-                Some(market_data.symbol.clone()),
-                normalized_payload(&message.envelope, &market_data),
-            );
+            let normalized = build_normalized_envelope(&message.envelope, &market_data, Utc::now());
 
             if let Err(err) = queue.publish(NORMALIZED_QUOTES_STREAM, &normalized).await {
                 tracing::warn!("Failed to publish normalized quote: {}", err);
@@ -929,7 +923,9 @@ fn normalize_quote(envelope: &StreamEnvelope) -> Option<MarketData> {
 
     Some(MarketData {
         symbol,
-        timestamp: envelope.ingest_ts,
+        // 时间模型（architecture-review §3.3）：行情时刻用事件时间（源侧），
+        // v1 消息无 event_time 时退回 ingest_ts（历史行为）。
+        timestamp: envelope.event_time.unwrap_or(envelope.ingest_ts),
         price,
         volume,
         bid: payload.get("bid1").and_then(|v| v.as_f64()),
@@ -957,6 +953,33 @@ fn normalized_payload(envelope: &StreamEnvelope, market_data: &MarketData) -> se
     }
 
     serde_json::Value::Object(payload)
+}
+
+/// normalized 转发信封（Envelope v2，architecture-review §3.1/§3.3）：
+/// - `process_time` 打本跳完成时刻（时间三跳模型的处理时刻）
+/// - 上游契约字段**透传**：event_time（源侧事件时刻）、source_event_id
+///   （对账锚点）、market、sequence（断档检测）、trace_id（链路）——
+///   换跳不丢溯源信息；ingest_ts/payload_hash 由 new() 对本跳重新赋值。
+fn build_normalized_envelope(
+    upstream: &StreamEnvelope,
+    market_data: &MarketData,
+    process_time: DateTime<Utc>,
+) -> StreamEnvelope {
+    let mut normalized = StreamEnvelope::new(
+        NORMALIZED_QUOTES_STREAM,
+        "normalized_quote",
+        "data-engine",
+        Some(market_data.symbol.clone()),
+        normalized_payload(upstream, market_data),
+    )
+    .with_process_time(process_time);
+    // 上游契约字段透传（None 透传为 None，v1 上游消息缺失时本跳保持缺省）
+    normalized.event_time = upstream.event_time;
+    normalized.source_event_id = upstream.source_event_id.clone();
+    normalized.market = upstream.market.clone();
+    normalized.sequence = upstream.sequence;
+    normalized.trace_id = upstream.trace_id.clone();
+    normalized
 }
 
 /// Prometheus 抓取端点：渲染 metrics recorder 文本快照
@@ -2174,6 +2197,86 @@ mod tests {
         let payload = normalized_payload(&envelope, &market_data);
         assert_eq!(payload["symbol"], "000001");
         assert_eq!(payload["price"], 12.34);
+    }
+
+    /// 时间模型（§3.3）：normalize 的行情时刻取 event_time（源侧事件时刻），
+    /// v1 消息缺 event_time 时退回 ingest_ts。
+    #[test]
+    fn normalize_quote_prefers_event_time_and_falls_back_to_ingest() {
+        let event_ts = Utc::now() - Duration::minutes(3);
+        let with_event = StreamEnvelope::new(
+            "quotes.raw",
+            "quote",
+            "eastmoney",
+            None,
+            serde_json::json!({"symbol": "000001", "price": 12.34, "volume": 1}),
+        )
+        .with_event_time(event_ts);
+        let got = normalize_quote(&with_event).unwrap();
+        assert_eq!(got.timestamp, event_ts, "event_time 优先于 ingest_ts");
+
+        // v1 老消息：无 event_time → 退回 ingest_ts（历史行为不变）
+        let legacy = quote_envelope(serde_json::json!({
+            "symbol": "000001",
+            "price": 12.34,
+            "volume": 1
+        }));
+        let got = normalize_quote(&legacy).unwrap();
+        assert_eq!(got.timestamp, legacy.ingest_ts);
+    }
+
+    /// Envelope v2 转发：process_time 打本跳时刻；上游契约字段
+    /// （event_time/source_event_id/market/sequence/trace_id）换跳不丢。
+    #[test]
+    fn normalized_envelope_carries_upstream_contract_and_process_time() {
+        let event_ts = Utc::now() - Duration::minutes(2);
+        let upstream = StreamEnvelope::new(
+            "quotes.raw",
+            "quote",
+            "eastmoney",
+            Some("000001".to_string()),
+            serde_json::json!({"symbol": "000001", "price": 12.34, "volume": 1}),
+        )
+        .with_event_time(event_ts)
+        .with_source_event_id("src-7")
+        .with_market("cn")
+        .with_sequence(42)
+        .with_trace_id("trace-1");
+        let market_data = MarketData {
+            symbol: "000001".to_string(),
+            timestamp: event_ts,
+            price: 12.34,
+            volume: 1,
+            bid: None,
+            ask: None,
+            open: None,
+            high: None,
+            low: None,
+        };
+
+        let process_ts = Utc::now();
+        let normalized = build_normalized_envelope(&upstream, &market_data, process_ts);
+        assert_eq!(normalized.stream, NORMALIZED_QUOTES_STREAM);
+        assert_eq!(normalized.event_type, "normalized_quote");
+        assert_eq!(normalized.event_time, Some(event_ts), "event_time 透传");
+        assert_eq!(normalized.source_event_id.as_deref(), Some("src-7"));
+        assert_eq!(normalized.market.as_deref(), Some("cn"));
+        assert_eq!(normalized.sequence, Some(42));
+        assert_eq!(normalized.trace_id.as_deref(), Some("trace-1"));
+        assert_eq!(normalized.process_time, Some(process_ts), "本跳处理时刻");
+        // normalized 信封的 payload 含规范化字段（normalized_payload 既有契约）
+        assert_eq!(normalized.payload["price"], 12.34);
+
+        // v1 上游（v2 字段全缺）→ 透传后保持缺省，仅 process_time 为本跳新打
+        let legacy =
+            quote_envelope(serde_json::json!({"symbol": "000001", "price": 1.0, "volume": 1}));
+        let legacy_normalized = build_normalized_envelope(&legacy, &market_data, process_ts);
+        assert!(legacy_normalized.event_time.is_none());
+        assert!(legacy_normalized.source_event_id.is_none());
+        assert!(legacy_normalized.market.is_none());
+        assert!(legacy_normalized.sequence.is_none());
+        assert!(legacy_normalized.trace_id.is_none());
+        assert_eq!(legacy_normalized.process_time, Some(process_ts));
     }
 
     fn storage_settings(enabled: bool, url: Option<&str>) -> StorageConfig {

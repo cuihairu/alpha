@@ -2,6 +2,7 @@
 //!
 //! 定义所有服务间的通信协议和数据格式
 
+pub mod events;
 pub mod grpc;
 pub mod instrument;
 pub mod rest;
@@ -16,6 +17,7 @@ pub mod proto {
 }
 
 // 重新导出主要类型
+pub use events::*;
 pub use grpc::*;
 pub use instrument::*;
 pub use rest::*;

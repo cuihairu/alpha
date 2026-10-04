@@ -493,13 +493,18 @@ impl SimpleCollector {
 
         let mut published = 0usize;
         for quote in quotes {
+            // Envelope v2（architecture-review §3.1/§3.3）：源侧行情时刻上提为
+            // event_time；market 标注 cn（A 股采集面）。source_event_id/sequence
+            // 待数据源提供对账锚点与单调序号后接线（当前源无此字段，留缺省）。
             let envelope = StreamEnvelope::new(
                 QUOTES_STREAM,
                 "quote",
                 quote.source.clone(),
                 Some(quote.symbol.clone()),
                 serde_json::to_value(&quote).map_err(|e| e.to_string())?,
-            );
+            )
+            .with_event_time(quote.timestamp)
+            .with_market("cn");
             queue
                 .publish(QUOTES_STREAM, &envelope)
                 .await

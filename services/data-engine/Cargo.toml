@@ -49,5 +49,5 @@ uuid = { workspace = true }
 
 # 内部包
 alpha-core = { workspace = true }
-alpha-protocols = { workspace = true }
+alpha-protocols = { workspace = true, features = ["grpc"] }
 alpha-storage = { workspace = true }

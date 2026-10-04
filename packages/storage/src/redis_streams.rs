@@ -1,50 +1,23 @@
 //! Redis Streams 队列支持
+//!
+//! 消息契约（`StreamEnvelope`）已迁至 `alpha-protocols::events::EventEnvelope`
+//! （architecture-review §2.2：契约属于 protocols 层，storage 只负责持久化）。
+//! 此处保留同名别名，既有消费者（collector/data-engine/real-time-feed）的
+//! `use alpha_storage::StreamEnvelope` 引用面零改动；新代码建议直接引用
+//! protocols 的 `EventEnvelope`。
+//!
+//! 注意：stream 条目的 payload 字段存的是 **envelope 整体 JSON**（v1 既有
+//! 布局，解码兼容），顶层 fields 是冗余索引。
 
 use alpha_core::errors::{AlphaError, AlphaResult};
-use chrono::{DateTime, Utc};
 use redis::{
     streams::{StreamRangeReply, StreamReadOptions, StreamReadReply},
     AsyncCommands,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamEnvelope {
-    pub id: Option<String>,
-    pub stream: String,
-    pub version: String,
-    pub event_type: String,
-    pub source: String,
-    pub symbol: Option<String>,
-    pub ingest_ts: DateTime<Utc>,
-    pub payload_hash: String,
-    pub payload: serde_json::Value,
-    pub created_at: DateTime<Utc>,
-}
-
-impl StreamEnvelope {
-    pub fn new(
-        stream: impl Into<String>,
-        event_type: impl Into<String>,
-        source: impl Into<String>,
-        symbol: Option<String>,
-        payload: serde_json::Value,
-    ) -> Self {
-        Self {
-            id: None,
-            stream: stream.into(),
-            version: "v1".to_string(),
-            event_type: event_type.into(),
-            source: source.into(),
-            symbol,
-            ingest_ts: Utc::now(),
-            payload_hash: payload_hash(&payload),
-            payload,
-            created_at: Utc::now(),
-        }
-    }
-}
+/// 管线消息契约（v2，见 protocols/events.rs）；storage 侧兼容别名
+pub use alpha_protocols::events::EventEnvelope as StreamEnvelope;
 
 #[derive(Clone)]
 pub struct RedisStreamQueue {
@@ -538,13 +511,4 @@ impl RedisStreamQueue {
         }
         Ok(Some(envelope))
     }
-}
-
-fn payload_hash(payload: &serde_json::Value) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    payload.to_string().hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
 }
