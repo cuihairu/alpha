@@ -1995,8 +1995,14 @@ mod tests {
         let delete_url = format!("{base}/api/v1/account");
 
         // 建档案 + 改名 + 留一条同步记录，让删除前后可分辨
-        let created: serde_json::Value =
-            client.get(&profile_url).send().await.unwrap().json().await.unwrap();
+        let created: serde_json::Value = client
+            .get(&profile_url)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
         assert_eq!(created["rev"], 1);
         let patched: serde_json::Value = client
             .put(&profile_url)
@@ -2024,8 +2030,14 @@ mod tests {
         assert_eq!(deleted.status().as_u16(), 204, "删除成功无响应体");
 
         // 复建的档案 = 缺省（rev 归 1、展示名回「本机用户」），同步水位归零
-        let fresh: serde_json::Value =
-            client.get(&profile_url).send().await.unwrap().json().await.unwrap();
+        let fresh: serde_json::Value = client
+            .get(&profile_url)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
         assert_eq!(fresh["rev"], 1, "删除后档案应重建为缺省，不复用旧 rev");
         assert_eq!(fresh["display_name"], "本机用户", "改名不复活");
         let cleared = post_json(&client, &sync_url, r#"{"cursor":0,"base":{},"pushes":[]}"#).await;
