@@ -22,6 +22,7 @@ Crawler (Py/Rust) -> Redis Streams -> Rust Processor -> TimescaleDB/ClickHouse/R
 ## 关键模块
 ### 1. 采集调度
 - **任务描述**：以 YAML/JSON 定义每个数据源（URL、请求参数、解析策略、刷新频率）。已落地：`services/collector/src/task_templates.rs`（装载/校验/转 `TaskDefinition`），`ALPHA_COLLECTOR_TASKS` 指向模板文件或目录即启动装载，示例见 `config/collector.tasks.yaml`。
+- **刷新频率执行面**：`services/collector/src/cron_scheduler.rs`（5/6 段 cron 解析 + 每秒扫描派发，`schedule` 到期自动执行，执行中不重入）；模板校验与调度执行共用同一解析器。执行链路复用 HTTP `POST /tasks/:id/execute`。
 - **执行引擎**：Python（requests/Playwright/asyncio）为主，部分场景可选 Go 或 Node.js。
 - **抗封策略**：UA/Headers 轮换、可插拔代理池、随机延迟、失败自动重试。
 - **产出**：遵循 Protobuf Schema 的结构化 JSON，写入 Kafka/NATS。

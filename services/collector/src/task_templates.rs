@@ -494,23 +494,12 @@ fn validate_url(url: &str) -> Result<(), String> {
     }
 }
 
-/// 轻量 cron 形检（非完整 cron 语义解析）：5/6 段、每段非空、字符集限
-/// `[A-Za-z0-9*/?,\-#LW]`——目的是拦住手误而非替代调度器解析
+/// cron 校验复用 cron_scheduler::parse（5/6 段、域取值、步进、区间约束全收口
+/// 一处——模板面与调度执行面语义永不脱节）
 fn validate_schedule(schedule: &str) -> Result<(), String> {
-    let fields: Vec<&str> = schedule.split_whitespace().collect();
-    if fields.len() != 5 && fields.len() != 6 {
-        return Err(format!(
-            "schedule 「{schedule}」须为 5/6 段 cron 表达式（6 段含秒位，如 `0 */5 * * * *`）"
-        ));
-    }
-    let allowed = |c: char| c.is_ascii_alphanumeric() || "*/?,-#LW".contains(c);
-    if let Some(bad) = schedule
-        .chars()
-        .find(|c| !allowed(*c) && !c.is_whitespace())
-    {
-        return Err(format!("schedule 「{schedule}」含非法字符 {bad:?}"));
-    }
-    Ok(())
+    crate::cron_scheduler::parse(schedule)
+        .map(|_| ())
+        .map_err(|e| format!("schedule 「{schedule}」非法：{e}"))
 }
 
 /// 与 main_simple::parse_priority 同值域，但未知值显式报错而非静默降级

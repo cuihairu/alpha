@@ -19,7 +19,9 @@ async fn main() -> Result<()> {
         .ok()
         .map(std::path::PathBuf::from)
         .unwrap_or(std::env::current_dir()?);
-    let collector = alpha_collector::main_simple::SimpleCollector::new(workspace_root);
+    let collector = std::sync::Arc::new(alpha_collector::main_simple::SimpleCollector::new(
+        workspace_root,
+    ));
     collector.start().await?;
 
     // 任务模板（architecture §24 任务描述）：ALPHA_COLLECTOR_TASKS 指向 YAML/JSON
@@ -38,7 +40,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    let router = alpha_collector::main_simple::build_router(Arc::new(collector));
+    // Cron 调度（architecture §24 刷新频率执行面）：schedule 非空的任务按
+    // cron 周期自动执行；HTTP API 与模板提交的任务同享
+    Arc::clone(&collector).start_cron_scheduler().await;
+
+    let router = alpha_collector::main_simple::build_router(Arc::clone(&collector));
 
     // 与 docker-compose/Dockerfile/dev-start 的约定一致（8083），可用 ALPHA_COLLECTOR_BIND 覆盖
     let addr: SocketAddr = std::env::var("ALPHA_COLLECTOR_BIND")

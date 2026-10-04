@@ -55,10 +55,10 @@ const QUOTES_STREAM: &str = "quotes.raw";
 pub struct SimpleCollector {
     /// 工作空间根目录（用于脚本路径、工作目录等）
     workspace_root: PathBuf,
-    /// 任务存储
-    tasks: Arc<RwLock<HashMap<String, TaskDefinition>>>,
-    /// 运行中任务
-    running_tasks: Arc<RwLock<HashMap<String, TaskStatus>>>,
+    /// 任务存储（cron_scheduler 只读扫描）
+    pub(crate) tasks: Arc<RwLock<HashMap<String, TaskDefinition>>>,
+    /// 运行中任务（cron_scheduler 判定重入）
+    pub(crate) running_tasks: Arc<RwLock<HashMap<String, TaskStatus>>>,
     /// 多语言爬虫执行器
     crawler: Arc<MultilangCrawler>,
     /// 事件广播
@@ -458,6 +458,23 @@ impl SimpleCollector {
                 Err(e.to_string())
             }
         }
+    }
+
+    /// 启动 cron 调度（architecture §24 刷新频率执行面）：每秒扫描 `schedule`
+    /// 非空的任务，到期且非运行中即派发执行。需要 `Arc<Self>` 供后台任务
+    /// 持 'static 引用；表达式解析在 CronDispatcher 内懒缓存。
+    pub async fn start_cron_scheduler(self: Arc<Self>) {
+        let dispatcher = std::sync::Arc::new(crate::cron_scheduler::CronDispatcher::new(
+            Arc::clone(&self.tasks),
+            Arc::clone(&self.running_tasks),
+            self,
+        ));
+        tokio::spawn(async move {
+            dispatcher
+                .run_forever(std::time::Duration::from_secs(1))
+                .await;
+        });
+        info!("Cron scheduler started (1s tick)");
     }
 
     pub async fn publish_realtime_quotes(
@@ -958,6 +975,15 @@ fn map_crawler_error(err: CrawlerError) -> String {
         CrawlerError::RateLimited => "rate limited".to_string(),
         CrawlerError::Timeout => "crawler timeout".to_string(),
         CrawlerError::InvalidData(msg) => format!("invalid data: {}", msg),
+    }
+}
+
+/// cron 调度执行面：直接复用真实执行链路（execute_task），cron 派发与
+/// HTTP POST /tasks/:id/execute 走同一条执行路径
+#[async_trait::async_trait]
+impl crate::cron_scheduler::TaskRunner for SimpleCollector {
+    async fn run(&self, task_id: &str) -> Result<String, String> {
+        self.execute_task(task_id).await
     }
 }
 

@@ -30,6 +30,9 @@ pub mod storage;
 // 采集任务模板（YAML/JSON 声明式任务定义，architecture §24）
 pub mod task_templates;
 
+// Cron 调度（architecture §24 刷新频率执行面）
+pub mod cron_scheduler;
+
 // 预导出模块
 pub mod prelude;
 
