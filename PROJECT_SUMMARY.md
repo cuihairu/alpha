@@ -1,274 +1,89 @@
-# Alpha Finance - 金融数据分析平台项目总结
+# Alpha — 自托管金融数据与量化研究基础平台
 
-## 🎉 项目完成状态
+> 定位声明（与 `docs/architecture-review.md` §0 对齐）：**采集公开行情/公告/新闻 →
+> 标准化 → 存储 → 查询 → 实时分发 → 指标/分析 → 回测**，全部自托管、可重放、可追溯。
+>
+> 这不是：券商交易系统 / 高频交易系统 / AI 股票预测器 / 投资建议系统 / 交易终端 / 超级微服务平台。
 
-⚠️ **项目已完成一批核心模块，但整体仍处于持续开发中**
+## 项目状态
 
----
+核心数据平面已打通并有测试覆盖；文档站与架构审查详见 `docs/`。平台持续开发中，
+按 `docs/architecture-review.md` §5 的分期推进（P0 文档收敛 ✅ → P1 数据模型 ✅ →
+P2 数据质量 → P3 API 分层/数据集/Experiment → P4 UI 收敛）。
 
-## 📋 项目概览
+## 五个核心域
 
-Alpha Finance 是一个基于 Rust workspace 的金融数据分析平台，包含采集、协议、存储、WebAssembly 分析、桌面端和多服务原型。当前仓库已经具备可编译、可测试的核心存储层与分析模块，但仍有大量路线图项目待完成。
+| 域 | 落点 |
+|---|---|
+| ingestion（采集） | `services/collector`：task templates（YAML/JSON 声明式数据源）+ cron 调度 + 东方财富行情源 + cleaner + rate_limiter + 重试策略 |
+| data（数据仓） | `packages/storage` + `services/data-engine`：Redis Streams 消息契约 + 内存/内存镜像时序 + ClickHouse 导出归档 + Parquet 数据湖 |
+| research（研究） | `packages/core`：indicators（RSI/MACD/SMA/EMA/布林带/ATR…）/ backtest / optimize / risk / parallel + `wasm-analyzer`（WASM 契约层） |
+| realtime（实时） | `services/real-time-feed`：Redis Streams 消费 + WebSocket 连接级订阅 + DLQ 兜底 |
+| access（访问） | `services/api-gateway` + `services/data-engine` HTTP 面：REST/WS + API key 门 + 追踪 + Prometheus 指标 |
 
-### 🏗️ 技术架构
-
-#### 核心技术栈
-- **后端**: Rust (高性能系统编程语言)
-- **前端**: HTML5/CSS3/JavaScript ES6+
-- **WebAssembly**: Rust 编译的高性能浏览器引擎
-- **数据库**: 内置时间序列存储 + 可扩展后端支持
-- **微服务**: Cargo workspace 统一管理
-
-#### 跨平台支持
-- **Web 浏览器**: WebAssembly + JavaScript
-- **桌面应用**: Tauri (计划中)
-- **Android**: Rust + JNI (计划中)
-- **iOS**: Rust + Swift (计划中)
-
----
-
-## 📦 项目结构
+## 仓库布局
 
 ```
-alpha/
-├── packages/                    # 核心包
-│   ├── core/                   # 核心业务逻辑
-│   │   ├── src/
-│   │   │   ├── models.rs       # 数据模型
-│   │   │   ├── trading.rs      # 交易策略
-│   │   │   ├── indicators.rs   # 技术指标
-│   │   │   ├── indicators/advanced.rs  # 高级指标
-│   │   │   ├── analytics.rs    # 分析引擎
-│   │   │   └── utils.rs        # 工具函数
-│   ├── storage/                # 存储抽象层
-│   │   ├── src/
-│   │   │   ├── memory.rs       # 内存 KV
-│   │   │   ├── disk_kv.rs      # 本地磁盘 KV
-│   │   │   ├── redis_kv.rs     # Redis KV
-│   │   │   ├── postgres_kv.rs  # PostgreSQL KV
-│   │   │   ├── cloud.rs        # 对象存储兼容层
-│   │   │   ├── timeseries.rs   # 时间序列存储
-│   │   │   ├── dal.rs          # 数据访问层
-│   │   │   └── lib.rs          # 存储接口和工厂
-│   │   └── README.md           # 存储后端说明
-│   └── protocols/              # 通信协议 (待实现)
-├── services/                    # 微服务
-│   ├── api-gateway/            # API 网关
-│   ├── data-engine/            # 数据处理引擎
-│   └── real-time-feed/         # 实时数据流
-├── wasm-analyzer/               # WebAssembly 分析引擎
-│   └── src/lib.rs              # WASM 绑定接口
-├── web/                         # Web 前端
-│   ├── index.html              # 主页面
-│   ├── app.js                  # 应用逻辑
-│   ├── style.css               # 样式表
-│   ├── demo-data.js            # 演示数据生成
-│   ├── server.js               # 开发服务器
-│   └── pkg/                    # WASM 构建输出
-├── desktop/                     # Tauri 桌面应用 (计划)
-└── tools/                       # 构建工具
+packages/
+  core/       研究域：indicators / backtest / optimize / risk / analytics / parallel / crypto / hybrid_cache …
+  protocols/  契约层（纯 serde、wasm-clean）：events（Envelope v2）/ instrument（Instrument 契约）/ rest / websocket / grpc
+  storage/    Redis Streams 队列 / 时序存储 / Timescale 镜像 / ClickHouse / 缓存 / 限流 / 加密
+services/
+  collector/         数据源运行时：task templates + cron 调度 + 行情抓取 + 重试 + 限流
+  data-engine/       数据面：normalize 消费 / /query SQL / 技术指标 / /instruments / ClickHouse 导出
+  real-time-feed/    WebSocket 实时分发（连接级订阅 + DLQ）
+  api-gateway/       外部访问面：REST/WS 反代 + 鉴权 + 追踪
+  alert-webhook/     告警出口
+  crawlers/          采集脚本（Python/多语言）
+desktop/             Tauri 桌面骨架（跨端契约）
+mobile/              Android（JNI）+ iOS（UniFFI）骨架
+wasm-analyzer/       WASM 客户端分析契约（--no-default-features 纯 serde）
+web/                 Web 前端（状态：UI 收敛为 API consumer，见 architecture-review §P4）
+docs/                Docusaurus 文档站（architecture / architecture-review 等 42+ 篇）
+scripts/             CI 门禁四件套：check-lint / check-cross-platform / check-desktop
 ```
 
----
+## 已交付能力
 
-## ✅ 已完成功能
+### 消息契约（packages/protocols）
+- **Envelope v2（`events.rs`）**：全管线消息契约——v1 十字段 + 加性字段
+  `source_event_id / market / event_time / process_time / sequence / trace_id`；
+  时间三跳模型（ingest/event/process）可度量端到端延迟；加性原则保证老消息可读、
+  新消息缺省时字节面与 v1 一致。
+- **Instrument 契约（`instrument.rs`）**：全仓唯一键 `cn.{exchange}.{symbol}`
+  （`cn.sse.000001` 上证指数 vs `cn.szse.000001` 平安银行）；多形态符号消歧纯函数；
+  data-engine 提供 `GET /instruments` 查询。
 
-### 🔧 核心库 (alpha-core)
+### 采集（services/collector）
+- **task templates**：YAML/JSON 声明式数据源（source_type / url / schedule / retry / storage）
+- **cron 调度器**：5/6 段 cron 解析 + 1s tick 派发 + 任务互斥（同类任务串行）+
+  模板校验与调度执行面共用同一解析器
 
-#### 📊 技术指标计算
-- **RSI (相对强弱指标)**: 超买超卖判断
-- **MACD (异同移动平均线)**: 趋势和动量分析
-- **SMA/EMA (移动平均线)**: 趋势识别
-- **布林带**: 价格波动范围分析
-- **随机指标 (Stochastic)**: 动量震荡指标
-- **威廉指标 (Williams %R)**: 超买超卖判断
-- **ATR (平均真实波幅)**: 波动性测量
-- **动量指标**: 价格变化率计算
+### 数据面（services/data-engine）
+- Redis Streams 消费（quotes.raw）+ normalized 写路径（内存 serving + Timescale 可选镜像）
+- `/query` DataFusion SQL、技术指标计算、`/stocks/:symbol/history`、ClickHouse parquet 导出
+- 去重窗口 + 镜像失败重试缓冲 + API key 门（默认关）
 
-#### 📈 交易策略
-- **双移动平均线策略**: 金叉死叉信号
-- **RSI 均值回归策略**: 超买超卖反转
-- **策略组合**: 多策略权重组合
-- **回测引擎**: 策略性能评估
-- **风险指标**: 夏普比率、最大回撤等
+### 研究（packages/core + wasm-analyzer）
+- 技术指标库（RSI/MACD/SMA/EMA/布林/Stochastic/Williams %R/ATR/动量）、回测引擎、
+  风险指标（夏普/回撤）、优化与并行骨架；WASM 契约层可编译验证
 
-#### 🔍 分析引擎
-- **多指标综合分析**: 统一分析接口
-- **风险评估**: 波动率、VaR 计算
-- **推荐系统**: 基于多个指标的智能推荐
-- **置信度评估**: 信号可靠性评分
+### 实时（services/real-time-feed）
+- Redis Streams → WebSocket 连接级订阅；毒消息/解码失败进 DLQ 兜底 + ack 契约
 
-### 💾 存储层 (alpha-storage)
+## 工程纪律
 
-#### ⚡ KV 与对象存储
-- **MemoryStorage**: 进程内高速 KV
-- **DiskKvStorage**: 本地目录层级 KV，支持 key 编码和清理
-- **RedisKvStorage**: 支持 TTL、`SCAN` 列举和可选集成测试
-- **PostgresKvStorage**: 支持自动建表、TTL 和前缀查询
-- **CloudStorage**: 兼容简单 HTTP 对象接口，支持对象索引和清空
-- **StorageFactory**: 统一按配置创建后端
+- **门禁**：lint（clippy 零警告 + rustfmt）、`cargo test --workspace --all-targets
+  --exclude alpha-desktop`、cross-platform（含 protocols wasm32）、desktop——全绿才合入。
+- **契约演进**：流内消息加性演进（default + skip_serializing_if）；API 面严格
+  （deny_unknown_fields）；新表/新端点只引用 `instrument_id`。
+- **不做清单**（与 architecture-review §2.4 对齐）：Kafka/NATS 升级（吞吐/审计/回放
+  需求明确前）、Kubernetes、AI 价格预测、反爬核心化、iOS 主线。
 
-#### 📊 时间序列与 DAL
-- **TimeSeriesStorage**: 内存时间序列管理
-- **TimescaleTimeSeriesStorage**: SQLx/TimescaleDB 落盘
-- **DataAccessLayer**: 组合时间序列、缓存和元数据存储
-- **QueryBuilder**: 提供简单范围查询、限制和重采样
-- **完整测试**: `alpha-storage` 当前已具备 25 个通过的测试
+## 下一步（按分期）
 
-### 🌐 Web 前端
+- **P2 数据质量**：完整性/连续性/异常/重复检测 + sequence 断档告警（契约字段已就位）
+- **P3**：三级 API 分层（Public/Research/Internal）；Research Dataset + Experiment 登记表；MCP 慢启动
+- **P4**：UI 回归 API consumer 定位
 
-#### ⚡ WebAssembly 分析引擎
-- **浏览器原生性能**: Rust 编译的 WASM 模块
-- **实时计算**: 毫秒级指标计算
-- **类型安全**: Rust 类型系统保证
-- **内存安全**: 防止缓冲区溢出
-
-#### 📱 用户界面
-- **现代化设计**: 响应式布局
-- **实时更新**: WebSocket 数据流
-- **交互式图表**: Canvas 图表绘制
-- **移动设备适配**: 触摸友好界面
-
-#### 🎯 核心功能
-- **股票分析**: 多股票批量分析
-- **技术指标面板**: 实时指标展示
-- **实时监控**: 价格变化跟踪
-- **性能监控**: 系统性能指标
-
----
-
-## 🛠️ 开发工具和脚本
-
-### 构建脚本
-- **`build-wasm.sh`**: WASM 模块构建（`--serve` 可选启动静态服务器）
-- **`start-web.sh`**: Web 应用启动脚本
-- **`start-dev.sh`**: 开发环境快速启动
-
-### 开发服务器
-- **Node.js 服务器**: 简单高效的静态文件服务
-- **热重载支持**: 开发时自动刷新
-- **CORS 配置**: 跨域请求支持
-
----
-
-## 🚀 快速开始
-
-### 环境要求
-- Rust 1.70+
-- Node.js 14+
-- wasm-pack
-
-### 构建和运行
-```bash
-# 构建并运行 Web 应用
-./start-web.sh
-
-# 或手动构建 WASM
-cd wasm-analyzer
-wasm-pack build --target web --out-dir ../web/pkg
-cd ../web
-npm start
-```
-
-### 访问应用
-- **本地访问**: http://localhost:8080
-- **功能演示**: 打开浏览器即可体验
-
----
-
-## 📊 性能特性
-
-### ⚡ 高性能计算
-- **WebAssembly 性能**: 比纯 JavaScript 快 10-100 倍
-- **并发处理**: 多线程数据处理
-- **内存优化**: 零拷贝数据传输
-- **算法优化**: 高效的数值计算算法
-
-### 📈 可扩展性
-- **模块化设计**: 组件化架构
-- **插件系统**: 可扩展的策略系统
-- **API 抽象**: 统一的存储和计算接口
-- **微服务架构**: 服务解耦和独立部署
-
----
-
-## 🎯 技术亮点
-
-### 💡 创新设计
-1. **Rust + WebAssembly**: 浏览器中获得桌面级性能
-2. **统一数据模型**: 跨平台数据一致性
-3. **类型安全**: 编译时错误检查
-4. **零拷贝序列化**: 高效的数据传输
-
-### 🏆 架构优势
-1. **高性能**: 原生级别计算速度
-2. **内存安全**: Rust 内存安全保证
-3. **跨平台**: 85%+ 代码复用率
-4. **可扩展**: 模块化和插件化设计
-
-### 🔒 安全特性
-1. **类型安全**: 编译时类型检查
-2. **内存安全**: 防止缓冲区溢出
-3. **输入验证**: 全面的数据验证
-4. **错误处理**: 完善的错误处理机制
-
----
-
-## 🔮 未来计划
-
-### 📱 移动端支持
-- **Android**: Rust JNI 绑定
-- **iOS**: Rust + Swift 桥接
-- **React Native**: 跨平台移动应用
-
-### ☁️ 云端集成
-- **数据源集成**: 实时数据提供商 API
-- **云端部署**: Kubernetes 集群部署
-- **API 网关**: 统一的 API 入口
-- **微服务**: 服务拆分和独立扩展
-
-### 🤖 AI 增强
-- **机器学习**: TensorFlow.js 集成
-- **预测模型**: 价格预测算法
-- **智能推荐**: AI 驱动的投资建议
-- **自然语言**: 新闻情感分析
-
----
-
-## 📚 学习价值
-
-这个项目展示了以下现代软件开发的最佳实践：
-
-### 🏗️ 系统设计
-- **领域驱动设计 (DDD)**: 清晰的业务模型
-- **微服务架构**: 服务拆分和解耦
-- **事件驱动**: 异步消息处理
-- **API 设计**: RESTful API 原则
-
-### 💻 编程语言特性
-- **Rust 所有权系统**: 内存安全保证
-- **零成本抽象**: 高性能抽象
-- **模式匹配**: 强大的表达式能力
-- **泛型编程**: 类型安全的抽象
-
-### 🌐 Web 技术
-- **WebAssembly**: 高性能 Web 应用
-- **现代 JavaScript**: ES6+ 特性
-- **响应式设计**: 移动优先设计
-- **渐进式增强**: 渐进式功能增强
-
----
-
-## 🎉 项目成就
-
-✅ **成功构建了完整的金融数据分析平台**
-✅ **实现了 Rust + WebAssembly 的高性能计算引擎**
-✅ **创建了现代化的 Web 用户界面**
-✅ **建立了可扩展的存储和计算架构**
-✅ **提供了完整的开发工具链和构建脚本**
-
-这个项目展示了如何使用现代 Rust 生态系统构建高性能的 Web 应用，为金融数据分析提供了强大的技术基础。
-
----
-
-**🚀 Alpha Finance - 让金融分析更智能、更快速、更可靠！**
+**Alpha = 自托管金融数据与量化研究基础平台。**

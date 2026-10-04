@@ -57,7 +57,9 @@ use tower_http::{
 };
 
 mod grpc;
+mod sequence_gap;
 mod settings;
+use sequence_gap::{SequenceGapMonitor, SequenceObservation};
 use settings::{AppConfig, ClickHouseSettings, StorageConfig, TelemetryConfig};
 
 const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
@@ -186,6 +188,8 @@ struct AppState {
     /// 证券主数据注册表（instrument_id → Instrument；见 architecture-review §3.2）。
     /// 当前为启动时种子装载，后续可接权威源的增量刷新。
     instruments: Arc<RwLock<HashMap<String, Instrument>>>,
+    /// sequence 断档检测（数据质量 §3.1/§5 P2）：per-(stream, source) 基线
+    sequence_gaps: Arc<SequenceGapMonitor>,
 }
 
 /// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
@@ -217,6 +221,7 @@ impl AppState {
             config,
             metrics: global_metrics_handle().clone(),
             instruments: Arc::new(RwLock::new(seed_instruments())),
+            sequence_gaps: Arc::new(SequenceGapMonitor::new()),
         }
     }
 
@@ -842,6 +847,51 @@ async fn process_normalizer_message(
     queue: &RedisStreamQueue,
     message: &StreamMessage,
 ) {
+    // 数据质量（architecture-review §5 P2）：sequence 断档检测与去重正交——
+    // 重复消息同样推进基线（重放由 envelope.sequence 回退语义处理，不误报）；
+    // v1 消息无 sequence 字段时静默跳过（加性演进，不炸老数据）。
+    if let Some(sequence) = message.envelope.sequence {
+        let source = message.envelope.source.as_str();
+        match state
+            .sequence_gaps
+            .observe(&message.envelope.stream, source, sequence)
+        {
+            SequenceObservation::Gap(gap) => {
+                metrics::counter!(
+                    "alpha_dataquality_sequence_gaps_total",
+                    "stream" => message.envelope.stream.clone(),
+                    "source" => source.to_string(),
+                )
+                .increment(gap.missing);
+                tracing::warn!(
+                    stream = %message.envelope.stream,
+                    source,
+                    expected = gap.expected,
+                    got = gap.got,
+                    missing = gap.missing,
+                    entry_id = %message.id,
+                    "sequence gap detected (data quality)"
+                );
+            }
+            SequenceObservation::Regression { last, got } => {
+                metrics::counter!(
+                    "alpha_dataquality_sequence_regressions_total",
+                    "stream" => message.envelope.stream.clone(),
+                    "source" => source.to_string(),
+                )
+                .increment(1);
+                tracing::info!(
+                    stream = %message.envelope.stream,
+                    source,
+                    last,
+                    got,
+                    "sequence regression (source restart or replay); baseline reset"
+                );
+            }
+            SequenceObservation::FirstSeen | SequenceObservation::Continuous => {}
+        }
+    }
+
     match normalize_quote(&message.envelope) {
         Some(market_data) => {
             let payload_hash = message.envelope.payload_hash.clone();
@@ -2502,6 +2552,7 @@ mod tests {
             config: test_config(),
             metrics: global_metrics_handle().clone(),
             instruments: Arc::new(RwLock::new(seed_instruments())),
+            sequence_gaps: Arc::new(SequenceGapMonitor::new()),
         });
 
         let symbol = format!("E2E-{}", uuid::Uuid::new_v4());

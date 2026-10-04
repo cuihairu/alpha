@@ -55,6 +55,6 @@ Internal A-share (China) market data platform focused on low-latency ingestion, 
 ## Roadmap
 1. Define Protobuf schemas and topic contracts.
 2. Keep the Redis Streams pipeline minimal and reliable before introducing heavier MQ infrastructure.
-3. Build crawler framework with scheduling + proxy rotation.
+3. ✅ Build crawler framework with scheduling + proxy rotation — done via collector task templates (YAML/JSON source definitions) + cron dispatcher + optional proxy pool.
 4. Establish observability stack and tunnel configuration.
 5. Expand dataset coverage (沪深两市, 港股延伸, alternative data).

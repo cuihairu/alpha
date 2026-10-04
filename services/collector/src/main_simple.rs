@@ -55,6 +55,9 @@ const QUOTES_STREAM: &str = "quotes.raw";
 pub struct SimpleCollector {
     /// 工作空间根目录（用于脚本路径、工作目录等）
     workspace_root: PathBuf,
+    /// per-source 序列号计数器（Envelope v2 / 数据质量：sequence 断档检测的
+    /// 生产面。进程内单调递增；重启归零由消费面 Regression 语义处理）。
+    sequence_counters: Arc<std::sync::Mutex<HashMap<String, u64>>>,
     /// 任务存储（cron_scheduler 只读扫描）
     pub(crate) tasks: Arc<RwLock<HashMap<String, TaskDefinition>>>,
     /// 运行中任务（cron_scheduler 判定重入）
@@ -180,12 +183,25 @@ impl SimpleCollector {
 
         Self {
             workspace_root: workspace_root.clone(),
+            sequence_counters: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tasks: Arc::new(RwLock::new(HashMap::new())),
             running_tasks: Arc::new(RwLock::new(HashMap::new())),
             crawler: Arc::new(MultilangCrawler::new(&workspace_root)),
             event_tx,
             started_at: Instant::now(),
         }
+    }
+
+    /// 取某数据源的下一条 sequence（per-source 单调递增，从 1 起）。
+    /// 进程内计数；重启归零由消费端 SequenceGapMonitor 的 Regression 语义处理。
+    fn next_source_sequence(&self, source: &str) -> u64 {
+        let mut counters = self
+            .sequence_counters
+            .lock()
+            .expect("sequence counter mutex poisoned");
+        let counter = counters.entry(source.to_string()).or_insert(0);
+        *counter += 1;
+        *counter
     }
 
     /// 启动收集器服务
@@ -494,8 +510,9 @@ impl SimpleCollector {
         let mut published = 0usize;
         for quote in quotes {
             // Envelope v2（architecture-review §3.1/§3.3）：源侧行情时刻上提为
-            // event_time；market 标注 cn（A 股采集面）。source_event_id/sequence
-            // 待数据源提供对账锚点与单调序号后接线（当前源无此字段，留缺省）。
+            // event_time；market 标注 cn（A 股采集面）；source_event_id 待数据源
+            // 提供对账锚点后接线（当前源无此字段，留缺省）。sequence 为
+            // per-source 单调序号（数据质量 §5 P2 断档检测的生产面）。
             let envelope = StreamEnvelope::new(
                 QUOTES_STREAM,
                 "quote",
@@ -504,7 +521,8 @@ impl SimpleCollector {
                 serde_json::to_value(&quote).map_err(|e| e.to_string())?,
             )
             .with_event_time(quote.timestamp)
-            .with_market("cn");
+            .with_market("cn")
+            .with_sequence(self.next_source_sequence(&quote.source));
             queue
                 .publish(QUOTES_STREAM, &envelope)
                 .await
@@ -1009,6 +1027,26 @@ mod tests {
         // This would need to be made async in a real test
         // let result = collector.parse_task_source("ashare", "https://example.com").await;
         // assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_sequence_counter_monotonic_per_source() {
+        // 数据质量 §5 P2：per-source 单调序号（Envelope v2 sequence 生产面）
+        let collector = SimpleCollector::new("/tmp");
+        assert_eq!(collector.next_source_sequence("eastmoney"), 1);
+        assert_eq!(collector.next_source_sequence("eastmoney"), 2);
+        assert_eq!(collector.next_source_sequence("eastmoney"), 3);
+    }
+
+    #[test]
+    fn test_sequence_counters_independent_across_sources() {
+        // 不同 source 的基线互不串扰（与消费端 SequenceGapMonitor 的
+        // per-(stream, source) 语义对齐）
+        let collector = SimpleCollector::new("/tmp");
+        assert_eq!(collector.next_source_sequence("eastmoney"), 1);
+        assert_eq!(collector.next_source_sequence("sina"), 1);
+        assert_eq!(collector.next_source_sequence("eastmoney"), 2);
+        assert_eq!(collector.next_source_sequence("sina"), 2);
     }
 
     #[test]
