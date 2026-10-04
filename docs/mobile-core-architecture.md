@@ -1,6 +1,6 @@
 # 移动端 Rust 核心库架构（JNI + UniFFI）
 
-> TODO.md「📱 移动端应用」节第 1 项「设计移动端 Rust 核心库架构（JNI + UniFFI）」
+> TODO.md「移动端应用」节第 1 项「设计移动端 Rust 核心库架构（JNI + UniFFI）」
 > 的落地说明（台账编号沿用 L112–L117 的 dispatch 顺序假设，本文记为 **L118**；
 > 骨架 crate = `mobile/` → `alpha-mobile`）。文末登记非交互假设与真机验收边界。
 

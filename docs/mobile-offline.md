@@ -1,6 +1,6 @@
 # 移动端离线数据存储与同步机制
 
-口径：**设计要点先行 + 最小可编译闭环 + 单测**（沿 L118/L301/L337/L367 既定口径）——
+口径：**设计要点先行 + 最小可编译增量 + 单测**（沿 L118/L301/L337/L367 既定口径）——
 离线数据的**决策面**（允许存什么/何时同步/增量基线）在 Rust 核心库，**执行面**
 （kv 落盘/恢复）在平台壳；融入既有架构模式（`RefreshGateway` 注入面、JSON 桥、
 `Mutex` 决策状态、FFI 只增不改）。
@@ -14,8 +14,8 @@ docs/mobile-push-sync.md（L337 指纹口径 `content_seq`/`fingerprint_of`）�
 
 | 术语 | 定义 | 数据去向 | 本轮落地 |
 |---|---|---|---|
-| **备份（backup / snapshot）** | 本地快照**落盘**：把授权范围内的行情快照写入壳层本地 kv，供断网/重启后恢复 | **不出设备**（纯本地持久化） | ✅ 本轮闭环（`offline_snapshot_json` / `restore_offline_snapshot_json` / `OfflineStore`） |
-| **同步（sync / delta）** | 与**远端**做增量对齐：以指纹比较决定是否需要对齐、对齐哪些数据 | **出设备**（经网络到远端） | 决策与增量判断闭环本轮落地；真实网络执行归远端接入 TODO（§8④） |
+| **备份（backup / snapshot）** | 本地快照**落盘**：把授权范围内的行情快照写入壳层本地 kv，供断网/重启后恢复 | **不出设备**（纯本地持久化） | ✅ 本轮落地（`offline_snapshot_json` / `restore_offline_snapshot_json` / `OfflineStore`） |
+| **同步（sync / delta）** | 与**远端**做增量对齐：以指纹比较决定是否需要对齐、对齐哪些数据 | **出设备**（经网络到远端） | 决策与增量判断本轮落地；真实网络执行归远端接入 TODO（§8④） |
 
 纪律落点：载荷与 API 命名一一对应——备份面用 `Snapshot`（`captured_at`、
 `restore`），同步面用 `SyncDelta`（`since_fingerprint`、`needed`）；注释、UI 文案

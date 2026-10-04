@@ -1,4 +1,4 @@
-# 🚀 Alpha Finance 快速部署指南
+# Alpha Finance 快速部署指南
 
 ## 一键部署到 Ubuntu 24.04
 
@@ -33,7 +33,7 @@ sudo ./scripts/deploy-ubuntu.sh
 
 ---
 
-## 📋 服务管理命令
+## 服务管理命令
 
 ### 查看服务状态
 ```bash
@@ -62,7 +62,7 @@ curl http://localhost:8123/ping
 
 ---
 
-## 🔧 故障排除
+## 故障排除
 
 ### 服务无法启动
 ```bash
@@ -96,7 +96,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ---
 
-## 📈 更新项目
+## 更新项目
 
 ```bash
 cd /opt/alpha
@@ -106,7 +106,7 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 
 ---
 
-## 📚 详细文档
+## 详细文档
 
 - [完整部署文档](docs/deployment-runbook.md)
 - [市场数据 API](docs/market-data-api.md)
@@ -114,23 +114,21 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 
 ---
 
-## 🎯 生产环境建议
+## 生产环境建议
 
-1. **安全配置**
-   - 修改默认密码
-   - 配置 SSL 证书
-   - 设置防火墙规则
-
-2. **性能优化**
-   - 配置反向代理
-   - 启用缓存
-   - 监控系统资源
-
-3. **备份策略**
-   - 定期数据备份
-   - 配置监控告警
-   - 制定恢复计划
+- 改掉 ClickHouse 默认口令 `admin/admin123`：口令写死在两处——
+  `docker-compose.yml` `CLICKHOUSE_PASSWORD` 与
+  `config/clickhouse-users.xml`，改完 `docker compose up -d --force-recreate
+  clickhouse` 重建，再同步 `scripts/deploy-ubuntu.sh:169` 的 init 口令；
+- TLS 终止放 nginx：证书配进 `/etc/nginx/sites-available/alpha`（脚本已
+  站点化），8123/9081 等非网关端口继续不对外放行；
+- 鉴权默认全关（见 `docs/auth.md`），对外暴露前至少开网关 JWT 与
+  data-engine `X-Api-Key`；
+- 备份对象按数据分级：ClickHouse 数据卷（行情归档）定期
+  `clickhouse-backup` 或卷快照；Postgres/Timescale 未默认启用。
 
 ---
 
-**🎉 恭喜！您的 Alpha Finance 金融数据分析平台已成功部署！**
+部署验证：`curl -fsS http://localhost:9080/health` 返回 200、
+`docker ps` 里 clickhouse 为 Up、`systemctl status alpha-*` 三个服务
+均 active（running），才算部署完成。

@@ -20,9 +20,9 @@ Rust wasm 引擎（`wasm-analyzer` cdylib）的集成面、CI 门禁可维护性
 
 | 维度 | React 18 + Vite | Vue 3 + Vite | Yew / Leptos |
 |---|---|---|---|
-| 金融级组件生态（图表/虚拟表格/SQL 编辑器） | **最强**：lightweight-charts、AG Grid/react-window、Monaco editor 均有 React 一等封装 | 中：echarts 成熟，交易级图表与 Monaco 封装偏薄 | **近乎为零**：需自行开发或经 JS 桥回借 React 生态，等于双重成本 |
+| 金融级组件（图表/虚拟表格/SQL 编辑器） | lightweight-charts、AG Grid/react-window、Monaco editor 均有 React 一等封装，三件直接可用 | 中：echarts 成熟，交易级图表与 Monaco 封装偏薄 | 仅零散实验性绑定，图表/虚拟表格/编辑器三件均需自行开发或经 JS 桥回借 React 组件，等于双重成本 |
 | TypeScript | 一等（ts-jest/vitest/模板成熟） | 一等 | Rust 侧类型即文档，但 UI 层丢掉 TS 工具链 |
-| 与 wasm 集成面 | **保持现状**：`wasm-pack` 产 JS 绑定，import 即用（`wasm-demo.html` 已验证该模式） | 同 React | UI 与引擎同语言，理论最优；但 L0 wasm 门禁（check-cross-platform.sh）会把 UI 重编译卷进 Rust 门禁周期 |
+| 与 wasm 集成面 | **保持现状**：`wasm-pack` 产 JS 绑定，import 即用（`wasm-demo.html` 已验证该模式） | 同 React | UI 与引擎同语言、类型可贯通（理论上顺）；但 L0 wasm 门禁（check-cross-platform.sh）会把 UI 重编译卷进 Rust 门禁周期 |
 | 生产案例 / 招聘 / AI 辅助 | 最大 | 大 | 小（生产案例少，出问题排查成本高） |
 | 本仓既有投入 | 零（web/ 为 vanilla JS，无迁移负担） | 零 | 零（TODO L428 仅是设想项，无一行代码） |
 | 后续 TODO 项契合度 | L428 组件化界面 / L429 图表库 / L430 SQL 编辑器均有现成 React 路线 | L430 需自封装 | 全部需自行开发 |

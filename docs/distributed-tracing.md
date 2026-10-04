@@ -61,4 +61,4 @@ tracing-subscriber 对齐）接入四个服务的 subscriber 初始化。
 1. `tr-<uuid>` 格式为仓内约定（非 W3C trace-id 32hex）——第 3 节启用时
    以 OTel trace-id 为准回填，本格式仅服务网关启动期。
 2. data-engine/collector/real-time-feed 侧的 trace-id 日志字段逐步补齐
-   （读取转发头即可），不构成验收阻塞——链路串联在网关侧已闭环。
+   （读取转发头即可），不构成验收阻塞——链路串联已在网关侧接通。

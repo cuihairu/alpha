@@ -21,7 +21,7 @@
 - `npx tsc -b` 类型面 + `vite build` 构建门禁（`scripts/check-web.sh`）；
 - Android JVM：`:app:testPlayDebugUnitTest`（54 用例，纯逻辑不触框架类）。
 
-## 3. WS 消息级契约（L491 补深，L469 缺口闭环）
+## 3. WS 消息级契约（L491 补深，L469 缺口补上）
 
 `check-e2e.sh` 断言 3b：连 `/ws` → Subscribe + Resync(from_seq=0) →
 **无论通道是否有数据必须回帧**（Sync Full 快照或显式 Error），超时静默 =

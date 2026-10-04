@@ -3,9 +3,10 @@
 > 历史快照（2025-11-24 时点）。当前状态以 `web/README.md`、`wasm-analyzer/src/`
 > 与 `pkg/` 实际构建产物为准；CI wasm 作业持续验证。
 
-## 📋 项目概述
+## 项目概述
 
-已成功完善 Alpha Finance 的 WebAssembly 分析引擎，实现了生产级别的高性能数据处理能力。
+本报告记录 2025-11-24 时点 `wasm-analyzer` 的实现：五个模块、性能基准
+与构建配置（历史快照，现状见报告头注）。
 
 **构建时间:** 2025-11-24
 **版本:** 0.1.0
@@ -14,9 +15,9 @@
 
 ---
 
-## ✅ 已实现功能模块
+## 已实现功能模块
 
-### 1. Arrow 零拷贝内存管理 ⚡
+### 1. Arrow 零拷贝内存管理
 
 **文件:** `wasm-analyzer/src/arrow_adapter.rs`
 
@@ -47,7 +48,7 @@ console.log(`行数: ${batch.numRows()}, 内存: ${batch.getByteSize()} bytes`);
 
 ---
 
-### 2. IndexedDB 混合存储架构 💾
+### 2. IndexedDB 混合存储架构
 
 **文件:** `wasm-analyzer/src/storage.rs`
 
@@ -61,7 +62,7 @@ console.log(`行数: ${batch.numRows()}, 内存: ${batch.getByteSize()} bytes`);
 **性能指标:**
 - 批量存储 (1000条): ~50ms
 - 批量查询: ~30ms
-- 数据持久化: 100% 可靠
+- 数据持久化: IndexedDB 事务提交后才返回，无内存态丢失窗口
 
 **API 示例:**
 ```javascript
@@ -82,7 +83,7 @@ const stats = await hybrid.getStorageStats();   // lru_len/hits/misses/evictions
 
 ---
 
-### 3. 流式数据处理引擎 🔄
+### 3. 流式数据处理引擎
 
 **文件:** `wasm-analyzer/src/streaming.rs`
 
@@ -123,7 +124,7 @@ batchStream.pushDataForSymbol("GOOGL", data2);
 
 ---
 
-### 4. Web Workers 并行计算引擎 ⚙️
+### 4. Web Workers 并行计算引擎
 
 **文件:** `wasm-analyzer/src/worker.rs`
 
@@ -165,7 +166,7 @@ const allIndicators = computer.batchComputeMultiple(prices, 20, 12, 14);
 
 ---
 
-### 5. WebSocket 实时数据同步 🌐
+### 5. WebSocket 实时数据同步
 
 **文件:** `wasm-analyzer/src/websocket.rs`
 
@@ -215,7 +216,7 @@ pool.broadcast('{"type":"ping"}');
 
 ---
 
-## 📊 性能基准测试
+## 性能基准测试
 
 **测试环境:**
 - 浏览器: Chrome 120+ / Firefox 121+
@@ -238,7 +239,7 @@ pool.broadcast('{"type":"ping"}');
 
 ---
 
-## 🏗️ 项目结构
+## 项目结构
 
 ```
 wasm-analyzer/
@@ -258,7 +259,7 @@ wasm-analyzer/
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
 ### 1. 构建 WASM 模块
 
@@ -314,7 +315,7 @@ python3 -m http.server 8000
 
 ---
 
-## 📦 依赖说明
+## 依赖说明
 
 **核心依赖:**
 - `wasm-bindgen`: Rust 与 JavaScript 互操作
@@ -329,7 +330,7 @@ python3 -m http.server 8000
 
 ---
 
-## 🔧 构建优化配置
+## 构建优化配置
 
 **Cargo.toml 优化:**
 ```toml
@@ -351,7 +352,7 @@ wasm-opt = ["-O", "--enable-simd"]
 
 ---
 
-## 🧪 测试
+## 测试
 
 ### 运行单元测试
 ```bash
@@ -374,7 +375,7 @@ wasm-pack test --firefox -- --test performance_tests
 
 ---
 
-## 📈 未来扩展方向
+## 未来扩展方向
 
 1. **SIMD 向量化优化**
    - 使用 Rust SIMD 指令加速指标计算
@@ -396,7 +397,7 @@ wasm-pack test --firefox -- --test performance_tests
 
 ---
 
-## 📝 版本历史
+## 版本历史
 
 **v0.1.0 (2025-11-24)**
 - ✅ 实现 Arrow 零拷贝内存管理
@@ -408,29 +409,12 @@ wasm-pack test --firefox -- --test performance_tests
 
 ---
 
-## 🤝 贡献指南
+## 许可证
 
-欢迎贡献代码！请遵循以下步骤：
-
-1. Fork 项目
-2. 创建特性分支: `git checkout -b feature/amazing-feature`
-3. 提交更改: `git commit -m 'Add amazing feature'`
-4. 推送分支: `git push origin feature/amazing-feature`
-5. 提交 Pull Request
+MIT License（仓库根 LICENSE）。仓库：https://github.com/cuihairu/alpha
 
 ---
 
-## 📄 许可证
-
-MIT License
-
----
-
-## 📧 联系方式
-
-Alpha Finance Team
-GitHub: https://github.com/cuihairu/alpha
-
----
-
-**总结:** 本次实现完成了 WASM Web 分析引擎的全部核心功能，性能指标达到生产级别要求。所有模块经过充分测试，可直接用于实际项目开发。
+**总结:** 2025-11-24 时点，五模块编译通过、演示页与性能测试套件入库；
+性能基准数字见 §性能基准测试。已知的 LTO/SIMD 边界与后续计划见
+BUILD_REPORT.md 与本报告 §未来扩展方向。

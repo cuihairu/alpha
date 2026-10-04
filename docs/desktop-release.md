@@ -12,7 +12,7 @@ bundler 单宿主单面，跨宿主已由 `release.yml` desktop 作业承接
 
 | 宿主 | bundles | 说明 |
 |---|---|---|
-| Linux | `appimage` + `deb` | AppImage 为主分发（免安装、单文件）；deb 覆盖 Debian/Ubuntu 生态。容器/CI 无 FUSE → 脚本置 `APPIMAGE_EXTRACT_AND_RUN=1` |
+| Linux | `appimage` + `deb` | AppImage 为主分发（免安装、单文件）；deb 覆盖 Debian/Ubuntu 系发行版。容器/CI 无 FUSE → 脚本置 `APPIMAGE_EXTRACT_AND_RUN=1` |
 | macOS | `app` + `dmg` | dmg 分发；签名/公证见 §2 |
 | Windows | `nsis`（.exe）+ `msi`（WiX） | NSIS 面向最终用户安装向导；msi 面向企业批量部署。代码签名见 §2 |
 
@@ -57,7 +57,7 @@ platforms[target].signature/url。即：**安装包构建一次，分发与自�
    （用户面窄，登记不实现）；
 2. 自动更新侧载渠道的 AppImage 差分（zsync）登记归 L519 复核项；
 3. 跨 OS 打包已由 `release.yml` desktop 作业承接（三宿主矩阵 +
-   `Swatinem/rust-cache` + npm cache；本项原登记项已闭环）。
+   `Swatinem/rust-cache` + npm cache；本项原登记项已完结）。
 
 ## 6. 非交互假设与实测边界
 

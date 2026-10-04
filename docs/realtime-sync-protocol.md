@@ -69,5 +69,5 @@ real-time-feed 广播路径与 wasm 侧绑定均调用它，两端协议不漂�
 | 版本推进/Gap/幂等/违约/多通道隔离/Resync 恢复 | `alpha_core::sync` 单测（16） |
 | 追平重放/超窗 Resync/未知通道/回环收敛 | `alpha_core::sync` `catch_up_*` + `publish_catch_up_round_trip_converges` |
 | 线上帧 JSON 形态（type tag/op/round-trip/旧帧兼容） | `alpha_protocols::websocket` 单测（4） |
-| 服务端 Full→Delta 序列/逐通道 seq/Resync 应答/服务端 Delta × 客户端引擎闭环 | `alpha-real-time-feed` 单测（含 `test_server_delta_applies_on_client_engine`） |
+| 服务端 Full→Delta 序列/逐通道 seq/Resync 应答/服务端 Delta × 客户端引擎对账 | `alpha-real-time-feed` 单测（含 `test_server_delta_applies_on_client_engine`） |
 | JS 边界（buildSyncDelta/applySyncDelta/WasmSyncEngine） | `wasm-analyzer` `#[wasm_bindgen_test]`（浏览器跑，门禁编译验证） |

@@ -1,8 +1,11 @@
 # Alpha Finance Web 前端
 
-基于 Rust WebAssembly 的高性能金融数据分析平台 Web 前端。
+Rust WebAssembly 分析引擎驱动的行情前端：页面本体是原生 JS
+（`index.html`/`app.js`），引擎侧由 Rust 经 wasm-pack 编译进 `pkg/`
+（wasm-analyzer），SQL 工作台走 DuckDB-WASM。底座：Rust、wasm-pack、
+DuckDB-WASM，皆为开源组件，本仓做接线与页面实现。
 
-## 🚀 快速开始
+## 快速开始
 
 ### 1. 安装依赖
 
@@ -50,7 +53,7 @@ python3 -m http.server 8080 --bind 127.0.0.1
 HOST=0.0.0.0 PORT=8080 npm start
 ```
 
-## ⚛️ React 骨架（`app/`，TODO L427）
+## React 骨架（`app/`，TODO L427）
 
 跨平台 UI 框架选型已定 **React 18 + TypeScript + Vite**（对比、理由与
 Desktop/Mobile 边界见 `../docs/web-framework-selection.md`）。新组件化界面
@@ -68,44 +71,24 @@ npm run build   # 类型检查 + 生产构建
 `vite build`）已接入 CI `wasm` 作业。示例页内置 WASM 引擎探针：先
 `npm run build:wasm`（本目录）再把 `pkg/` 拷入 `app/public/pkg/` 即可加载。
 
-## 📊 功能特性
+## 功能特性
 
-### 🔧 核心分析引擎
-- **高性能 WASM 引擎**: 基于 Rust 开发，在浏览器中提供桌面级性能
-- **实时技术指标计算**: RSI, MACD, 布林带, 移动平均线等
-- **股票分析**: 智能推荐系统，基于多种技术指标
+- 技术指标在浏览器内计算：RSI、MACD、SMA/EMA、布林带，算法本体是
+  `wasm-analyzer` 编译的 Rust 代码，与 `packages/core` 同源口径。
+- 股票分析页按多指标综合打分排序，指标口径见指标卡片说明。
+- 实时行情经 WebSocket 订阅 real-time-feed（需启动该服务并配置 WS 地址；
+  后端不可达回退演示数据并在状态栏注明，断线出复位按钮）。
+- 性能面板展示帧内计算耗时；布局响应式，窄屏可用。
 
-### 📈 技术指标
-- **RSI (相对强弱指标)**: 判断超买超卖状态
-- **MACD (异同移动平均线)**: 趋势和动量分析
-- **SMA/EMA (移动平均线)**: 趋势识别
-- **布林带**: 价格波动范围分析
+## 技术架构
 
-### ⚡ 实时功能
-- **实时价格监控**: 多股票价格跟踪
-- **实时推送**: 经 WebSocket 订阅 real-time-feed（需启动该服务并配置 WS 地址；
-  后端不可达回退演示数据并在状态栏注明）
-- **性能监控**: 实时性能指标展示
+页面：原生 JS（ES6+ 模块）+ Canvas 图表，无打包器。
+引擎：Rust → WebAssembly（`wasm-pack build --target web`），
+serde 负责两侧数据契约。
+构建产物 `dist/` 经 `optimize-dist.mjs` 做指纹重命名与 gz/br 预压缩
+（桌面 distDir 与 web-origin 共用）。
 
-### 🎨 用户界面
-- **现代化设计**: 响应式布局，支持移动设备
-- **直观操作**: 简单易用的界面
-- **实时反馈**: 加载状态和结果展示
-
-## 🏗️ 技术架构
-
-### 前端技术栈
-- **HTML5/CSS3**: 现代化 Web 标准
-- **JavaScript ES6+**: 模块化开发
-- **WebAssembly**: Rust 编译的高性能引擎
-- **Canvas API**: 图表绘制
-
-### 后端引擎
-- **Rust**: 高性能系统编程语言
-- **WebAssembly**: 浏览器原生性能
-- **Serde**: 高效序列化/反序列化
-
-## 📁 项目结构
+## 项目结构
 
 ```
 web/
@@ -134,7 +117,7 @@ web/
 提供浏览器内 SQL 面：读 Parquet 导出（`read_parquet()`）即席查询，
 与 data-engine 的 `/query` 面互补——本地文件走 DuckDB，服务端表走 API。
 
-## 🔧 开发指南
+## 开发指南
 
 ### 添加新的技术指标
 
@@ -153,21 +136,14 @@ web/
 2. 在 `app.js` 中添加对应的 JavaScript 逻辑
 3. 更新导航链接
 
-## 🧪 测试
+## 测试
 
-### 功能测试
-- 股票分析功能
-- 技术指标计算
-- 实时数据监控
-- 性能指标展示
+门禁 `scripts/check-web.sh`（接 CI `wasm` 作业）：旧演示页在场 + `node --check`
+语法冒烟 + React 工程结构在场断言 + `npm ci`/tsc/vitest/`vite build`。
+浏览器兼容目标：Chrome 80+ / Firefox 75+ / Safari 13+ / Edge 80+
+（桌面壳 WebView2/WKWebView 同此基线）。
 
-### 浏览器兼容性
-- Chrome 80+
-- Firefox 75+
-- Safari 13+
-- Edge 80+
-
-## 📈 性能优化
+## 性能优化
 
 ### WASM 优化
 - 使用 `wasm-opt` 进行代码优化（`--enable-simd` 为 wasm-opt 层面的 SIMD 处理，
@@ -175,11 +151,12 @@ web/
 - 减少内存分配（零拷贝 `SharedF64Buffer` 直写直读）
 
 ### 前端优化
-- 代码分割和懒加载
-- 图片和资源优化
-- 缓存策略
 
-## 🐛 故障排除
+- `dist/` 指纹资产长缓存一年 immutable，入口 HTML no-cache（三处缓存头
+  同源：优化器清单 / nginx / 部署脚本，见 `../docs/web-cdn.md`）；
+- 文本与 wasm 产 `.gz`/`.br` 预压缩体，源站 `gzip_static` 直发。
+
+## 故障排除
 
 ### 常见问题
 
@@ -205,24 +182,13 @@ web/
 - 使用 Network 面板检查资源加载
 - 使用 Performance 面板分析性能
 
-## 🤝 贡献指南
-
-1. Fork 项目
-2. 创建功能分支: `git checkout -b feature/amazing-feature`
-3. 提交更改: `git commit -m 'Add amazing feature'`
-4. 推送分支: `git push origin feature/amazing-feature`
-5. 创建 Pull Request
-
-## 📄 许可证
+## 许可证
 
 本项目采用 MIT 许可证 - 查看 [LICENSE](../LICENSE) 文件了解详情。
 
-## 🙏 致谢
+## 致谢
 
 - [Rust](https://rust-lang.org/) - 系统编程语言
 - [WebAssembly](https://webassembly.org/) - 高性能 Web 标准
 - [wasm-pack](https://rustwasm.github.io/wasm-pack/) - Rust WebAssembly 工具链
 
----
-
-⭐ 如果这个项目对你有帮助，请给我们一个 Star！

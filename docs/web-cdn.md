@@ -56,7 +56,7 @@ scripts/web-cdn-deploy.sh --bucket my-bucket \
 - `--dry-run` 打印完整计划（无工具也可自测语义）。
 
 CDN 侧配置要点：回源跟随源站缓存头（指纹 immutable 长缓存边缘命中）、
-开 brotli/gzip 透传（勿边缘重压缩，预压缩体已最优）、入口 HTML 短
+开 brotli/gzip 透传（勿边缘重压缩，预压缩体已到位）、入口 HTML 短
 TTL（≤60s）或走源站 no-cache 协商。
 
 ## 5. 与相邻项
