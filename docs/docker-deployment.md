@@ -22,13 +22,15 @@
 每个服务 Dockerfile 两阶段：
 
 1. **builder `rust:1.98.1-slim-bookworm`**：与 workspace 实测工具链同 minor（本地 `rustc 1.99.0`、
-   Docker Hub 现行最新 1.98.1，已用 `cargo +1.98.1 check --workspace` 实证向后兼容；1.99 镜像发布后随
-   例行升级跟进）——过旧的钉定（原 1.75）解析不了新 edition 的传递依赖；`cargo build --release -p <crate>` 只编目标服务。
+   已用 `cargo +1.98.1 check --workspace` 实证向后兼容。Docker Hub 已于 2026-09-28 发布
+   `rust:1.99.0-slim-bookworm`，本仓镜像基线仍钉 1.98.1，升级随例行升级跟进）——过旧的钉定
+   （原 1.75）解析不了新 edition 的传递依赖；`cargo build --release -p <crate>` 只编目标服务。
    - `protobuf-compiler`：`alpha-protocols` 默认 `grpc` 特性跑 tonic-build proto 代码生成
-     （collector 不依赖 alpha-protocols，无需装）。
+     （collector、alert-webhook 不依赖 alpha-protocols，无需装）。
 2. **runtime `debian:bookworm-slim`**：与 builder **同基底**——builder 产物链接 bookworm 的
    glibc 2.36，运行时若降级到 bullseye（2.31）会直接符号查找失败；反向升级运行时则浪费。
-   非 root 用户 `alpha` + `HEALTHCHECK` 探 `/health`（curl 显式入运行时依赖，slim 基底默认没有）。
+   非 root 用户（四个服务用 `alpha`，alert-webhook 用 `appuser`）+ `HEALTHCHECK` 探 `/health`
+   （curl 显式入运行时依赖，slim 基底默认没有）。
 
 官方 `rust`/`debian` 均为多架构镜像（linux/amd64 + linux/arm64），阶段内无架构假设，
 因此**同一 Dockerfile 天然支持多平台构建**，无需按架构分叉。

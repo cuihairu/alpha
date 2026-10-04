@@ -22,9 +22,9 @@ sudo ./scripts/deploy-ubuntu.sh
 
 ### 部署完成后的访问地址
 
-- **Web 应用**: `http://your-server-ip`
-- **API 文档**: `http://your-server-ip/api/docs`
-- **数据库管理**: `http://your-server-ip:8123`
+- **Web 应用**: `http://your-server-ip`（需 nginx；脚本仅在已安装 nginx 时配置站点，未装时请先 `apt install -y nginx` 后重跑）
+- **API 网关**: `http://your-server-ip:9080/health`（网关 `/api/v1/*` 反代 data-engine；接口清单见 [docs/market-data-api.md](docs/market-data-api.md)）
+- **ClickHouse**: `http://localhost:8123`（防火墙默认不放行 8123，仅本机可访问；如需远程访问请自行放行并改密）
 
 ### 默认登录信息
 
@@ -100,7 +100,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ```bash
 cd /opt/alpha
-sudo -u alpha git pull origin main
+git pull origin main          # 以部署用户执行（脚本以 $SUDO_USER 为项目属主）
 sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 ```
 
@@ -109,9 +109,8 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 ## 📚 详细文档
 
 - [完整部署文档](docs/deployment-runbook.md)
-- [API 文档](docs/API.md)
-- [配置说明](docs/CONFIGURATION.md)
-- [故障排除指南](docs/TROUBLESHOOTING.md)
+- [市场数据 API](docs/market-data-api.md)
+- [告警与故障诊断](docs/alerting-and-diagnosis.md)
 
 ---
 

@@ -32,7 +32,7 @@
 | iOS | App Store/TestFlight（明确不做自更新，L519 边界） | L119 面手工同步 |
 
 增量差分现实（L519 已登记）：Tauri 整包替换无内置差分，
-Windows/macOS bsdiff 与 AppImage zsync 待 L516 打包形态复核——不自研 delta 协议。
+Windows/macOS bsdiff 与 AppImage zsync 待 L516 打包形态复核——不自行开发 delta 协议。
 
 ## 3. 与 L470/L471 分工
 

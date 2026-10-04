@@ -1,971 +1,209 @@
-# Alpha Finance 部署文档
+# 部署 Runbook（Ubuntu 裸机 + Docker Compose）
 
-## 📋 目录
+本文只描述两条已落库、可照抄执行的部署路径：
 
-- [快速开始](#快速开始)
-- [系统架构](#系统架构)
-- [服务部署](#服务部署)
-- [环境配置](#环境配置)
-- [监控与维护](#监控与维护)
-- [故障排除](#故障排除)
-- [性能优化](#性能优化)
+- 裸机路径：`scripts/deploy-ubuntu.sh`，产 systemd 三单元 + nginx 站点 + ufw 规则，装在 `/opt/alpha`。
+- 容器路径：仓库根 `docker-compose.yml`，15 个服务一键起（应用 5 个 + 基础设施 + 可观测栈）。
 
----
+两条路径都不引入本文未列出的组件。Kafka、NATS、Kubernetes、Go 服务不在本仓栈内，
+architecture-review §2.4 已裁定队列升级（Kafka/NATS）不立项；编排以 compose 为界。
 
-## 快速开始
+## 1. 端口与拓扑
 
-### 🚀 一键部署
+| 服务 | 容器内/裸机默认端口 | 说明 |
+|---|---|---|
+| api-gateway | 8080（compose）/ 9080（裸机 `--bind`） | `/api/v1/*` 反代 data-engine，`/ws` 反代 real-time-feed |
+| data-engine | 8081（compose）/ 9082（裸机 `ALPHA__SERVER__ADDR`） | 行情 REST + SQL 查询 + gRPC(:50051) |
+| real-time-feed | 8082（compose）/ 9081（裸机 `ALPHA_REALTIME_FEED_BIND`） | WebSocket 推送 `/ws` |
+| collector | 8083 | 任务模板 + cron 调度 + 行情抓取 |
+| alert-webhook | 容器 8080，compose 映射 8084 | Alertmanager 转发出口 |
+| redis | 6379 | Streams 行情总线 + 缓存 + 限流令牌 |
+| timescaledb | 5432 | 时序落库（可选镜像） |
+| clickhouse | 8123(HTTP) 9000(TCP) 9004 9005 | 列存导出归档 |
+| prometheus / loki / promtail / grafana | 9090 / 3100 / - / 3000 | 指标 + 日志 + 面板 |
+| alertmanager | 9093 | 告警路由 |
+
+数据流：collector 发布 `quotes.raw` → data-engine 消费、标准化、写 `quotes.normalized`
+（毒消息进 `quotes.dlq`）→ real-time-feed 消费 normalized 推给 WebSocket 客户端。
+api-gateway 是唯一对外 REST/WS 入口；collector 的任务管理面（`/tasks`）只在内网暴露。
+
+裸机路径下端口挪到 9080-9082 是为了让 nginx 独占 80 端口；容器路径不改端口。
+两个服务（data-engine、real-time-feed）没有 CLI 参数解析，绑址只能走 env，
+裸机单元文件里 `ALPHA__SERVER__ADDR` / `ALPHA_REALTIME_FEED_BIND` 就是干这个的。
+
+## 2. 容器路径：docker compose
 
 ```bash
-# 克隆项目
-git clone https://github.com/your-org/alpha-finance.git
-cd alpha-finance
-
-# 安装依赖
-make setup
-
-# 启动服务
-make dev
-
-# 停止服务
-make stop
-
-# 重启服务
-make restart
+cp .env.example .env        # 可调端口与 ClickHouse 账密，默认值即可用
+docker compose up -d        # 起全部服务
+docker compose ps           # HEALTHCHECK 状态（各应用镜像探 /health）
 ```
 
-### 📋 前置要求
+编排细节：
 
-- **系统要求**
-  - **操作系统**: Ubuntu 20.04+ / CentOS 8+ / macOS 12+ / Windows 10+
-  - **内存**: 最低 4GB，推荐 8GB+
-  - **磁盘**: 最低 20GB，推荐 SSD
-  - **CPU**: 最低 4 核，推荐 8+ 核心
-  - **网络**: 稳定的互联网连接
+- 应用镜像由 `services/*/Dockerfile` 构建，`docker-compose.yml` 里 `build: context: .` 直连；
+  预构建多架构镜像走 `scripts/build-images.sh`（tag 默认 git 短 SHA，见 docs/docker-deployment.md）。
+- `web-origin` 容器服 `web/dist` 静态站，上线顺序是先 `cd web && npm run build` 再 `compose up web-origin`。
+- 配置挂载：`config/clickhouse-schema.sql`、`config/nginx/web-origin.conf`、
+  `config/prometheus.yml`、`config/loki/`、`config/promtail/`、`config/grafana/`、`config/alertmanager.yml`。
+- `docker-compose.yml` 内 `ALPHA__*` 键遵守「section 双下划线分隔、键名内单下划线」规则
+  （config crate `Environment::with_prefix("ALPHA").separator("__")`）。
 
-- **软件依赖**
-  ```bash
-  # Docker & Docker Compose (推荐)
-  docker --version
-  docker-compose --version
+初始化 ClickHouse schema：`scripts/clickhouse-init.sh`（deploy 脚本自动调用；
+compose 路径下手工跑一次）。
 
-  # Node.js 16+ (如果使用前端开发)
-  node --version
+## 3. 裸机路径：deploy-ubuntu.sh
 
-  # Rust 1.70+
-  rustc --version
-
-  # 其他构建工具
-  make --version
-  ```
-
-- **可选数据库**
-  - PostgreSQL 13+ (推荐用于生产环境)
-  - TimescaleDB (用于时序数据)
-  - ClickHouse (用于分析型查询)
-  - Redis (用于缓存和会话)
-
-### 🔧 构建步骤
+前置：Ubuntu 24.04、sudo、已 clone 的仓库（或让脚本克隆到 `/opt/alpha`）。
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/your-org/alpha-finance.git
-cd alpha-finance
+sudo ./scripts/deploy-ubuntu.sh
+```
 
-# 2. 配置环境
-cp .env.example .env
-# 编辑 .env 文件，配置数据库连接等
+脚本实际做的事，按顺序：
 
-# 3. 构建项目
+1. 建 `/opt/alpha` 与项目用户（`$SUDO_USER`，缺省 `alpha`）；
+2. apt 装依赖，装 rustup、Node 18、pm2、docker-compose v2；
+3. `cargo build --release` 编五个服务，`./build-wasm.sh` 编 WASM，
+   `web/` 下 `npm install && npm run build` 出 `dist/`；
+4. `docker-compose up -d clickhouse` 只起 ClickHouse，跑 `scripts/clickhouse-init.sh`；
+5. 写 systemd 三单元：`alpha-api-gateway`（`--bind 0.0.0.0:9080`）、
+   `alpha-data-engine`（`ALPHA__SERVER__ADDR=0.0.0.0:9082`）、
+   `alpha-real-time-feed`（`ALPHA_REALTIME_FEED_BIND=0.0.0.0:9081`）；
+   Redis 连接各服务按 `REDIS_URL` 默认值 `redis://localhost:6379` 自取；
+6. nginx 已装则写 `/etc/nginx/sites-available/alpha`（静态站 + `/api/` → 9080 +
+   `/ws/` → 9081；未装则跳过，Web 端口 80 无人服务，需自行 `apt install -y nginx` 后重配）；
+7. ufw 放行 22/80/443/9080/9081/9082 并启用；
+8. 起服务、探 `localhost:9080/health` 与 ClickHouse `:8123/ping`，打印结果。
+
+健康与状态：
+
+```bash
+systemctl status alpha-api-gateway alpha-data-engine alpha-real-time-feed
+journalctl -u alpha-* -f
+curl localhost:9080/health
+```
+
+更新：
+
+```bash
+cd /opt/alpha
+git pull origin main
 cargo build --release
-
-# 4. 构建并启动 WebAssembly 模块
-./build-wasm-optimized.sh
-
-# 5. 构建并启动服务
-make build-all
-
-# 6. 启动开发环境
-make dev
+sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 ```
 
----
+## 4. 服务配置面
 
-## 系统架构
+各服务配置入口不同，没有统一配置文件：
 
-### 🏗️ 整体架构
+**data-engine**（唯一有 schema 的服务）：`services/data-engine/config`、`Config`
+（相对进程 CWD，仓内默认都不存在，全靠 env 覆盖默认值）。schema：
+`server{addr,enable_cors,grpc_addr}` / `telemetry{level,json}` /
+`data{seed_demo_data,seed_symbols,lookback_days}` /
+`storage{persistence_enabled,timescale_url}` /
+`clickhouse{enabled,url,database,user,password}` /
+`sweeper{enabled,min_idle_ms,interval_secs,max_delivery_count}` /
+`security{api_keys}`。env 形如 `ALPHA__STORAGE__PERSISTENCE_ENABLED=true`。
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   ┌─────────┐                ┌─────────┐        │
-│                   │  Web Frontend   │                │  WebAssembly │
-│                   │  (React/Vue)   │                │   (Rust/Wasm) │
-│                   └─────────────┘                └─────────────┘        │
-│                                                            │
-┌─────────────────────────────────────────────────────────┐
-│              ┌───────────┐           ┌─────────┐             │
-│              │ Load Balancer │           │   Gateway  │             │
-│              │ (Nginx/HAProxy)│           │  (Nginx)   │             │
-│              └─────────────┘           └─────────────┘             │
-└─────────────────────────────────────────────────────────┘                            │
-                                                            │
-┌─────────────────────────────────────────────────────────┐
-│  ┌─────────────┐       ┌─────────────┐      ┌─────────────┐       │
-│  │ Collector    │       │ Data Engine  │       │ Real-time Feed │       │
-│  │ (Multiple)   │       │ (Go Service) │       │ (Go Service)    │
-│  │              │       └─────────────┘       └─────────────┘       │
-│  └─────────────┘       ┌─────────────┐      ┌─────────────┐       │
-│                    │ Scheduler  │      │ Task Queue  │       │ WebSocket    │
-│                    │ (Go Service) │       │ (Redis/NATS)  │       │ (Go Service)    │
-│                    └─────────────┘       └─────────────┘       └─────────────┘
-└─────────────────────────────────────────────────────────┘                             │
-                                                            │
-┌─────────────────────────────────────────────────────────┐
-│              ┌───────────────────┐    ┌─────────────┐    ┌─────────────┐   │
-│              │    Storage Layer      │    │ Storage Layer  │    │ Storage Layer  │
-│              │ (Multiple)           │    │ (PostgreSQL)   │    │ (ClickHouse)  │
-│              │                      │    │ + TimescaleDB │    │ + Redis Cache   │
-│              └───────────────────┘    └─────────────┘    └─────────────┘
-└─────────────────────────────────────────────────────────┘                             │
-                                                            │
-┌─────────────────────────────────────────────────────────┐
-│              ┌───────────────────┐       ┌─────────────┐    ┌─────────────┐   │
-│              │   Message Queue     │       │ Message Queue │       │ Message Queue │
-│              │ (Kafka/Redis)     │       │ (Kafka)     │       │ (Redis/NATS) │
-│              └───────────────────┘       └─────────────┘       └─────────────┘
-└─────────────────────────────────────────────────────────┘                             │
-                                                            │
-┌─────────────────────────────────────────────────────────┐
-│                   ┌─────────┐         ┌─────────────┐        │
-│                   │ Monitoring │         │  Metrics     │         │   Metrics     │
-│                   │ (Prometheus)    │         │ (Prometheus) │         │ (Prometheus) │
-│                   └─────────────┘         └─────────────┘         └─────────────┘
-└─────────────────────────────────────────────────────────┘                             │
-                                                            │
-```
+**api-gateway**：clap CLI（`--bind`、`--auth-mode off|jwt`、`--auth-secret`、
+`--rate-*` 等），同名 env 兜底（`ALPHA_GATEWAY_*`）。鉴权细节见 docs/auth.md。
 
----
+**collector**：`ALPHA_COLLECTOR_BIND`（默认 `0.0.0.0:8083`）、
+`ALPHA_COLLECTOR_TASKS`（任务模板路径，默认 `config/collector.tasks.yaml`）、
+`ALPHA_WORKSPACE_ROOT`。模板格式见该文件与 architecture.md §24。
 
-## 服务部署
+**real-time-feed**：`ALPHA_REALTIME_FEED_BIND`、`ALPHA_REDIS_URL`/`REDIS_URL`、
+`ALPHA_LOG_LEVEL`、`ALPHA_CLAIM_MIN_IDLE_MS`/`ALPHA_CLAIM_SWEEP_SECS`/
+`ALPHA_CLAIM_MAX_DELIVERY`（孤儿消息认领）、`ALPHA_ALERT_RULES`。
 
-### 🚢 生产环境部署
+**日志级别**：real-time-feed 走 `ALPHA_LOG_LEVEL → RUST_LOG → info` 显式初始化；
+data-engine 走 `telemetry.level`（默认 info）；其余服务 `RUST_LOG` 语义。
 
-#### 1. **Collector Service** (数据收集服务)
+测试专用 env（生产不设）：`REDIS_TEST_URL`、`TIMESCALE_TEST_URL`——不设则对应
+集成测试打印 skipping 并通过。
+
+## 5. 可观测与告警
+
+抓取目标以 `config/prometheus.yml` 为准：api-gateway:8080、data-engine:8081、
+real-time-feed:8082、collector:8083 各自 `/metrics`，10s 间隔。
+
+常用指标：
+
+- 网关：`alpha_gateway_requests_total`、`alpha_gateway_auth_total`、
+  `alpha_gateway_rate_limit_total`、`alpha_gateway_shield_total`、`alpha_gateway_audit_total`
+- 实时：`alpha_realtime_messages_total`、`alpha_realtime_feed_connected`
+- 数据面：`alpha_dataengine_memory_bytes`、`alpha_dataengine_query_duration_seconds`
+- 数据质量：`alpha_dataquality_sequence_gaps_total`、
+  `alpha_dataquality_sequence_regressions_total`（sequence 断档/回退，见 architecture-review §5 P2）
+
+告警规则 9 条（`config/alpha-alerts.yml`）：GatewayRateLimitExceeded、
+GatewayShieldTriggered、GatewayUpstreamUnhealthy、GatewayErrorRateHigh、
+DataEngineQueryLatencyHigh、DataEngineMemoryPressure、RealtimeFeedConnectionLoss、
+RealtimeFeedMessageGap、PrometheusTargetDown。链路：Prometheus → Alertmanager
+（`config/alertmanager.yml`，分组/抑制/静默在档）→ alert-webhook
+（`/health`、`/alerts`、`/alerts/critical`，渠道 env：`DINGTALK_WEBHOOK_URL`、
+`WECHAT_WEBHOOK_URL`、`SLACK_WEBHOOK_URL`、`PAGERDUTY_INTEGRATION_KEY`，缺哪个跳过哪个）。
+
+日志：promtail 按 docker 服务发现收容器日志（`config/promtail/promtail-config.yml`）
+推 Loki（`config/loki/loki-config.yml`），Grafana 出 `alpha-services-overview` 面板
+（`config/grafana/dashboards/` + provisioning 自动加载）。
+
+## 6. 接口速查
+
+对外与运维端点以各服务 router 为准，这里只列入口方向：
+
+| 面 | 入口 | 文档 |
+|---|---|---|
+| 行情/查询 REST | api-gateway `/v1/*` → data-engine（`/query`、`/stocks/:symbol/history`、`/instruments` 等） | docs/market-data-api.md |
+| WebSocket | api-gateway `/ws` → real-time-feed `/ws`（版本化 Full/Delta 帧） | docs/realtime-sync-protocol.md |
+| 任务管理 | collector `GET/POST /tasks`、`GET /tasks/:id`、`POST /tasks/:id/execute`、`GET /stats`、`GET /events`(SSE) | 内网暴露，勿上公网 |
+| 鉴权 | api-gateway `POST /auth/token`（jwt 模式） | docs/auth.md |
+| 健康/指标 | 四服务 `/health`、`/metrics` | 本文 §5 |
+
+collector 没有任务 cancel/retry/delete 端点；real-time-feed 的 WS 不推任务事件，
+推的是行情帧与 alerts 通道。
+
+## 7. 故障排查
 
 ```bash
-# 环境变量
-export RUST_LOG=info
-export DATABASE_URL=postgresql://user:password@localhost:5432/alpha_finance
-export REDIS_URL=redis://localhost:6379/0
-export KAFKA_BROKERS=localhost:9092
-export COLLECTOR_CONFIG=/path/to/collector/config.toml
+# 端口与监听
+sudo ss -tlnp | grep -E '8080|8081|8082|8083|9080|9081|9082'
 
-# 启动服务
-cd services/collector
-cargo run --release
+# 服务日志（裸机）
+journalctl -u alpha-data-engine -n 100 --no-pager
+
+# 容器日志
+docker logs alpha-data-engine --tail 100
+
+# 毒消息积压（DLQ）
+docker exec alpha-redis redis-cli XLEN quotes.dlq
+
+# 积压的 pending（认领 sweeper 每 30s 扫一轮）
+docker exec alpha-redis redis-cli XPENDING quotes.raw data-engine
+
+# ClickHouse
+curl http://localhost:8123/ping
 ```
 
-**配置文件示例** (`config/collector.toml`):
-```toml
-[server]
-host = "0.0.0.0"
-port = 8080
-
-[database]
-url = "postgresql://alpha:password@localhost:5432/alpha_finance"
-max_connections = 20
-connection_timeout = 30
-
-[redis]
-url = "redis://localhost:6379/1"
-pool_size = 10
-connection_timeout = 5
-
-[kafka]
-brokers = ["localhost:9092"]
-topics = ["market-data", "news-data", "task-results"]
-producer_config = { batch_size = 1000 }
-
-[crawlers]
-max_concurrent_tasks = 50
-default_timeout = 300
-retry_policy = { max_retries = 3, backoff_strategy = "exponential" }
-
-[monitoring]
-metrics_port = 9090
-health_check_interval = 30
-log_level = "info"
-```
-
-#### 2. **Data Engine Service** (数据处理服务)
-
-```bash
-# 启动数据处理服务
-cd services/data-engine
-cargo run --release --config /path/to/data-engine/config.toml
-```
-
-**配置文件示例**:
-```toml
-[server]
-host = "0.0.0.0"
-port = 8081
-
-[database]
-url = "postgresql://alpha:password@localhost:5432/alpha_finance"
-query_timeout = 30
-connection_pool_size = 10
-
-[processing]
-batch_size = 1000
-memory_limit = "2GB"
-worker_threads = 8
-```
-
-#### 3. **Real-time Feed Service** (实时数据流服务)
-
-```bash
-# 启动实时数据流服务
-cd services/real-time-feed
-cargo run --release --config /path/to/real-time-feed/config.toml
-```
-
-**配置文件示例**:
-```toml
-[websocket]
-host = "0.0.0.0"
-port = 8082
-path = "/ws"
-compression = true
-
-[redis]
-url = "redis://localhost:6379/2"
-pub_channel = "real-time-updates"
-sub_channel = "market-data"
-
-[processors]
-tick_interval = 1000
-max_connections = 10000
-buffer_size = 8192
-```
-
-#### 4. **API Gateway Service** (API网关服务)
-
-```bash
-# 启动API网关
-cd services/api-gateway
-cargo run --release --config /path/to/api-gateway/config.toml
-```
-
-**配置文件示例**:
-```toml
-[server]
-host = "0.0.0.0"
-port = 8080
-workers = 4
-
-[database]
-url = "postgresql://alpha:password@localhost:5432/alpha_finance"
-connection_pool_size = 20
-
-[rate_limiting]
-requests_per_minute = 1000
-burst_size = 100
-window_size = 60000
-
-[auth]
-api_keys = ["your-api-key-here"]
-jwt_secret = "your-jwt-secret-here"
-
-[monitoring]
-metrics_port = 9091
-health_check_interval = 60
-```
-
-### 🌐 负载均衡配置
-
-#### **Nginx 配置**
-```nginx
-upstream alpha_backend {
-    least_conn;
-    server 127.0.0.1:8080;
-    server 127.0.0.1:8081;
-    server 127.0.0.1:8082;
-    server 127.0.0.1:8083;
-}
-
-server {
-    listen 80;
-    server_name api.alpha.finance;
-
-    location / {
-        proxy_pass http://alpha_backend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-        # 健康检查
-        location /health {
-            access_log off;
-            return 200 "healthy";
-            add_header Content-Type text/plain;
-            add_header Cache-Control no-cache;
-        }
-
-        # API 路由
-        location /api/ {
-            proxy_pass http://alpha_backend;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-            # CORS 头
-            add_header Access-Control-Allow-Origin *;
-            add_header Access-Control-Allow-Methods GET,POST,PUT,DELETE,OPTIONS;
-            add_header Access-Control-Allow-Headers Content-Type,Authorization;
-            add_header Access-Control-Allow-Credentials true;
-        }
-
-        # WebSocket 代理
-        location /ws {
-            proxy_pass http://alpha_backend;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection $connection_upgrade;
-            proxy_set_header Host $host;
-        }
-    }
-}
-```
-
-#### **Docker Compose 配置**
-```yaml
-version: '3.8'
-
-services:
-  # 数据库服务
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: alpha_finance
-      POSTGRES_USER: alpha
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d
-    networks:
-      - alpha-network
-
-  # Redis 缓存
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
-    volumes:
-      - redis_data:/data
-    networks:
-      - alpha-network
-
-  # Kafka 消息队列
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    networks:
-      - alpha-network
-
-  kafka:
-    image: confluentinc/cp-kafka:7.4.0
-    depends_on:
-      - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
-    networks:
-      - alpha-network
-
-  # 应用服务
-  collector:
-    build: ./services/collector
-    environment:
-      - DATABASE_URL=postgresql://alpha:password@postgres:5432/alpha_finance
-      - REDIS_URL=redis://redis:6379/0
-      - KAFKA_BROKERS=localhost:9092
-    depends_on:
-      - postgres
-      - redis
-      - kafka
-    networks:
-      - alpha-network
-    ports:
-      - "8080:8080"
-
-  data-engine:
-    build: ./services/data-engine
-    environment:
-      - DATABASE_URL=postgresql://alpha:password@postgres:5432/alpha_finance
-    depends_on:
-      - postgres
-    networks:
-      - alpha-network
-
-  real-time-feed:
-    build: ./services/real-time-feed
-    environment:
-      - REDIS_URL=redis://redis:6379/1
-      - KAFKA_BROKERS=localhost:9092
-    depends_on:
-      - redis
-      - kafka
-    networks:
-      - alpha-network
-    ports:
-      - "8081:8081"
-
-  api-gateway:
-    build: ./services/api-gateway
-    environment:
-      - DATABASE_URL=postgresql://alpha:password@postgres:5432/alpha_finance
-      - REDIS_URL=redis://redis:6379/2
-    depends_on:
-      - postgres
-      - redis
-    networks:
-      - alpha-network
-    ports:
-      - "8080:8080"
-
-  # 负载均衡器
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf
-    depends_on:
-      - collector
-      - data-engine
-      - real-time-feed
-      - api-gateway
-    networks:
-      - alpha-network
-
-networks:
-  alpha-network:
-    driver: bridge
-```
-
----
-
-## 环境配置
-
-### 🔧 环境变量配置
-
-```bash
-# .env 文件示例
-# 数据库配置
-DATABASE_URL=postgresql://alpha:secure_password@localhost:5432/alpha_finance
-DATABASE_POOL_SIZE=20
-DATABASE_QUERY_TIMEOUT=30
-
-# Redis 配置
-REDIS_URL=redis://localhost:6379/0
-REDIS_POOL_SIZE=10
-REDIS_CONNECTION_TIMEOUT=5
-
-# Kafka 配置
-KAFKA_BROKERS=localhost:9092
-KAFKA_TOPIC_PREFIX=alpha-finance
-KAFKA_BATCH_SIZE=1000
-KAFKA_PRODUCER_CONFIG={}
-
-# 服务配置
-COLLECTOR_HOST=0.0.0.0
-COLLECTOR_PORT=8080
-DATA_ENGINE_HOST=0.0.0.0
-DATA_ENGINE_PORT=8081
-REAL_TIME_FEED_HOST=0.0.0.0
-REAL_TIME_FEED_PORT=8081
-API_GATEWAY_HOST=0.0.0.0
-API_GATEWAY_PORT=8080
-
-# 调度和日志
-RUST_LOG=info
-RUST_LOG_STYLE=json
-RUST_BACKTRACE=1
-
-# 性能配置
-TOKIO_WORKER_THREADS=8
-COLLECTOR_MAX_CONCURRENT=50
-DATA_ENGINE_MEMORY_LIMIT=2GB
-REAL_TIME_FEED_MAX_CONNECTIONS=10000
-```
-
-### 🔐 安全配置
-
-#### 1. **数据库安全**
-```sql
--- 创建专用用户
-CREATE USER alpha_user WITH PASSWORD 'secure_password_123';
-CREATE DATABASE alpha_finance OWNER alpha_user;
-
--- 授权用户访问
-GRANT ALL PRIVILEGES ON DATABASE alpha_finance TO alpha_user;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO alpha_user;
-
--- 启用行级安全
-ALTER DATABASE alpha_finance SET row_level_security = on;
-```
-
-#### 2. **API 安全**
-```toml
-[security]
-# 启用 API 密钥认证
-api_key_required = true
-
-# 速率限制
-rate_limit_per_minute = 1000
-rate_limit_burst = 100
-
-# CORS 配置
-cors_origins = ["https://app.alpha.finance", "https://admin.alpha.finance"]
-cors_methods = ["GET", "POST", "PUT", "DELETE"]
-cors_headers = ["Content-Type", "Authorization", "X-API-Key"]
-
-# JWT 配置
-jwt_secret = "your-256-bit-secret-here"
-jwt_expiration = 86400  # 24小时
-jwt_refresh_window = 3600  # 1小时
-```
-
-#### 3. **网络安全**
-```bash
-# 防火墙配置 (ufw)
-sudo ufw enable 80/tcp    # HTTP
-sudo ufw enable 443/tcp   # HTTPS
-sudo ufw enable 9092/tcp  # Kafka
-sudo ufw enable 5432/tcp   # PostgreSQL
-sudo ufw enable 6379/tcp   # Redis
-
-# 反向代理配置
-# 在 nginx.conf 中配置真实 IP 检查
-set_real_ip_from 192.168.1.0/24;
-set_real_ip_header X-Real-IP;
-```
-
----
-
-## 监控与维护
-
-### 📊 监控指标
-
-#### 1. **应用指标**
-```yaml
-# Prometheus 配置
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-
-scrape_configs:
-  - job_name: 'alpha-collector'
-    static_configs:
-      - targets: ['collector:8080/metrics']
-    metrics_path: '/metrics'
-    scrape_interval: 5s
-
-  - job_name: 'alpha-data-engine'
-    static_configs:
-      - targets: ['data-engine:8080/metrics']
-    metrics_path: '/metrics'
-    scrape_interval: 5s
-
-  - job_name: 'alpha-real-time-feed'
-    static_configs:
-      - targets: ['real-time-feed:8081/metrics']
-    metrics_path: '/metrics'
-    scrape_interval: 5s
-
-  - job_name: 'alpha-api-gateway'
-    static_configs:
-      - targets: ['api-gateway:8080/metrics']
-    metrics_path: '/metrics'
-    scrape_interval: 5s
-```
-
-#### 2. **Grafana 仪表板**
-```json
-{
-  "datasources": [
-    {
-      "name": "Alpha Finance",
-      "type": "prometheus",
-      "url": "http://prometheus:9090",
-      "access": "proxy",
-      "isDefault": true
-    }
-  ],
-  "dashboard": {
-    "title": "Alpha Finance 监控",
-    "panels": [
-      {
-        "title": "任务执行统计",
-        "type": "stat",
-        "targets": [
-          {
-            "expr": "sum(alpha_tasks_total)",
-            "legendFormat": "总任务数"
-          }
-        ]
-      },
-      {
-        "title": "API 请求量",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "rate(alpha_api_requests_total[5m])",
-            "legendFormat": "每5分钟请求数"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-#### 3. **日志聚合**
-```yaml
-# Loki 配置
-auth_enabled: false
-server:
-  http_listen_port: 3100
-  grpc_listen_port: 9096
-
-positions:
-  filename: /tmp/positions.yaml
-  target_config: config/loki-local-config.yaml
-
-clients:
-  - url: http://loki:3100/loki/api/v1/push
-    batchsize: 400
-    external_labels:
-      job: "alpha-finance"
-      instance: "prod-1"
-```
-
-### 🛠️ 运维脚本
-
-#### 1. **健康检查脚本**
-```bash
-#!/bin/bash
-
-# Alpha Finance 健康检查脚本
-# 检查所有服务的健康状态
-
-SERVICES=("collector:8080" "data-engine:8081" "real-time-feed:8081" "api-gateway:8080")
-
-ALL_HEALTHY=true
-FAILED_SERVICES=()
-
-for service in "${SERVICES[@]}"; do
-    name="${service%:*}"
-    port="${service#*:}"
-
-    echo "检查 $name (端口 $port)..."
-
-    if curl -f -s "http://localhost:$port/health" --max-time 10 >/dev/null 2>&1; then
-        echo "✅ $name 健康"
-    else
-        echo "❌ $name 不健康"
-        ALL_HEALTHY=false
-        FAILED_SERVICES+=("$name")
-    fi
-done
-
-echo ""
-if [ "$ALL_HEALTHY" = true ]; then
-    echo "🎉 所有服务运行正常"
-    exit 0
-else
-    echo "💥 以下服务不健康: $FAILED_SERVICES"
-    exit 1
-fi
-```
-
-#### 2. **日志轮转脚本**
-```bash
-#!/bin/bash
-
-# 日志轮转脚本
-# 定期压缩和归档日志文件
-
-LOG_DIR="/var/log/alpha-finance"
-ARCHIVE_DIR="/var/log/alpha-finance/archive"
-RETENTION_DAYS=30
-
-# 创建归档目录
-mkdir -p "$ARCHIVE_DIR"
-
-# 压缩旧日志
-find "$LOG_DIR" -name "*.log" -mtime +$RETENTION_DAYS -exec gzip -v {} \;
-
-# 移动压缩后的日志
-find "$LOG_DIR" -name "*.gz" -mtime +$((RETENTION_DAYS + 90)) -exec mv {} "$ARCHIVE_DIR/" \;
-
-echo "日志轮转完成"
-```
-
----
-
-## 故障排除
-
-### 🔧 常见问题解决
-
-#### 1. **服务无法启动**
-```bash
-# 检查端口占用
-netstat -tlnp | grep :8080
-
-# 检查 Docker 容器状态
-docker ps -a
-
-# 查看服务日志
-docker logs alpha-collector
-docker logs alpha-data-engine
-```
-
-#### 2. **数据库连接问题**
-```bash
-# 测试数据库连接
-psql "postgresql://alpha:password@localhost:5432/alpha_finance" -c "SELECT 1;"
-
-# 检查 PostgreSQL 状态
-systemctl status postgresql
-
-# 重启数据库
-sudo systemctl restart postgresql
-sudo systemctl restart redis
-```
-
-#### 3. **性能问题**
-```bash
-# 检查系统资源
-htop
-iostat -x 1
-
-# 检查 Rust 内存使用
-pmap $(pgrep -f collector | head -1)
-
-# 分析日志
-tail -f /var/log/alpha-finance/collector.log | grep ERROR
-```
-
-#### 4. **内存泄漏检测**
-```bash
-# 使用 valgrind 检测内存泄漏
-valgrind --tool=memcheck --leak-check=full ./target/release/alpha-collector
-
-# 使用 AddressSanitizer
-RUSTFLAGS="-Zaddress-sanitizer -fsanitize=address" cargo build --release
-```
-
----
-
-## 性能优化
-
-### ⚡ 性能调优建议
-
-#### 1. **数据库优化**
-```sql
--- 创建索引
-CREATE INDEX CONCURRENTLY ON market_data(timestamp, symbol);
-CREATE INDEX CONCURRENTLY ON task_results(created_at);
-
--- 分区表
-CREATE TABLE market_data_2024 PARTITION OF market_data
-FOR VALUES FROM ('2024-01-01') TO ('2024-12-31');
-
--- 查询优化
-EXPLAIN ANALYZE SELECT * FROM market_data WHERE symbol='AAPL' AND timestamp >= '2024-01-01';
-```
-
-#### 2. **Rust 代码优化**
-```toml
-# Cargo.toml 优化配置
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"
-
-[dependencies]
-# 使用优化的依赖版本
-tokio = { version = "1.39", features = ["full", "parking_lot"] }
-axum = { version = "0.7", features = ["macros", "http2"] }
-serde = { version = "1.0.210", features = ["derive"] }
-```
-
-#### 3. **系统级优化**
-```bash
-# 系统参数优化
-echo 'net.core.somaxconn = 65536' >> /etc/sysctl.conf
-echo 'vm.swappiness = 10' >> /etc/sysctl.conf
-echo 'fs.file-max = 2097152' >> /etc/sysctl.conf
-
-# 应用参数
-sysctl -p
-```
-
-#### 4. **缓存策略**
-```toml
-# Redis 缓存配置
-[cache]
-default_ttl = 3600
-max_memory = "1GB"
-compression = "gzip"
-serialization = "json"
-```
-
-### 📈 扩展指南
-
-#### 1. **添加新数据源**
-```rust
-// 1. 在 types.rs 中添加新的数据源类型
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TaskSource {
-    // 现有类型...
-    AShare { ... },
-    HKShare { ... },
-    // 新增数据源
-    CryptoExchange {
-        exchange: String,
-        symbols: Vec<String>,
-        api_endpoint: String,
-        auth_type: AuthType,
-    },
-    CommodityMarket {
-        exchange: String,
-        commodities: Vec<String>,
-        data_types: Vec<DataType>,
-    },
-}
-
-// 2. 实现对应的解析器和配置
-impl CryptoExchangeDataSource {
-    pub async fn fetch_data(&self, config: &DataSourceConfig) -> Result<Vec<MarketData>> {
-        // 实现加密交易所 API 调用
-    }
-}
-```
-
-#### 2. **水平扩展**
-```bash
-# Kubernetes 部署配置
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: alpha-collector
-  labels:
-    app: alpha-collector
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: alpha-collector
-  template:
-    metadata:
-      labels:
-        app: alpha-collector
-    spec:
-      containers:
-      - name: alpha-collector
-        image: alpha-finance/collector:latest
-        ports:
-        - containerPort: 8080
-        env:
-          - name: DATABASE_URL
-            valueFrom:
-              secretKeyRef:
-                name: database-url
-          - name: REDIS_URL
-            valueFrom:
-              secretKeyRef:
-                name: redis-url
-          - name: KAFKA_BROKERS
-            valueFrom:
-              secretKeyRef:
-                name: kafka-brokers
-        resources:
-          limits:
-            memory: "1Gi"
-            cpu: "500m"
-```
-
----
-
-## 🔒 安全最佳实践
-
-### 1. **数据安全**
-- **加密存储**: 所有敏感数据使用 AES-256 加密
-- **访问控制**: 实施基于角色的访问控制 (RBAC)
-- **审计日志**: 记录所有数据访问和修改操作
-- **定期备份**: 每日自动备份数据库
-- **网络隔离**: 使用 VPC 或防火墙隔离服务网络
-
-### 2. **应用安全**
-- **HTTPS 强制**: 生产环境强制使用 HTTPS
-- **API 密钥轮换**: 定期轮换 API 密钥
-- **输入验证**: 严格验证所有 API 输入
-- **依赖安全**: 使用最新版本的依赖，定期安全扫描
-
-### 3. **运行时安全**
-- **容器化部署**: 使用非 root 用户运行容器
-- **资源限制**: 设置合理的 CPU 和内存限制
-- **健康检查**: 定期检查服务健康状态
-- **监控告警**: 配置异常情况的告警机制
-
----
-
-## 📝 API 文档
-
-### 核心 API 端点
-
-| 方法 | 端点 | 描述 | 参数 |
-|------|------|--------|--------|------|--------|
-| GET | `/health` | 健康检查 | 无 |
-| GET | `/metrics` | 获取监控指标 | 无 |
-| GET | `/stats` | 获取系统统计 | 无 |
-| GET | `/tasks` | 获取任务列表 | `?status=pending`, `?limit=10` |
-| GET | `/tasks/{id}` | 获取任务详情 | 任务ID |
-| GET | `/tasks/{id}/status` | 获取任务状态 | 任务ID |
-| POST | `/tasks` | 创建新任务 | 任务配置JSON |
-| POST | `/tasks/{id}/execute` | 执行任务 | 任务ID |
-| POST | `/tasks/{id}/cancel` | 取消任务 | 任务ID |
-| POST | `/tasks/{id}/retry` | 重试任务 | 任务ID |
-| DELETE | `/tasks/{id}` | 删除任务 | 任务ID |
-
-### WebSocket 事件
-
-| 事件类型 | 描述 | 数据格式 |
-|----------|--------|--------|----------|----------|
-| `task.created` | 任务创建 | `{ "taskId": "uuid", "task": {...} }` |
-| `task.updated` | 任务更新 | `{ "taskId": "uuid", "status": "running", "timestamp": "2024-01-01T00:00:00Z" }` |
-| `task.completed` | 任务完成 | `{ "taskId": "uuid", "result": {...}, "executionTime": 120.5 }` |
-| `task.failed` | 任务失败 | `{ "taskId": "uuid", "error": "Timeout", "timestamp": "2024-01-01T00:00:00Z" }` |
-| `system.status` | 系统状态 | `{ "timestamp": "2024-01-01T00:00:00Z", "cpu": 45.2, "memory": 67.8, "connections": 1200 }` |
-
----
-
-这个部署文档提供了 Alpha Finance 项目的完整部署指南，包括：
-
-- 🏗️ **完整的系统架构图**
-- 🚀 **一键部署脚本**
-- ⚙️ **详细的配置示例**
-- 🛠️ **全面的故障排除指南**
-- 📈 **性能优化建议**
-- 🔒 **安全最佳实践**
-- 📝 **完整的 API 文档**
-
-通过这个文档，开发和运维团队可以快速部署和管理 Alpha Finance 金融数据平台。
+常见形态：
+
+- WS 连不上：先探 real-time-feed `/health`，再确认 nginx `/ws/` 指向的端口
+  （裸机 9081，容器走网关 `/ws`）。
+- `/query` 500：多为 DataFusion 表注册问题，看 data-engine 日志中 register/deregister 行。
+- 指标断流：Prometheus `up == 0` 对应 target 不可达，检查容器端口映射或防火墙。
+- 镜像写失败重试缓冲溢出：日志出现 mirror retry 计数，检查 Timescale
+  （`ALPHA__STORAGE__TIMESCALE_URL`）连通性；未启用持久化时该告警不应出现。
+
+## 8. 边界与已知项
+
+- **TLS 在服务内未接线**：api-gateway 声明了 `axum-server`(tls-rustls) 依赖但没有
+  启用路径，HTTPS 当前由反代终结。裸机路径 nginx 只配了 80 端口，443 需自行补证书。
+- **Cargo.lock 不入库**：容器与裸机构建每次解析最新兼容依赖，构建不完全可复现。
+  锁文件入库策略归质量保证统筹（docker-deployment §5 登记）。
+- **单节点为界**：compose 是开发/测试栈，无副本、无编排级资源限额；
+  生产加固项（镜像按 SHA 出库、secrets 注入、限额）登记在 docker-deployment §4。
+- **数据备份**：仓内无自动化备份脚本，Timescale/ClickHouse 卷自行 `docker run --rm
+  -v ... pg_dump` 或宿主机方案；这是运维缺口，不是遗漏。
+- **ClickHouse 账密默认 admin/admin123**：仅限内网演示，公网部署先改
+  `config/clickhouse-users.xml` 与 `.env`。
