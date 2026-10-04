@@ -262,6 +262,35 @@ fn builtin_rules() -> Vec<DiagnosisRule> {
             runbook_url: Some("https://wiki.company.com/ops/gateway-errors".to_string()),
         },
 
+        DiagnosisRule {
+            id: "GW-004".to_string(),
+            name: "API 网关防护栏触发".to_string(),
+            description: "护栏（UA 拒绝/burst 令牌桶/路径扫描检测）拒绝率>0——爬虫或滥用流量特征，按 mode 标签甄别".to_string(),
+            alert_patterns: vec!["GatewayShieldTriggered".to_string()],
+            required_metric_anomalies: vec![MetricAnomalyType::Spike],
+            log_patterns: vec!["shield".to_string(), "burst".to_string(), "scan".to_string()],
+            trace_indicators: vec![],
+            root_cause_category: RootCauseCategory::CapacityLimit,
+            base_confidence: 75,
+            suggested_actions: vec![
+                SuggestedAction {
+                    action_type: ActionType::ReviewLogs,
+                    description: "按 mode 甄别攻击面（bot_denied=伪造 UA、burst_denied=短洪峰、scan_denied=广撒网探测），结合访问日志提取来源分布".to_string(),
+                    command: Some("curl -s http://<gateway>:9080/metrics | grep alpha_gateway_shield_total".to_string()),
+                    priority: ActionPriority::High,
+                    estimated_downtime_secs: None,
+                },
+                SuggestedAction {
+                    action_type: ActionType::Custom,
+                    description: "确认误伤面：护栏只标记不封禁（alerting §6），误伤自有客户端时调 ALPHA_GATEWAY_BURST_CAPACITY / SCAN_MAX_DISTINCT".to_string(),
+                    command: None,
+                    priority: ActionPriority::Medium,
+                    estimated_downtime_secs: None,
+                },
+            ],
+            runbook_url: Some("docs/alerting-and-diagnosis.md".to_string()),
+        },
+
         // ===== 数据引擎规则 =====
         DiagnosisRule {
             id: "DE-001".to_string(),
@@ -791,6 +820,29 @@ mod tests {
             report.root_cause.category,
             RootCauseCategory::DownstreamFailure
         );
+    }
+
+    #[test]
+    fn engine_matches_shield_triggered_rule() {
+        let engine = DiagnosisEngine::new();
+        let mut request = sample_request();
+        request.alert_name = "GatewayShieldTriggered".to_string();
+
+        let metric_evidence = vec![MetricEvidence {
+            metric_name: "alpha_gateway_shield_total".to_string(),
+            query: "rate(alpha_gateway_shield_total[5m])".to_string(),
+            current_value: 0.4,
+            baseline_value: 0.0,
+            deviation_pct: 100.0,
+            anomaly_type: MetricAnomalyType::Spike,
+            timestamp: Utc::now(),
+        }];
+        let report = engine.diagnose(&request, metric_evidence, vec![], vec![]);
+
+        assert!(!report.matched_rules.is_empty());
+        assert_eq!(report.matched_rules[0].rule_id, "GW-004");
+        assert_eq!(report.root_cause.category, RootCauseCategory::CapacityLimit);
+        assert!(!report.recommended_actions.is_empty());
     }
 
     #[test]

@@ -79,8 +79,9 @@ Webhook 多渠道分发 + 诊断引擎纯函数库。Jaeger OTLP 全量 span
 1. 通知渠道只做到 Webhook 转发层；短信/电话升级链归运维侧。
 2. `repeat_interval` 默认 4h（critical 1h）：告警风暴与打扰度的折中，
    随 on-call 制度调。
-3. 诊断引擎知识库首批规则覆盖现配置 9 条告警中的 8 条
-   （`GatewayShieldTriggered` 槽位待补）；新故障模式按 `DiagnosisRule`
-   结构增量登记，置信分人工复核。
+3. 诊断引擎知识库规则覆盖现配置全部 9 条告警（2026-10 补齐
+   `GatewayShieldTriggered` → GW-004，护栏只标记不封禁、按 mode 甄别的
+   处置面入规则建议动作）；新故障模式按 `DiagnosisRule` 结构增量登记，
+   置信分人工复核。
 4. alert-webhook 用 reqwest 0.12（需 rustls-tls），与网关的 0.11
    并存——服务独立构建，版本不强制统一。
