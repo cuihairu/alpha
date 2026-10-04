@@ -1,6 +1,6 @@
 # alpha
 
-Internal A-share (China) market data platform focused on low-latency ingestion, cleaning, and distribution of freely available public data. The current implementation is Rust-first, with lightweight crawlers and a staged queue strategy that starts from Redis Streams and can evolve to NATS JetStream or Kafka as scale increases.  
+Internal A-share (China) market data platform focused on low-latency ingestion, cleaning, and distribution of freely available public data. Positioning: **self-hosted financial data & quant research foundation**（采集 → 标准化 → 存储 → 查询 → 实时分发 → 指标/分析 → 回测）; scope boundaries in `docs/architecture-review.md`. The current implementation is Rust-first, with lightweight crawlers and a staged queue strategy that starts from Redis Streams and can evolve to NATS JetStream or Kafka as scale increases.  
 中文方案说明见 `docs/architecture.md`。
 
 ## Goals

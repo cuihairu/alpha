@@ -27,6 +27,7 @@ module.exports = {
       label: '架构与设计',
       items: [
         { type: 'doc', id: 'architecture', label: '平台总体方案' },
+        { type: 'doc', id: 'architecture-review', label: '架构收敛审查' },
         { type: 'doc', id: 'cross-platform-architecture', label: '跨平台 Rust 架构' },
         { type: 'doc', id: 'web-framework-selection', label: 'UI 框架选型决策' },
         { type: 'doc', id: 'desktop-framework', label: '桌面端框架（Tauri）' },
