@@ -4,9 +4,9 @@
 **隐私政策文本**（工程草案，见 §1）。检查器：`scripts/check-compliance.sh`，
 基线：`config/compliance/permissions-registry.txt`（`[allow]` 为检查白名单、
 `[planned]` 留档计划权限；新增 allow 条目 = conscious ack，与
-`packages/core` safety_audit 的 unsafe 预算同一纪律）。CI 接线现状：
-`check-compliance.sh` 尚未接入任何 workflow（L467 是多目标构建项、已完结
-且不含此项——接入登记为待办，挂靠新编号）。
+`packages/core` safety_audit 的 unsafe 预算同一纪律）。CI 接线：`check-compliance.sh` 已进 `.github/workflows/ci.yml` 的
+`compliance` 作业（checkout 后直跑，非阻塞面之外的常规门禁——权限与 CSP
+回归即红）。
 
 ## 1. 隐私政策（应用内展示文本 · 工程草案）
 

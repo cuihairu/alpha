@@ -21,6 +21,17 @@ jobs:
       - name: 版本一致性
         run: scripts/check-version.sh
 
+  # 平台合规门禁（L520，docs/platform-compliance.md §3）：权限注册表 ↔
+  # Android 清单 / Tauri allowlist 双向对账 + CSP 非空（runner 自带 python3）
+  compliance:
+    name: Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 平台合规检查
+        run: scripts/check-compliance.sh
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
