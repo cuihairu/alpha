@@ -6,12 +6,13 @@
 ## 1. 语义对账表（实测/源码锁定）
 
 表中 Web 列为 React 工程（`web/app/`，CI 覆盖、未部署）；线上/桌面用户面
-是 `web/dist` 构建的原生页（`web/` 根 `index.html`/`app.js`），两者色板与
-动效并不相同。
+是 `web/dist` 构建的原生页（`web/` 根 `index.html`/`app.js`）。色板已统一
+（2026-10 收敛为 `#c0392b` 涨 / `#27ae60` 跌）；动效仍不同——React 端有
+0.8s flash，原生页仅方向色。
 
 | 语义 | Web（React 工程） | Desktop | Android | iOS | 裁决 |
 |---|---|---|---|---|---|
-| 涨跌色板 | `#c0392b` 涨 / `#27ae60` 跌（`web/app/src/styles.css` `.flash-up/down`） | 窗口装 web/dist 原生页：`#10b981` 涨 / `#ef4444` 跌（`app.js:447`，绿涨红跌与 A 股惯例相反）；兜底壳第三套 `--up:#f0554d/--down:#2fb87a`（`web/dist/index.html`） | `widget_up #C0392B` / `widget_down #27AE60`（`colors.xml`） | 灵动岛 `.red`/`.green`（`docs/ios-live-activities.md` §4） | ⚠️ 三套值待收敛：React/Android/iOS 红涨绿跌一致，线上原生页与桌面壳相反——收敛登记 §4 |
+| 涨跌色板 | `#c0392b` 涨 / `#27ae60` 跌（`web/app/src/styles.css` `.flash-up/down`） | 窗口装 web/dist 原生页，同值同向：`#c0392b` 涨 / `#27ae60` 跌（`app.js:447`；兜底壳 `--up/--down` 同套） | `widget_up #C0392B` / `widget_down #27AE60`（`colors.xml`） | 灵动岛 `.red`/`.green`（`docs/ios-live-activities.md` §4） | ✅ 四端同值红涨绿跌（2026-10 收敛，原生页 5 处语义色对齐；RSI 超买/超卖与 success/error 为警示语义不计入） |
 | 零涨跌（平盘）归属 | `pct >= 0` → 红色（含等号，`LiveQuoteBoard.tsx:89`） | 兜底壳 `price >= open` 归涨侧（`desktop-shell.js:80`，语义等价） | 曾为 `> 0` → FLAT，**本项已改 `>= 0` → UP**（`HomeWidget.kt`，A 股平盘红惯例） | `>= 0 ? .red`（设计文档 §4） | ✅ 本项收敛：四端 0 归涨侧 |
 | 数字格式 | 价格原值、`pct.toFixed(2)`、`volume.toLocaleString()`、缺值 `—` | 价/量原值输出、无千分位（`desktop-shell.js:83`），缺值占位同形 | `Locale.ROOT` `"%.2f"` / `"%+.2f%%"` / `"--"`（防本地化小数点漂移） | Decimal 两位（设计文档 §2） | ✅ 两位小数 + 缺值占位符同形；桌面量值无本地化格式（登记） |
 | 主题三态 | system/light/dark，缺省跟随系统（`ThemeToggle.tsx` + `matchMedia` 监听） | tauri v1 `theme` 仅 Light/Dark 无 system 档——窗口 chrome 留空走 OS，前端三态照常（`docs/theme-adaptation.md`） | `ThemePreference` SYSTEM/LIGHT/DARK，缺省 SYSTEM（`Theme.kt`，L511） | L119 交付面不动，跟随系统（设计文档登记） | ✅ 缺省口径统一：跟随系统 |
@@ -33,9 +34,6 @@
 
 ## 4. 缺口登记
 
-- 涨跌色板收敛：线上原生页/桌面壳为绿涨红跌（`#10b981/#ef4444`、
-  `#f0554d/#2fb87a`），React/Android/iOS 为红涨绿跌——A 股惯例要求红涨，
-  收敛线上页为先（用户可见，登记）；
 - 桌面过期语义与跳变动效缺失：桌面无 stale 灰显与 flash，仅方向色——随
   兜底壳演进或接真实后端时补（登记）；
 - 平板/折叠屏断点：web 响应式未设平板专用断点，Android 无平板布局——待首个平板用户反馈再立项；

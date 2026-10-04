@@ -158,8 +158,8 @@ function displayAnalysisResults(symbol, result) {
 // 获取信号颜色
 function getSignalColor(signal) {
     switch (signal) {
-        case 'BUY': return '#10b981';
-        case 'SELL': return '#ef4444';
+        case 'BUY': return '#c0392b';
+        case 'SELL': return '#27ae60';
         default: return '#6b7280';
     }
 }
@@ -260,7 +260,7 @@ function displayIndicatorResults(indicators, prices, showDetails = true) {
                 </div>
                 <div>
                     <strong>MACD:</strong><br>
-                    <span style="font-size: 1.2rem; color: ${currentMACD > currentSignal ? '#10b981' : '#ef4444'}">${currentMACD.toFixed(3)}</span>
+                    <span style="font-size: 1.2rem; color: ${currentMACD > currentSignal ? '#c0392b' : '#27ae60'}">${currentMACD.toFixed(3)}</span>
                     <div style="font-size: 0.85rem; color: #6b7280; margin-top: 4px;">
                         信号: ${currentSignal.toFixed(3)}
                     </div>
@@ -274,7 +274,7 @@ function displayIndicatorResults(indicators, prices, showDetails = true) {
                 </div>
                 <div>
                     <strong>价格相对均线:</strong><br>
-                    <span style="font-size: 1.3rem; color: ${currentPrice > currentSMA ? '#10b981' : '#ef4444'}">
+                    <span style="font-size: 1.3rem; color: ${currentPrice > currentSMA ? '#c0392b' : '#27ae60'}">
                         ${currentPrice > currentSMA ? '↑' : '↓'} ${Math.abs(((currentPrice - currentSMA) / currentSMA) * 100).toFixed(2)}%
                     </span>
                 </div>
@@ -444,7 +444,7 @@ function renderRealtimeQuotes() {
                     <div style="font-size: 1.2rem; margin: 4px 0;">$${Number(currentPrice).toFixed(2)}</div>
                     <div style="font-size: 0.8rem; color: #9ca3af;">成交量 ${formatNumber(quote.volume || 0)}</div>
                 </div>
-                <div style="text-align: right; color: ${isPositive ? '#10b981' : '#ef4444'};">
+                <div style="text-align: right; color: ${isPositive ? '#c0392b' : '#27ae60'};">
                     <div style="font-size: 1.1rem;">
                         ${isPositive ? '↑' : '↓'} ${Math.abs(changePercent).toFixed(2)}%
                     </div>
