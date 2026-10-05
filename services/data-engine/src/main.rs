@@ -60,9 +60,11 @@ mod grpc;
 mod outlier;
 mod sequence_gap;
 mod settings;
+mod source_divergence;
 use outlier::{OutlierObservation, PriceOutlierMonitor};
 use sequence_gap::{SequenceGapMonitor, SequenceObservation};
 use settings::{AppConfig, ClickHouseSettings, StorageConfig, TelemetryConfig};
+use source_divergence::{DivergenceObservation, SourceDivergenceMonitor};
 
 const DEFAULT_REDIS_URL: &str = "redis://localhost:6379";
 const RAW_QUOTES_STREAM: &str = "quotes.raw";
@@ -195,6 +197,9 @@ struct AppState {
     /// 单跳价格异常检测（§5 P2「异常」维度）：per-symbol 价格基线，
     /// 超涨跌停带的跳变 = 行情源污染信号
     price_outliers: Arc<PriceOutlierMonitor>,
+    /// 多源背离检测（§5 P2「Source Divergence」维度）：同 symbol 同刻
+    /// 各源报价差超容差即背离；单源在报期间休眠
+    source_divergence: Arc<SourceDivergenceMonitor>,
 }
 
 /// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
@@ -228,6 +233,7 @@ impl AppState {
             instruments: Arc::new(RwLock::new(seed_instruments())),
             sequence_gaps: Arc::new(SequenceGapMonitor::new()),
             price_outliers: Arc::new(PriceOutlierMonitor::from_env()),
+            source_divergence: Arc::new(SourceDivergenceMonitor::from_env()),
         }
     }
 
@@ -925,6 +931,37 @@ async fn process_normalizer_message(
                     );
                 }
                 OutlierObservation::FirstSeen | OutlierObservation::Within => {}
+            }
+
+            // 数据质量（P2「Source Divergence」维度）：同 symbol 同刻多源比对
+            // （事件时间对齐，2 分钟窗口内才比较）；单源在报期间恒
+            // FirstSeen/Agree，第二源并发接入即自然生效。
+            match state.source_divergence.observe(
+                &market_data.symbol,
+                message.envelope.source.as_str(),
+                market_data.price,
+                market_data.timestamp.timestamp_millis(),
+                Utc::now().timestamp_millis(),
+            ) {
+                DivergenceObservation::Diverge(div) => {
+                    metrics::counter!(
+                        "alpha_dataquality_source_divergences_total",
+                        "stream" => message.envelope.stream.clone(),
+                        "source" => message.envelope.source.as_str().to_string(),
+                    )
+                    .increment(1);
+                    tracing::warn!(
+                        symbol = %market_data.symbol,
+                        source = %div.source,
+                        other_source = %div.other_source,
+                        price = div.price,
+                        other_price = div.other_price,
+                        pct = div.pct,
+                        entry_id = %message.id,
+                        "source divergence detected (data quality)"
+                    );
+                }
+                DivergenceObservation::FirstSeen | DivergenceObservation::Agree => {}
             }
 
             let payload_hash = message.envelope.payload_hash.clone();
@@ -2609,6 +2646,7 @@ mod tests {
             instruments: Arc::new(RwLock::new(seed_instruments())),
             sequence_gaps: Arc::new(SequenceGapMonitor::new()),
             price_outliers: Arc::new(PriceOutlierMonitor::from_env()),
+            source_divergence: Arc::new(SourceDivergenceMonitor::from_env()),
         });
 
         let symbol = format!("E2E-{}", uuid::Uuid::new_v4());

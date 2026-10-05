@@ -176,7 +176,7 @@ Collector = Data Source Runtime
 |---|---|---|---|
 | P0（立即，docs-only 可先行） | 定位声明落 README/PROJECT_SUMMARY；本文入文档站 | 文档收敛 | ✅ 已落（6968e57 + 后续对账批） |
 | P1（下一开发轮） | envelope v2 字段 + protocols 迁移 + process_time；Instrument 契约 + /instruments | 数据模型 | ✅ 已落（0af6fe0、024a63d） |
-| P2 | 数据质量系统（完整性/连续性/异常/重复/Source Divergence）+ sequence 断档告警 | 可靠性 | 进行中——sequence 断档已落（9254efe）；重复/完整性观测面已落（重复命中、规范化失败、DLQ 隔离三计数，2026-10）；异常检测已落（单跳价格超阈 `PriceOutlierMonitor`，2026-10）；Source Divergence 未开始 |
+| P2 | 数据质量系统（完整性/连续性/异常/重复/Source Divergence）+ sequence 断档告警 | 可靠性 | 进行中——sequence 断档已落（9254efe）；重复/完整性观测面已落（重复命中、规范化失败、DLQ 隔离三计数，2026-10）；异常检测已落（单跳价格超阈 `PriceOutlierMonitor`，2026-10）；Source Divergence 已落（同刻多源比对 SourceDivergenceMonitor，单源期间休眠，2026-10）——五维齐 |
 | P3 | 三级 API 分层；Research Dataset + Experiment 登记表；MCP 慢启动 | 能力面 | 未开始 |
 | P4 | UI 回归 API consumer 定位（不设独立路线图） | 收敛 | 未开始 |
 
