@@ -138,8 +138,9 @@ real-time-feed:8082、collector:8083 各自 `/metrics`，10s 间隔。
   `alpha_dataquality_sequence_regressions_total`（sequence 断档/回退）、
   `alpha_dataquality_duplicates_total`（去重窗口命中）、
   `alpha_dataquality_invalid_payloads_total`（规范化失败丢弃）、
-  `alpha_dataquality_quarantined_total`（解码失败入 DLQ），见
-  architecture-review §5 P2
+  `alpha_dataquality_quarantined_total`（解码失败入 DLQ）、
+  `alpha_dataquality_price_outliers_total`（单跳价格超阈，阈值
+  `ALPHA_DATAQUALITY_OUTLIER_PCT` 缺省 30%），见 architecture-review §5 P2
 
 告警规则 9 条（`config/alpha-alerts.yml`）：GatewayRateLimitExceeded、
 GatewayShieldTriggered、GatewayUpstreamUnhealthy、GatewayErrorRateHigh、

@@ -57,8 +57,10 @@ use tower_http::{
 };
 
 mod grpc;
+mod outlier;
 mod sequence_gap;
 mod settings;
+use outlier::{OutlierObservation, PriceOutlierMonitor};
 use sequence_gap::{SequenceGapMonitor, SequenceObservation};
 use settings::{AppConfig, ClickHouseSettings, StorageConfig, TelemetryConfig};
 
@@ -190,6 +192,9 @@ struct AppState {
     instruments: Arc<RwLock<HashMap<String, Instrument>>>,
     /// sequence 断档检测（数据质量 §3.1/§5 P2）：per-(stream, source) 基线
     sequence_gaps: Arc<SequenceGapMonitor>,
+    /// 单跳价格异常检测（§5 P2「异常」维度）：per-symbol 价格基线，
+    /// 超涨跌停带的跳变 = 行情源污染信号
+    price_outliers: Arc<PriceOutlierMonitor>,
 }
 
 /// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
@@ -222,6 +227,7 @@ impl AppState {
             metrics: global_metrics_handle().clone(),
             instruments: Arc::new(RwLock::new(seed_instruments())),
             sequence_gaps: Arc::new(SequenceGapMonitor::new()),
+            price_outliers: Arc::new(PriceOutlierMonitor::from_env()),
         }
     }
 
@@ -894,6 +900,33 @@ async fn process_normalizer_message(
 
     match normalize_quote(&message.envelope) {
         Some(market_data) => {
+            // 数据质量（P2「异常」维度）：单跳涨跌幅超阈判定——超 A 股涨跌停
+            // 带（缺省 30%）即行情源污染信号；与去重窗口正交（重放同价只是
+            // Within）。符号不进指标标签（symbol 面无界），进日志行。
+            match state.price_outliers.observe(
+                &market_data.symbol,
+                market_data.price,
+                Utc::now().timestamp_millis(),
+            ) {
+                OutlierObservation::Jump(jump) => {
+                    metrics::counter!(
+                        "alpha_dataquality_price_outliers_total",
+                        "stream" => message.envelope.stream.clone(),
+                        "source" => message.envelope.source.as_str().to_string(),
+                    )
+                    .increment(1);
+                    tracing::warn!(
+                        symbol = %market_data.symbol,
+                        last = jump.last,
+                        got = jump.got,
+                        pct = jump.pct,
+                        entry_id = %message.id,
+                        "price outlier detected (data quality)"
+                    );
+                }
+                OutlierObservation::FirstSeen | OutlierObservation::Within => {}
+            }
+
             let payload_hash = message.envelope.payload_hash.clone();
             if state.payload_hash_seen(&payload_hash) {
                 // 数据质量（P2「重复」维度）：窗口内重放/重复发布计数——
@@ -2575,6 +2608,7 @@ mod tests {
             metrics: global_metrics_handle().clone(),
             instruments: Arc::new(RwLock::new(seed_instruments())),
             sequence_gaps: Arc::new(SequenceGapMonitor::new()),
+            price_outliers: Arc::new(PriceOutlierMonitor::from_env()),
         });
 
         let symbol = format!("E2E-{}", uuid::Uuid::new_v4());
