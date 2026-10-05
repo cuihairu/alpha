@@ -54,7 +54,9 @@ export function PriceChart() {
   return (
     <section>
       <h2>{tr('chart.title')}</h2>
-      <div ref={containerRef} />
+      {/* 图表库无内建读屏语义：容器给 role=img + 描述（标题下方的
+          caption 文本兼作可访问名——内容口径一致，不另造文案） */}
+      <div ref={containerRef} role="img" aria-label={tr('chart.title')} />
       <p>{trf('chart.caption', { n: SMA_PERIOD })}</p>
     </section>
   )

@@ -37,7 +37,6 @@
 - 桌面过期语义与跳变动效缺失：桌面无 stale 灰显与 flash，仅方向色——随
   兜底壳演进或接真实后端时补（登记）；
 - 平板/折叠屏断点：web 响应式未设平板专用断点，Android 无平板布局——待首个平板用户反馈再立项；
-- 无障碍：React 端交互控件 aria 已横扫（2026-10 补齐：工作区三处输入框
-  aria-label、错误提示 role=alert、SQL 编辑器 aria-label；标签条
-  role=tablist/tab、隐私面板 role=status 原有）；图表容器/表格 caption
-  的读屏播报深化留后续登记。
+- 无障碍：React 端已横扫（2026-10：交互控件 aria-label、错误 role=alert、
+  图表容器 role=img、标签条 role=tablist/tab、隐私面板 role=status；
+  表格均有 thead/th 结构可读）。
