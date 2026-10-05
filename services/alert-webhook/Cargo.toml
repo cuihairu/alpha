@@ -16,5 +16,7 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+# 规则知识库诊断（alerting §5）：告警富化用（纯函数零 IO）
+alpha-storage = { workspace = true }
 # 独立版本：workspace 内其余服务用 reqwest 0.11，此服务需 rustls-tls 走 0.12
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }

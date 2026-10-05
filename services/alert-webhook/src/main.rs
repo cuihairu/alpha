@@ -7,6 +7,7 @@
 //! 告警 payload 结构遵循 Alertmanager v2 标准：
 //! https://prometheus.io/docs/alerting/latest/configuration/#webhook_config
 
+use alpha_storage::diagnosis::{DiagnosisEngine, DiagnosisRequest};
 use axum::{
     extract::{Extension, Json},
     http::{HeaderMap, StatusCode},
@@ -370,6 +371,20 @@ async fn handle_alerts(
     Ok(StatusCode::OK)
 }
 
+/// Alert → 规则知识库诊断请求（窗口 = starts_at 前推 15 分钟 .. 结束/现在；
+/// 无证据注入——规则级初判，指标/日志/追踪证据增强随后续接线）
+fn alert_diagnosis_request(alert: &Alert) -> DiagnosisRequest {
+    DiagnosisRequest {
+        alert_fingerprint: alert.fingerprint.clone(),
+        alert_name: label_or(&alert.labels, "alertname", "").to_string(),
+        severity: label_or(&alert.labels, "severity", "unknown").to_string(),
+        job: label_or(&alert.labels, "job", "").to_string(),
+        window_start: alert.starts_at - chrono::Duration::minutes(15),
+        window_end: alert.ends_at.unwrap_or_else(Utc::now),
+        labels: alert.labels.clone(),
+    }
+}
+
 /// 构建人类可读的告警消息（Markdown 兼容）
 fn build_message(payload: &AlertmanagerPayload, route: &str) -> String {
     let mut lines = Vec::new();
@@ -380,6 +395,11 @@ fn build_message(payload: &AlertmanagerPayload, route: &str) -> String {
         route.to_uppercase()
     ));
     lines.push(String::new());
+
+    // 规则知识库诊断富化（alerting §5）：告警名 → builtin 规则匹配给根因
+    // 初判与建议动作——纯函数零 IO，不拉指标/日志；未匹配到已知模式时
+    // 不硬塞根因，保持原有信息面
+    let engine = DiagnosisEngine::new();
 
     for alert in &payload.alerts {
         let alertname = label_or(&alert.labels, "alertname", "Unknown");
@@ -398,6 +418,28 @@ fn build_message(payload: &AlertmanagerPayload, route: &str) -> String {
         }
         if !runbook.is_empty() {
             lines.push(format!("- **运行手册**: {runbook}"));
+        }
+        let report = engine.diagnose(
+            &alert_diagnosis_request(alert),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        if let Some(primary) = report
+            .matched_rules
+            .iter()
+            .max_by_key(|r| r.confidence_contribution)
+        {
+            lines.push(format!(
+                "- **根因初判**: {}（`{}` · {}，置信 {}）",
+                report.root_cause.description,
+                primary.rule_id,
+                primary.rule_name,
+                report.confidence_score
+            ));
+            for action in report.recommended_actions.iter().take(2) {
+                lines.push(format!("  - 建议: {}", action.description));
+            }
         }
         lines.push(format!(
             "- **起始**: {}",
@@ -649,6 +691,43 @@ mod tests {
         assert!(msg.contains("API 网关限流触发"));
         assert!(msg.contains("检测到请求被拒绝"));
         assert!(msg.contains("https://wiki.example.com"));
+        // 规则知识库诊断富化（alerting §5）：告警名命中 builtin 规则 →
+        // 根因初判 + 规则 ID + 建议动作
+        assert!(msg.contains("根因初判"), "诊断富化缺失:\n{msg}");
+        assert!(msg.contains("GW-001"), "应带命中规则 ID:\n{msg}");
+        assert!(msg.contains("建议"), "应带建议动作:\n{msg}");
+    }
+
+    #[test]
+    fn build_message_leaves_unknown_alert_without_root_cause() {
+        // 未匹配已知模式的告警不硬塞根因（保持原有信息面）
+        let mut labels = HashMap::new();
+        labels.insert("alertname".to_string(), "NeverSeenAlert".to_string());
+        labels.insert("severity".to_string(), "warning".to_string());
+        let alert = Alert {
+            status: "firing".to_string(),
+            labels,
+            annotations: HashMap::new(),
+            starts_at: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+            ends_at: None,
+            generator_url: String::new(),
+            fingerprint: "x".to_string(),
+        };
+        let payload = AlertmanagerPayload {
+            receiver: "default".to_string(),
+            status: "firing".to_string(),
+            alerts: vec![alert],
+            group_labels: HashMap::new(),
+            common_labels: HashMap::new(),
+            common_annotations: HashMap::new(),
+            external_url: String::new(),
+            version: "2.0".to_string(),
+            group_key: "g".to_string(),
+            truncated_alerts: 0,
+        };
+        let msg = build_message(&payload, "default");
+        assert!(msg.contains("NeverSeenAlert"));
+        assert!(!msg.contains("根因初判"));
     }
 
     #[test]

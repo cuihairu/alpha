@@ -67,12 +67,15 @@ Webhook 多渠道分发 + 诊断引擎纯函数库。Jaeger OTLP 全量 span
   ——指标快照（ServiceMetrics/Snapshot）→ Finding，阈值常量与 §2 告警规则同源。
   CLI `tools/diagnose`（`cargo run -p alpha-diagnose -- --help`）从 Prometheus
   拉快照（唯一 env `ALPHA_PROMETHEUS_URL`）→ JSON 报告，退出码 0/1/2/3。
-- **未接线的规则知识库**：`packages/storage/src/diagnosis.rs` 的 `DiagnosisEngine`
+- **已接线的规则知识库**：`packages/storage/src/diagnosis.rs` 的 `DiagnosisEngine`
   ——告警指纹+时间窗口输入 → `DiagnosisReport`（`DiagnosisRule`：告警通配/必需
   指标异常/日志模式/追踪特征/根因分类/基础置信分/修复动作），纯函数零 IO、
-  builtin 规则在档，但全仓当前零消费方，登记为待接线项。
-- 拉数归属：当前唯一调用方是 CLI（仅 Prometheus）；Loki/Jaeger 拉数随
-  DiagnosisEngine 接线，alert-webhook 只转发不诊断。
+  builtin 规则在档。消费方：alert-webhook（2026-10 接线）——告警名 → 规则
+  初判根因与建议动作富化进通知消息；无证据注入时按规则 base 置信度入册
+  （告警名归属是一等信号），未匹配已知模式不硬塞根因。
+- 拉数归属：alert-webhook 只做规则级富化不拉数；指标/日志/追踪证据增强
+  随 Loki/Jaeger 拉数接线再进（届时置信分从 base 提升）。CLI 消费的是
+  `alpha_core::diagnosis`（另一套，见上条）。
 
 ## 6. 非交互假设（自行判定，已注明）
 

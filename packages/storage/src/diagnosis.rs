@@ -568,15 +568,19 @@ impl DiagnosisEngine {
                 }
             }
 
-            if !matched_conditions.is_empty() {
-                matched_rules.push(MatchedRule {
-                    rule_id: rule.id.clone(),
-                    rule_name: rule.name.clone(),
-                    matched_conditions,
-                    confidence_contribution: confidence.min(100) as u8,
-                });
-                total_confidence += confidence;
+            if matched_conditions.is_empty() {
+                // 告警名归属本身是一等信号：无证据注入（规则级诊断，如
+                // alert-webhook 的告警富化）时按规则 base 置信度入册——
+                // 证据只加不减，缺失不把已知模式打成「未匹配」
+                matched_conditions.push(format!("告警名称: {}", request.alert_name));
             }
+            matched_rules.push(MatchedRule {
+                rule_id: rule.id.clone(),
+                rule_name: rule.name.clone(),
+                matched_conditions,
+                confidence_contribution: confidence.min(100) as u8,
+            });
+            total_confidence += confidence;
         }
 
         // 综合根因评估
@@ -843,6 +847,20 @@ mod tests {
         assert_eq!(report.matched_rules[0].rule_id, "GW-004");
         assert_eq!(report.root_cause.category, RootCauseCategory::CapacityLimit);
         assert!(!report.recommended_actions.is_empty());
+    }
+
+    #[test]
+    fn engine_matches_by_alert_name_without_evidence() {
+        // 规则级诊断（alert-webhook 告警富化）：无证据注入也按规则 base
+        // 置信度入册——告警名归属是一等信号，证据只加不减
+        let engine = DiagnosisEngine::new();
+        let mut request = sample_request();
+        request.alert_name = "GatewayShieldTriggered".to_string();
+        let report = engine.diagnose(&request, vec![], vec![], vec![]);
+        assert_eq!(report.matched_rules.len(), 1);
+        assert_eq!(report.matched_rules[0].rule_id, "GW-004");
+        assert_eq!(report.matched_rules[0].confidence_contribution, 75);
+        assert_eq!(report.root_cause.category, RootCauseCategory::CapacityLimit);
     }
 
     #[test]

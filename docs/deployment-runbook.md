@@ -151,7 +151,9 @@ DataEngineQueryLatencyHigh、DataEngineMemoryPressure、RealtimeFeedConnectionLo
 RealtimeFeedMessageGap、PrometheusTargetDown。链路：Prometheus → Alertmanager
 （`config/alertmanager.yml`，分组/抑制/静默在档）→ alert-webhook
 （`/health`、`/alerts`、`/alerts/critical`，渠道 env：`DINGTALK_WEBHOOK_URL`、
-`WECHAT_WEBHOOK_URL`、`SLACK_WEBHOOK_URL`、`PAGERDUTY_INTEGRATION_KEY`，缺哪个跳过哪个）。
+`WECHAT_WEBHOOK_URL`、`SLACK_WEBHOOK_URL`、`PAGERDUTY_INTEGRATION_KEY`，缺哪个
+跳过哪个；通知正文经规则知识库富化——告警名命中即附根因初判与建议动作，
+alerting-and-diagnosis §5）。
 
 日志：promtail 按 docker 服务发现收容器日志（`config/promtail/promtail-config.yml`）
 推 Loki（`config/loki/loki-config.yml`），Grafana 出 `alpha-services-overview` 面板
