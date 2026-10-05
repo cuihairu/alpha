@@ -82,6 +82,7 @@ export function SqlWorkbench({ record }: { record?: (name: string) => void }) {
             onChange={(e) => setSql(e.target.value)}
             rows={6}
             spellCheck={false}
+            aria-label={tr('sql.editor')}
             style={{ width: '100%', fontFamily: 'monospace' }}
           />
           <p>

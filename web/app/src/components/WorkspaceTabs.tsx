@@ -84,6 +84,7 @@ export function WorkspaceTabs({ ws, record }: { ws: WorkspaceActions; record?: (
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder={tr('ws.newPlaceholder')}
+              aria-label={tr('ws.newPlaceholder')}
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') submitNew()
@@ -104,6 +105,7 @@ export function WorkspaceTabs({ ws, record }: { ws: WorkspaceActions; record?: (
             <input
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
+              aria-label={tr('ws.rename')}
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') submitRename()
@@ -147,11 +149,16 @@ export function WorkspaceTabs({ ws, record }: { ws: WorkspaceActions; record?: (
               setSymbolError(null)
             }}
             placeholder={tr('ws.addSymbolPlaceholder')}
+            aria-label={tr('ws.addSymbolPlaceholder')}
             onKeyDown={(e) => {
               if (e.key === 'Enter') addSymbol()
             }}
           />
-          {symbolError && <span className="workspace-error">{symbolError}</span>}
+          {symbolError && (
+            <span className="workspace-error" role="alert">
+              {symbolError}
+            </span>
+          )}
         </span>
       </div>
     </div>
