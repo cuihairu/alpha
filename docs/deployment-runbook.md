@@ -173,12 +173,13 @@ alerting-and-diagnosis §5）。
 |---|---|---|
 | 行情/查询 REST | api-gateway `/v1/*` → data-engine（`/query`、`/stocks/:symbol/history`、`/instruments` 等） | docs/market-data-api.md |
 | WebSocket | api-gateway `/ws` → real-time-feed `/ws`（版本化 Full/Delta 帧） | docs/realtime-sync-protocol.md |
-| 任务管理 | collector `GET/POST /tasks`、`GET /tasks/:id`、`POST /tasks/:id/execute`、`GET /stats`、`GET /events`(SSE) | 内网暴露，勿上公网 |
+| 任务管理 | collector `GET/POST /tasks`、`GET /tasks/:id`、`DELETE /tasks/:id`（204 幂等；运行中 409）、`POST /tasks/:id/cancel`（清 schedule 不再调度；运行中任务本次跑完后停）、`POST /tasks/:id/execute`（重试语义亦由它承担——对 Failed/Cancelled 任务重跑即 retry）、`GET /stats`、`GET /events`(SSE) | 内网暴露，勿上公网 |
 | 鉴权 | api-gateway `POST /auth/token`（jwt 模式） | docs/auth.md |
 | 健康/指标 | 四服务 `/health`、`/metrics` | 本文 §5 |
 
-collector 没有任务 cancel/retry/delete 端点；real-time-feed 的 WS 不推任务事件，
-推的是行情帧与 alerts 通道。
+collector 任务管理闭环见上表（cancel/delete 已落，retry 由 execute 承担）；
+边界：运行中任务的子进程无法中断（crawler 无 kill 句柄），cancel 只阻止
+后续调度。real-time-feed 的 WS 不推任务事件，推的是行情帧与 alerts 通道。
 
 ## 7. 故障排查
 

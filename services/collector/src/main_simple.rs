@@ -835,6 +835,51 @@ path = "main.rs"
         running.get(task_id).cloned()
     }
 
+    /// 取消任务（幂等）：清 `schedule`（cron 不再派发）+ status=Cancelled。
+    /// 运行中任务的子进程无法中断（crawler 无 kill 句柄）——本次执行会
+    /// 跑完，之后不再调度；对不存在的任务报错
+    pub async fn cancel_task(&self, task_id: &str) -> Result<String, String> {
+        {
+            let tasks = self.tasks.read().await;
+            if !tasks.contains_key(task_id) {
+                return Err("Task not found".to_string());
+            }
+        }
+        {
+            let mut tasks = self.tasks.write().await;
+            if let Some(existing) = tasks.get_mut(task_id) {
+                existing.schedule = None;
+                existing.status = TaskStatus::Cancelled;
+                existing.updated_at = Utc::now();
+            }
+        }
+        {
+            let mut running = self.running_tasks.write().await;
+            running.insert(task_id.to_string(), TaskStatus::Cancelled);
+        }
+        let _ = self.event_tx.send(CollectorEvent::TaskStatusUpdated {
+            task_id: task_id.to_string(),
+            status: TaskStatus::Cancelled,
+        });
+        Ok(format!("Task {task_id} cancelled"))
+    }
+
+    /// 删除任务：从任务表与状态表移除（状态表残留会让 /tasks/:id 对已删
+    /// 任务仍返回状态、/stats 计数虚高）。运行中拒绝——同 cancel 的边界，
+    /// crawler 无 kill 句柄，等执行完再删；不存在按幂等成功处理
+    pub async fn delete_task(&self, task_id: &str) -> Result<(), String> {
+        let running_now = {
+            let running = self.running_tasks.read().await;
+            running.get(task_id) == Some(&TaskStatus::Running)
+        };
+        if running_now {
+            return Err("Task is running; cancel it and delete after completion".to_string());
+        }
+        self.tasks.write().await.remove(task_id);
+        self.running_tasks.write().await.remove(task_id);
+        Ok(())
+    }
+
     /// 获取任务统计
     pub async fn get_task_stats(&self) -> TaskStats {
         let running = self.running_tasks.read().await;
@@ -881,8 +926,9 @@ pub fn build_router(collector: Arc<SimpleCollector>) -> Router {
         .route("/health", get(health_check))
         .route("/metrics", get(metrics_endpoint))
         .route("/tasks", post(submit_task))
-        .route("/tasks/:id", get(get_task_status))
+        .route("/tasks/:id", get(get_task_status).delete(delete_task))
         .route("/tasks", get(list_tasks))
+        .route("/tasks/:id/cancel", post(cancel_task))
         .route("/tasks/:id/execute", post(execute_task))
         .route("/streams/quotes/publish", post(publish_quotes))
         .route("/stats", get(get_stats))
@@ -1002,6 +1048,35 @@ async fn execute_task(
     }
 }
 
+/// 取消任务端点（重试语义归既有 POST /tasks/:id/execute 承担——
+/// 对 Failed/Cancelled 任务重跑即 retry，不再造重复端点）
+async fn cancel_task(
+    State(collector): State<Arc<SimpleCollector>>,
+    axum::extract::Path(task_id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    match collector.cancel_task(&task_id).await {
+        Ok(message) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "task_id": task_id, "message": message })),
+        ),
+        Err(error) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": error })),
+        ),
+    }
+}
+
+/// 删除任务端点：204 幂等删除；409 运行中；404 不会出现（幂等语义）
+async fn delete_task(
+    State(collector): State<Arc<SimpleCollector>>,
+    axum::extract::Path(task_id): axum::extract::Path<String>,
+) -> StatusCode {
+    match collector.delete_task(&task_id).await {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(_) => StatusCode::CONFLICT,
+    }
+}
+
 async fn publish_quotes(
     State(collector): State<Arc<SimpleCollector>>,
     Json(request): Json<PublishQuotesRequest>,
@@ -1077,6 +1152,89 @@ mod tests {
     async fn test_simple_collector_creation() {
         let collector = SimpleCollector::new("/tmp/test_collector");
         assert_eq!(collector.get_task_stats().await.total, 0);
+    }
+
+    /// 测试构造：Custom 源 + 可选 schedule（cron 派发条件的取消靶子）
+    fn seeded_task(id: &str, schedule: Option<&str>) -> TaskDefinition {
+        let mut task = TaskDefinition::new(
+            id,
+            TaskSource::Custom {
+                source_type: "custom".to_string(),
+                endpoint: "https://x.io".to_string(),
+                params: HashMap::new(),
+            },
+            id,
+        );
+        task.schedule = schedule.map(|s| s.to_string());
+        task
+    }
+
+    /// 取消：清 schedule + status=Cancelled（cron 不再派发），幂等；不存在报错
+    #[tokio::test]
+    async fn cancel_clears_schedule_marks_cancelled_and_is_idempotent() {
+        let collector = SimpleCollector::new("/tmp/test_collector_cancel");
+        collector
+            .tasks
+            .write()
+            .await
+            .insert("t1".into(), seeded_task("t1", Some("0 30 9 * * 1-5")));
+
+        let message = collector.cancel_task("t1").await.unwrap();
+        assert!(message.contains("t1"));
+        {
+            let tasks = collector.tasks.read().await;
+            let task = tasks.get("t1").unwrap();
+            assert_eq!(task.status, TaskStatus::Cancelled);
+            assert!(task.schedule.is_none(), "schedule 须清空——cron 派发条件");
+        }
+        assert_eq!(
+            collector.get_task_status("t1").await,
+            Some(TaskStatus::Cancelled)
+        );
+
+        // 幂等：再取消一次仍成功
+        assert!(collector.cancel_task("t1").await.is_ok());
+        // 不存在的任务报错
+        assert_eq!(
+            collector.cancel_task("ghost").await.unwrap_err(),
+            "Task not found"
+        );
+    }
+
+    /// 删除：任务表+状态表一起摘（/tasks/:id 对已删任务不再有状态、
+    /// /stats 不虚高）；运行中 409；不存在幂等成功
+    #[tokio::test]
+    async fn delete_removes_task_and_state_rejects_running() {
+        let collector = SimpleCollector::new("/tmp/test_collector_delete");
+        collector
+            .tasks
+            .write()
+            .await
+            .insert("t1".into(), seeded_task("t1", None));
+        collector
+            .running_tasks
+            .write()
+            .await
+            .insert("t1".into(), TaskStatus::Running);
+
+        // 运行中拒绝
+        let err = collector.delete_task("t1").await.unwrap_err();
+        assert!(err.contains("running"), "{err}");
+        assert!(collector.tasks.read().await.contains_key("t1"));
+
+        // 状态改掉后可删：两表同清
+        collector
+            .running_tasks
+            .write()
+            .await
+            .insert("t1".into(), TaskStatus::Completed);
+        collector.delete_task("t1").await.unwrap();
+        assert!(!collector.tasks.read().await.contains_key("t1"));
+        assert_eq!(collector.get_task_status("t1").await, None);
+        assert_eq!(collector.get_task_stats().await.total, 0);
+
+        // 幂等：删不存在的仍成功
+        collector.delete_task("t1").await.unwrap();
     }
 
     #[test]
