@@ -207,8 +207,11 @@ curl http://localhost:8123/ping
 
 ## 8. 边界与已知项
 
-- **TLS 在服务内未接线**：api-gateway 声明了 `axum-server`(tls-rustls) 依赖但没有
-  启用路径，HTTPS 当前由反代终结。裸机路径 nginx 只配了 80 端口，443 需自行补证书。
+- **TLS 服务内已接线**：api-gateway 以 `--tls-cert`/`--tls-key`（env
+  `ALPHA_GATEWAY_TLS_CERT`/`ALPHA_GATEWAY_TLS_KEY`）启用服务内 rustls TLS
+  （axum-server），两把钥匙须同给——只给其一按部署配置错误拒绝启动（静默降级
+  明文比拒绝启动更贵）；都缺省保持反代终结形态。裸机 nginx 只配了 80 端口，
+  443 需自行补证书或改走网关服务内 TLS。
 - **Cargo.lock 不入库**：容器与裸机构建每次解析最新兼容依赖，构建不完全可复现。
   锁文件入库策略归质量保证统筹（docker-deployment §5 登记）。
 - **单节点为界**：compose 是开发/测试栈，无副本、无编排级资源限额；

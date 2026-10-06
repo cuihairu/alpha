@@ -101,6 +101,15 @@ struct Args {
     #[arg(long, default_value = "")]
     auth_audience: String,
 
+    /// TLS 证书 PEM 路径（与 --tls-key 同给启用服务内 TLS；
+    /// env ALPHA_GATEWAY_TLS_CERT 优先；缺省 TLS 终结归反代）
+    #[arg(long, default_value = "")]
+    tls_cert: String,
+
+    /// TLS 私钥 PEM 路径（env ALPHA_GATEWAY_TLS_KEY 优先）
+    #[arg(long, default_value = "")]
+    tls_key: String,
+
     /// /auth/token bootstrap 签发口令（空=关闭该端点；env ALPHA_GATEWAY_AUTH_PROVISION_KEY 优先）
     #[arg(long, default_value = "")]
     auth_provision_key: String,
@@ -231,13 +240,45 @@ async fn main() -> anyhow::Result<()> {
 
     let app = build_router(state);
 
-    // 启动服务器
-    let listener = tokio::net::TcpListener::bind(args.bind).await?;
-    tracing::info!("API Gateway listening on {}", args.bind);
-
-    axum::serve(listener, app).await?;
+    // 启动服务器：TLS 两把钥匙齐备走服务内 rustls（裸机无反代直出 HTTPS
+    // 用）；反代终结仍为默认形态。只配其一是部署配置错误 → 拒绝启动
+    // （静默降级明文会把「以为加密了」变成最贵的坑）。
+    match resolve_tls(
+        &resolve_url("ALPHA_GATEWAY_TLS_CERT", &args.tls_cert),
+        &resolve_url("ALPHA_GATEWAY_TLS_KEY", &args.tls_key),
+    )? {
+        None => {
+            let listener = tokio::net::TcpListener::bind(args.bind).await?;
+            tracing::info!(
+                "API Gateway listening on {} (http, TLS 终结归反代)",
+                args.bind
+            );
+            axum::serve(listener, app).await?;
+        }
+        Some((cert, key)) => {
+            let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)
+                .await
+                .map_err(|e| anyhow::anyhow!("TLS cert/key load failed: {e}"))?;
+            tracing::info!("API Gateway listening on {} (https, 服务内 TLS)", args.bind);
+            axum_server::bind_rustls(args.bind, config)
+                .serve(app.into_make_service())
+                .await?;
+        }
+    }
 
     Ok(())
+}
+
+/// TLS 装配解析（L485）：两把钥匙都空 = 不走服务内 TLS（反代终结，默认）；
+/// 都非空 = 启用（证书/私钥 PEM 路径）；只给其一是配置错误。
+fn resolve_tls(cert: &str, key: &str) -> anyhow::Result<Option<(String, String)>> {
+    match (cert.is_empty(), key.is_empty()) {
+        (true, true) => Ok(None),
+        (false, false) => Ok(Some((cert.to_string(), key.to_string()))),
+        _ => Err(anyhow::anyhow!(
+            "TLS 配置不完整：--tls-cert/--tls-key（ALPHA_GATEWAY_TLS_CERT/ALPHA_GATEWAY_TLS_KEY）须同给——只给其一会被静默降级为明文，拒绝启动"
+        )),
+    }
 }
 
 /// 账户存储装配（L476）：URL 为空 = 内存形态（默认，与历史启动行为完全
@@ -1611,6 +1652,72 @@ mod tests {
             "http://127.0.0.1:1".to_string(),
             "http://127.0.0.1:1".to_string(),
         )
+    }
+
+    /// TLS 装配解析（L485）：都缺省反代终结、齐备启用、只给其一拒绝启动
+    #[test]
+    fn resolve_tls_requires_both_paths() {
+        assert_eq!(resolve_tls("", "").unwrap(), None);
+        assert_eq!(
+            resolve_tls("/etc/alpha/tls.crt", "/etc/alpha/tls.key").unwrap(),
+            Some((
+                "/etc/alpha/tls.crt".to_string(),
+                "/etc/alpha/tls.key".to_string()
+            ))
+        );
+        assert!(resolve_tls("/c.crt", "").is_err());
+        assert!(resolve_tls("", "/k.key").is_err());
+    }
+
+    /// TLS 端到端（L485）：服务内 rustls 起服后 https 握手可达。rcgen 进程内
+    /// 自签证书落临时文件，走与生产完全一致的 from_pem_file 装配路径
+    #[tokio::test]
+    async fn tls_serving_serves_https_end_to_end() {
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let dir = std::env::temp_dir().join(format!("alpha-gw-tls-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cert_path = dir.join("cert.pem");
+        let key_path = dir.join("key.pem");
+        std::fs::write(&cert_path, certified.cert.pem()).unwrap();
+        std::fs::write(&key_path, certified.key_pair.serialize_pem()).unwrap();
+
+        // bind_rustls 不暴露 local_addr：占位取空闲端口后让位再绑
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = probe.local_addr().unwrap();
+        drop(probe);
+
+        let app = build_router(account_test_state());
+        let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
+            .await
+            .unwrap();
+        let handle = tokio::spawn(async move {
+            axum_server::bind_rustls(addr, config)
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+        });
+
+        // 自签证书接受无效校验——只为验证「服务内 TLS 握手 + 请求可达」这一装配本身
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        // 监听在 spawn 首次 poll 时才绑定，短轮询等就绪
+        let mut status = 0u16;
+        for _ in 0..50 {
+            match client.get(format!("https://{addr}/health")).send().await {
+                Ok(resp) => {
+                    status = resp.status().as_u16();
+                    break;
+                }
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
+            }
+        }
+        // /health 上游不可达时返回 degraded 但仍是 200（装配正确性只看状态码）
+        assert_eq!(status, 200, "https 请求应达 200");
+
+        handle.abort();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     async fn post_json(client: &reqwest::Client, url: &str, body: &str) -> serde_json::Value {

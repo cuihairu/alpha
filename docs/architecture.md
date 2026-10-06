@@ -66,8 +66,9 @@ Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB
 - **日志**：集中到 Loki（promtail 抓取），按 `trace_id`/`source` 关联。
 - **告警**：Alertmanager -> 钉钉/企业微信/Slack/PagerDuty（`services/alert-webhook`）。
 - **CI/CD**：GitHub Actions 打包 Rust 多目标二进制与 Docker 镜像；内网服务器使用 systemd 或容器编排。
-- **安全**：Cloudflare Tunnel 暴露网关为规划项；内部服务仅限内网访问；TLS 由反代终结
-  （服务内 TLS 接线未落，见 deployment-runbook §8）。
+- **安全**：Cloudflare Tunnel 暴露网关为规划项；内部服务仅限内网访问；TLS 缺省由
+  反代终结，api-gateway 亦可以 `--tls-cert`/`--tls-key` 启用服务内 rustls TLS
+  （见 deployment-runbook §8）。
 
 ## 数据流
 1. 调度器触发采集任务，爬虫访问数据源并写入 Redis stream，如 `quotes.raw`。
