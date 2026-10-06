@@ -8,6 +8,8 @@
 #   3. REST 反代 gateway → data-engine（/api/v1/health）+ x-trace-id 回填
 #   4. WS 反代 gateway → real-time-feed（101 Upgrade）
 #   5. gateway /metrics 暴露业务指标（requests_total / service_health）
+#   6. 数据面 e2e：XADD 行情（examples/stream_inject，生产同构 envelope）
+#      → real-time-feed 消费组 → 广播 → 网关 /ws 客户端收敛到注入价格
 #
 # 依赖：Redis（data-engine/real-time-feed 启动即连，E2E_REDIS_URL 可覆写）、
 #       cargo（构建四服务二进制）。非交互；退出码 0 通过 / 1 失败。
@@ -67,9 +69,12 @@ for p in "$GW_PORT" "$DE_PORT" "$GRPC_PORT" "$RT_PORT" "$COL_PORT"; do
 done
 
 # --- 构建四服务（缓存命中时近零成本，保证二进制与当前源码一致） ---
-echo "==> cargo build（四服务）"
+echo "==> cargo build（四服务 + 注入 example）"
 cargo build -p alpha-api-gateway -p alpha-data-engine -p alpha-real-time-feed -p alpha-collector \
   || fail "cargo build 失败"
+# 注入端一并预建：断言 3c 的竞速窗口内直跑二进制，不吃 cargo run 的
+# workspace 新鲜度检查（实测 ~10s，足以错过客户端超时窗口）
+cargo build -p alpha-storage --example stream_inject || fail "stream_inject 构建失败"
 
 # --- 启动四服务 ---
 echo "==> 启动服务（logs: $LOG_DIR）"
@@ -181,6 +186,46 @@ EOF
 node "$WS_SCRIPT" "ws://127.0.0.1:$GW_PORT/ws" || fail "WS 消息级 Resync 契约断言失败"
 rm -f "$WS_SCRIPT"
 echo "✅ WS 消息级：版本化同步 Resync 回帧契约成立"
+
+# --- 断言 3c：数据面 e2e——XADD 行情 → real-time-feed 消费 → /ws 客户端收敛 ---
+# （testing.md §4 登记的「数据面 e2e」缺口闭合）：注入端走
+# examples/stream_inject.rs（与生产同一 publish 组装面，非手拼 JSON），
+# 断言端以真实 WS 客户端等待 Sync 帧中的注入价格——envelope 解析链
+# （消费组读取 → envelope_to_realtime → 版本化广播）任何一环断即超时失败。
+WS_INJECT_SCRIPT="$(mktemp /tmp/ws_inject_XXXX.mjs)"
+cat >"$WS_INJECT_SCRIPT" <<'EOF'
+const url = process.argv[2];
+const expectPrice = Number(process.argv[3]);
+const fail = (msg) => { console.error(`❌ 数据面 e2e：${msg}`); process.exit(1); };
+const ws = new WebSocket(url);
+const timeout = setTimeout(() => fail('10s 内未收到含注入价格的 Sync 帧（解析/广播链断裂）'), 10000);
+ws.onopen = () => {
+  ws.send(JSON.stringify({ type: 'Subscribe', id: 'e2e-data', channels: ['real_time_quotes'], symbols: ['600519'] }));
+};
+ws.onmessage = (ev) => {
+  let frame;
+  try { frame = JSON.parse(ev.data); } catch { fail(`非 JSON 帧: ${String(ev.data).slice(0, 80)}`); return; }
+  if (frame.type === 'Sync' && frame.data && Number(frame.data.price) === expectPrice) {
+    clearTimeout(timeout);
+    console.log(`✅ 数据面：注入价格 ${expectPrice} 经 ${frame.op} 帧收敛（seq=${frame.seq}）`);
+    process.exit(0);
+  }
+  // 其他帧（Connected / 无关 Sync）：继续等
+};
+ws.onerror = () => fail('连接错误');
+EOF
+node "$WS_INJECT_SCRIPT" "ws://127.0.0.1:$GW_PORT/ws" 13.37 &
+WS_INJECT_PID=$!
+sleep 1.5
+# 注入：与生产同构的 envelope（RedisStreamQueue::publish 组装）；竞速窗口
+# 1.5s 已含订阅落定 + 组消费派发（直跑预建二进制，秒级内落库），若上游
+# 消费断链，客户端 10s 超时兜底报红
+inject_out="$("$BIN/examples/stream_inject" "$REDIS_URL" quotes.raw 600519 13.37 \
+  2>"$LOG_DIR/stream_inject.log")" \
+  || { kill "$WS_INJECT_PID" 2>/dev/null || true; fail "行情注入失败（见 stream_inject.log）"; }
+wait "$WS_INJECT_PID" || fail "WS 客户端未收敛到注入价格（注入 id=${inject_out:-?}）"
+rm -f "$WS_INJECT_SCRIPT"
+echo "✅ 数据面 e2e：XADD 行情 → 广播 → /ws 收敛（price=13.37）"
 
 # --- 断言 4：gateway /metrics 暴露业务指标（跨服务调用已发生之后） ---
 gw_metrics="$(curl -s --max-time 5 "http://127.0.0.1:$GW_PORT/metrics")"
