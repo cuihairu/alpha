@@ -2,6 +2,13 @@
 //!
 //! 提供统一的数据存储抽象层，支持多种存储后端
 
+// 公共导出面（architecture-review §4.1 白名单化：只列实际消费面，
+// 避免新代码顺手引用次级后端）：
+//   cache / clickhouse / cloud / columnar / dal / dataset_registry / diagnosis /
+//   encryption / memory / partition / prefetch / rate_limit / redis_kv(限流键) /
+//   redis_streams / timescale(可选) / timeseries
+// legacy 次级后端不进白名单：disk_kv（仓内零外部消费）、postgres_kv
+// （单点豁免 PostgresKvStorage——api-gateway 账户持久层的既有消费面）
 pub mod cache;
 pub mod clickhouse;
 pub mod cloud;
@@ -9,11 +16,11 @@ pub mod columnar;
 pub mod dal;
 pub mod dataset_registry;
 pub mod diagnosis;
-pub mod disk_kv;
+mod disk_kv;
 pub mod encryption;
 pub mod memory;
 pub mod partition;
-pub mod postgres_kv;
+mod postgres_kv;
 pub mod prefetch;
 pub mod rate_limit;
 pub mod redis_kv;
@@ -23,7 +30,7 @@ pub mod timeseries;
 
 use alpha_core::errors::AlphaResult;
 
-// 重新导出主要类型
+// 重新导出主要类型（白名单）
 pub use cache::*;
 pub use clickhouse::*;
 pub use cloud::*;
@@ -31,11 +38,10 @@ pub use columnar::*;
 pub use dal::*;
 pub use dataset_registry::*;
 pub use diagnosis::*;
-pub use disk_kv::*;
 pub use encryption::{decrypt_sensitive_field, encrypt_sensitive_field, EncryptedStorage};
 pub use memory::*;
 pub use partition::*;
-pub use postgres_kv::*;
+pub use postgres_kv::PostgresKvStorage;
 pub use prefetch::*;
 pub use rate_limit::*;
 pub use redis_kv::*;
@@ -112,7 +118,8 @@ impl StorageFactory {
                 Ok(Box::new(backend))
             }
             StorageBackendType::LocalDisk => {
-                let backend = DiskKvStorage::from_connection_string(&config.connection_string)?;
+                let backend =
+                    disk_kv::DiskKvStorage::from_connection_string(&config.connection_string)?;
                 Ok(Box::new(backend))
             }
         }
