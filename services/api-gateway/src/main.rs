@@ -994,8 +994,13 @@ async fn api_proxy(
 }
 
 /// WS 反代（根路径）：/ws → real-time-feed /ws
-async fn ws_proxy_root(state: State<GatewayState>, ws: WebSocketUpgrade) -> Response {
-    ws_proxy_inner(state, "/".to_string(), ws).await
+async fn ws_proxy_root(
+    state: State<GatewayState>,
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    ws_proxy_inner(state, "/".to_string(), ws, &headers, &uri).await
 }
 
 /// WS 反代（子路径）：/ws/<path> → real-time-feed /<path>
@@ -1003,15 +1008,41 @@ async fn ws_proxy(
     state: State<GatewayState>,
     Path(path): Path<String>,
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    uri: Uri,
 ) -> Response {
-    ws_proxy_inner(state, format!("/{path}"), ws).await
+    ws_proxy_inner(state, format!("/{path}"), ws, &headers, &uri).await
 }
 
 async fn ws_proxy_inner(
     state: State<GatewayState>,
     path: String,
     ws: WebSocketUpgrade,
+    headers: &HeaderMap,
+    uri: &Uri,
 ) -> Response {
+    // WS 握手鉴权（auth.md §6 遗留项闭合）：jwt 模式下升级请求必须持票，
+    // 校验在拨上游之前——未认证流量不触发 real-time-feed 连接。WS 是只读
+    // 订阅面，任意已认证角色放行（与 REST 读路径同口径，不走 authorize）。
+    // off 模式（默认）零行为变化。
+    if state.auth.mode != auth::AuthMode::Off {
+        let verdict =
+            ws_auth_token(headers, uri).map(|token| auth::verify_token(&state.auth.secret, &token));
+        match verdict {
+            Some(Ok(claims)) => {
+                metrics::counter!("alpha_gateway_auth_total", "mode" => "ws_allowed").increment(1);
+                tracing::debug!(sub = %claims.sub, "ws handshake authenticated");
+            }
+            verdict => {
+                metrics::counter!("alpha_gateway_auth_total", "mode" => "ws_denied").increment(1);
+                if verdict.is_none() {
+                    tracing::debug!("ws handshake rejected: no token");
+                }
+                return unauthorized();
+            }
+        }
+    }
+
     let upstream_url = to_ws_url(&state.realtime_url, &path);
     tracing::info!("Proxying WebSocket connection → {}", upstream_url);
 
@@ -1027,6 +1058,19 @@ async fn ws_proxy_inner(
                 .into_response()
         }
     }
+}
+
+/// WS 握手 token 提取：`Authorization: Bearer` 头优先，回落 `?token=` 查询参数
+/// （浏览器侧 WebSocket 无法自定义握手头，查询参数是标准回落通道）。JWS compact
+/// 序列化（base64url + `.`）全部是未保留字符，查询参数无需 percent 解码。
+fn ws_auth_token(headers: &HeaderMap, uri: &Uri) -> Option<String> {
+    if let Some(token) = auth::extract_bearer(headers) {
+        return Some(token);
+    }
+    uri.query()?.split('&').find_map(|kv| {
+        let (key, value) = kv.split_once('=')?;
+        (key == "token" && !value.is_empty()).then(|| value.to_string())
+    })
 }
 
 /// http(s) 上游地址 → ws(s) 地址
@@ -2462,6 +2506,168 @@ mod tests {
         assert_eq!(
             echoed,
             tokio_tungstenite::tungstenite::Message::Text("echo:ping".into())
+        );
+    }
+
+    /// jwt 模式装配：上游 = 第二参（realtime 侧可回声），data-engine 侧死端口
+    fn jwt_test_state(data_engine_url: String, realtime_url: String) -> GatewayState {
+        let mut state = test_state(data_engine_url, realtime_url);
+        state.auth = auth::AuthConfig {
+            mode: auth::AuthMode::JwtRequired,
+            secret: "test-secret".to_string(),
+            expected_issuer: String::new(),
+            expected_audience: String::new(),
+            provision_key: String::new(),
+        };
+        state
+    }
+
+    async fn spawn_on(addr_app: axum::Router) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, addr_app).await.unwrap();
+        });
+        addr
+    }
+
+    /// WS 握手鉴权（auth.md §6 遗留项闭合）：jwt 模式下无票升级 → 401，
+    /// 且未拨上游（realtime_url 死端口不产生 502——401 优先于上游连接）
+    #[tokio::test]
+    async fn ws_proxy_rejects_unauthenticated_in_jwt_mode() {
+        let app = build_router(jwt_test_state(
+            "http://127.0.0.1:1".to_string(),
+            "http://127.0.0.1:1".to_string(),
+        ));
+        let addr = spawn_on(app).await;
+
+        let err = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .unwrap_err();
+        match err {
+            tokio_tungstenite::tungstenite::Error::Http(resp) => {
+                assert_eq!(resp.status(), 401, "无票 WS 升级应 401");
+            }
+            other => panic!("expected HTTP 401 handshake failure, got {other:?}"),
+        }
+    }
+
+    /// 错 secret 签的票 → 401（与 REST 面同口径：不区分原因）
+    #[tokio::test]
+    async fn ws_proxy_rejects_wrong_secret_token_in_jwt_mode() {
+        let app = build_router(jwt_test_state(
+            "http://127.0.0.1:1".to_string(),
+            "http://127.0.0.1:1".to_string(),
+        ));
+        let addr = spawn_on(app).await;
+
+        let bad =
+            auth::create_token("wrong-secret", "mallory", "", Duration::from_secs(60)).unwrap();
+        let err = tokio_tungstenite::connect_async(format!("ws://{addr}/ws?token={bad}"))
+            .await
+            .unwrap_err();
+        match err {
+            tokio_tungstenite::tungstenite::Error::Http(resp) => {
+                assert_eq!(resp.status(), 401);
+            }
+            other => panic!("expected HTTP 401 handshake failure, got {other:?}"),
+        }
+    }
+
+    /// 合法票走 `?token=` 查询参数（浏览器侧无自定义握手头时的标准回落）
+    /// → 握手放行且反代链路完好（回声往返）
+    #[tokio::test]
+    async fn ws_proxy_accepts_valid_token_query_param_in_jwt_mode() {
+        let upstream = spawn_upstream().await;
+        let app = build_router(jwt_test_state("http://127.0.0.1:1".to_string(), upstream));
+        let addr = spawn_on(app).await;
+
+        let token =
+            auth::create_token("test-secret", "carol", "", Duration::from_secs(60)).unwrap();
+        let (mut ws_stream, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/ws?token={token}"))
+                .await
+                .unwrap();
+        use futures_util::SinkExt as TestSink;
+        use futures_util::StreamExt as TestStream;
+        ws_stream
+            .send(tokio_tungstenite::tungstenite::Message::Text("ping".into()))
+            .await
+            .unwrap();
+        let echoed = tokio::time::timeout(Duration::from_secs(5), ws_stream.next())
+            .await
+            .expect("echo within timeout")
+            .expect("message received")
+            .unwrap();
+        assert_eq!(
+            echoed,
+            tokio_tungstenite::tungstenite::Message::Text("echo:ping".into())
+        );
+    }
+
+    /// 合法票走 `Authorization: Bearer` 头（服务端/代理侧客户端可设头）
+    /// → 握手放行
+    #[tokio::test]
+    async fn ws_proxy_accepts_bearer_header_in_jwt_mode() {
+        let upstream = spawn_upstream().await;
+        let app = build_router(jwt_test_state("http://127.0.0.1:1".to_string(), upstream));
+        let addr = spawn_on(app).await;
+
+        let token = auth::create_token("test-secret", "dave", "", Duration::from_secs(60)).unwrap();
+        let mut req: tokio_tungstenite::tungstenite::http::Request<()> =
+            tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
+                format!("ws://{addr}/ws"),
+            )
+            .unwrap();
+        req.headers_mut().insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        let (_ws_stream, resp) = tokio_tungstenite::connect_async(req).await.unwrap();
+        assert_eq!(resp.status(), 101, "持票升级应 101 Switching Protocols");
+    }
+
+    /// token 提取纯函数：Bearer 头优先于查询参数；两者皆无 → None；
+    /// 空 `token=` 不算票
+    #[test]
+    fn ws_auth_token_prefers_header_and_requires_presence() {
+        let mut headers = HeaderMap::new();
+        let uri: Uri = "/ws?token=query_token".parse().unwrap();
+        assert_eq!(
+            ws_auth_token(&headers, &uri).as_deref(),
+            Some("query_token"),
+            "无头回落查询参数"
+        );
+
+        let bare: Uri = "/ws".parse().unwrap();
+        assert_eq!(ws_auth_token(&headers, &bare), None, "无头无票 → None");
+
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer header_token"),
+        );
+        assert_eq!(
+            ws_auth_token(&headers, &uri).as_deref(),
+            Some("header_token"),
+            "头优先于查询参数"
+        );
+
+        let no_query: Uri = "/ws".parse().unwrap();
+        assert_eq!(
+            ws_auth_token(&headers, &no_query).as_deref(),
+            Some("header_token")
+        );
+
+        let mut empty_auth = HeaderMap::new();
+        empty_auth.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer"),
+        );
+        let empty_param: Uri = "/ws?token=".parse().unwrap();
+        assert_eq!(
+            ws_auth_token(&empty_auth, &empty_param),
+            None,
+            "空头回落空参数 → None"
         );
     }
 
