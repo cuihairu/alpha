@@ -138,6 +138,7 @@ Timescale 保留为可选 TimescaleDB 后端（data-engine persistence 已是三
 - `dataset://{domain}/{granularity}/{version}` 概念：dataset_id + source + time_range + symbols + schema_version + checksum + created_at——回测/研究引用的是**某一版数据**而非当前表。
 - Experiment 记录（experiment_id / dataset_id+version / strategy+code_version / parameters / seed / result / created_at）：回答「为什么昨天 1.32 今天 1.17」。
 - 这两个先落**协议与登记表**（小），再落包级实现（P3）。
+  〔现注：协议与登记表已落（2026-10）——契约 `protocols/src/dataset.rs`（`DatasetDescriptor`/`ExperimentRecord`，纯 serde 加性演进）+ 登记表 `storage/src/dataset_registry.rs`（内存表 + 经 `StorageBackend` 两键快照 persist/load；数据集 id+version 不可变重复注册冲突、实验只增不改）；包级 parquet 数据集 API 面仍归 P3。〕
 
 ### 3.6 MCP 访问面（access 域扩展，慢启动）
 
