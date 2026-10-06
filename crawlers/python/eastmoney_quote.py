@@ -45,8 +45,29 @@ def fetch_quotes(symbols: list[str], timeout: float) -> dict:
     )
 
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
+        raw_bytes = resp.read()
+        raw = raw_bytes.decode("utf-8", errors="replace")
         data = json.loads(raw)
+
+    # 原始响应落盘（best-effort，字节级保真）：collector RawArchiver 扫描
+    # 工作目录上传 S3/MinIO 作数据质量取证底座；写不进绝不影响解析主链路
+    try:
+        with open("raw_response.txt", "wb") as f:
+            f.write(raw_bytes)
+        with open("raw_meta.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "url": resp.geturl(),
+                    "status": resp.status,
+                    "content_type": resp.headers.get("Content-Type"),
+                    "byte_len": len(raw_bytes),
+                    "fetched_at": datetime.now(tz=timezone.utc).isoformat(),
+                },
+                f,
+                ensure_ascii=False,
+            )
+    except Exception:
+        pass
 
     diff = (data.get("data") or {}).get("diff") or []
     quotes = []

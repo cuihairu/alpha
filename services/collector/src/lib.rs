@@ -33,6 +33,9 @@ pub mod task_templates;
 // Cron 调度（architecture §24 刷新频率执行面）
 pub mod cron_scheduler;
 
+// 原始响应归档（MinIO/S3 取证底座，env 门控默认关）
+pub mod raw_archive;
+
 // 预导出模块
 pub mod prelude;
 

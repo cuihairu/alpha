@@ -111,7 +111,13 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 
 **collector**：`ALPHA_COLLECTOR_BIND`（默认 `0.0.0.0:8083`）、
 `ALPHA_COLLECTOR_TASKS`（任务模板路径，默认 `config/collector.tasks.yaml`）、
-`ALPHA_WORKSPACE_ROOT`。模板格式见该文件与 architecture.md §24。
+`ALPHA_WORKSPACE_ROOT`、`ALPHA_COLLECTOR_RAW_ARCHIVE_URL`（原始响应归档，
+形如 `s3://bucket?endpoint=http://minio:9000&access_key=..&secret_key=..`；
+未设置=关闭，默认零行为变化；设置后任务工作目录的 `raw_response.txt`/
+`raw_meta.json` 上传对象存储，键布局 `raw/{YYYY-MM-DD}/{task_id}/{文件名}`，
+归档失败只记 `alpha_collector_raw_archive_total{result=failed}` 不影响任务）、
+`ALPHA_COLLECTOR_RAW_ARCHIVE_PREFIX`（可选，缺省 `raw`）。模板格式见该文件
+与 architecture.md §24。
 
 **real-time-feed**：`ALPHA_REALTIME_FEED_BIND`、`ALPHA_REDIS_URL`/`REDIS_URL`、
 `ALPHA_LOG_LEVEL`、`ALPHA_CLAIM_MIN_IDLE_MS`/`ALPHA_CLAIM_SWEEP_SECS`/

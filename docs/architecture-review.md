@@ -46,6 +46,7 @@
 
 **建议（收敛、不删除）**：
 1. 确立**三个权威后端**：ClickHouse（主数据仓）、Redis（缓存/流/限流/锁）、MinIO/S3（原始归档 + parquet 数据集）。Timescale 保留为可选后端（性能/回退），不再进入新功能默认路径。
+   〔现注：MinIO/S3 **原始归档写路径已落**（2026-10）——collector `RawArchiver`（`ALPHA_COLLECTOR_RAW_ARCHIVE_URL` 门控，默认关）把爬虫工作目录的 `raw_response.txt`/`raw_meta.json` 上传对象存储，作数据质量告警的取证底座；parquet 数据集面未落。〕
 2. `lib.rs` 的 `pub use` 改为**显式白名单**（列实际消费面），KV 次级后端不再公共导出，标注 "legacy/可选"，避免新代码顺手引用。
 3. 新写数据面代码一律经 `dal.rs` 单入口，禁止直接 new 具体 Storage。
 

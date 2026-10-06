@@ -19,9 +19,14 @@ async fn main() -> Result<()> {
         .ok()
         .map(std::path::PathBuf::from)
         .unwrap_or(std::env::current_dir()?);
-    let collector = std::sync::Arc::new(alpha_collector::main_simple::SimpleCollector::new(
-        workspace_root,
-    ));
+    let collector = std::sync::Arc::new(
+        alpha_collector::main_simple::SimpleCollector::new(workspace_root).with_raw_archiver(
+            // 原始响应归档（env 门控默认关）：URL 未设置=None 零行为变化；
+            // 设置了但连接串非法=启动即退出（配置错误不静默吞）
+            alpha_collector::raw_archive::RawArchiver::from_env()
+                .map_err(|e| anyhow::anyhow!("原始归档配置错误：{e}"))?,
+        ),
+    );
     collector.start().await?;
 
     // 任务模板（architecture §24 任务描述）：ALPHA_COLLECTOR_TASKS 指向 YAML/JSON

@@ -39,6 +39,7 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::multilang_simple::{CrawlerConfig, CrawlerLanguage, MultilangCrawler};
+use crate::raw_archive::RawArchiver;
 use crate::sources::{
     CrawlerConfig as SourceCrawlerConfig, CrawlerError, DataSource, EastmoneySource,
 };
@@ -66,6 +67,8 @@ pub struct SimpleCollector {
     crawler: Arc<MultilangCrawler>,
     /// 事件广播
     event_tx: broadcast::Sender<CollectorEvent>,
+    /// 原始响应归档器（env 门控，默认 None=关闭）
+    raw_archive: Option<RawArchiver>,
     /// 启动时间（用于 uptime 统计）
     started_at: Instant,
 }
@@ -187,9 +190,18 @@ impl SimpleCollector {
             tasks: Arc::new(RwLock::new(HashMap::new())),
             running_tasks: Arc::new(RwLock::new(HashMap::new())),
             crawler: Arc::new(MultilangCrawler::new(&workspace_root)),
+            raw_archive: None,
             event_tx,
             started_at: Instant::now(),
         }
+    }
+
+    /// 挂载原始响应归档器（env 装配的 None = 关闭）。独立 builder 而非并进
+    /// new()：配置错误要在 main 启动期响亮退出（连接串非法不静默降级），
+    /// 而测试构造保持零参数零行为变化
+    pub fn with_raw_archiver(mut self, archiver: Option<RawArchiver>) -> Self {
+        self.raw_archive = archiver;
+        self
     }
 
     /// 取某数据源的下一条 sequence（per-source 单调递增，从 1 起）。
@@ -419,6 +431,33 @@ impl SimpleCollector {
         // 执行任务
         match self.crawler.execute_crawler(&task, &crawler_config).await {
             Ok(result) => {
+                // 原始响应归档（旁路，architecture-review §2.1 MinIO/S3 原始归档）：
+                // 脚本 best-effort 落在工作目录的 raw_response.txt/raw_meta.json
+                // 上传对象存储——成功/失败都只走指标与日志，绝不影响任务状态
+                // （采集可用性优先于归档完整性）；失败任务的 raw 同样归档，
+                // 那正是排查数据源问题的证据
+                if let Some(archiver) = &self.raw_archive {
+                    match archiver.archive_task(task_id, &working_directory_abs).await {
+                        Ok(0) => {}
+                        Ok(n) => {
+                            metrics::counter!("alpha_collector_raw_archive_total",
+                                "result" => "uploaded")
+                            .increment(n as u64);
+                            info!(task_id, count = n, "raw response archived");
+                        }
+                        Err(e) => {
+                            metrics::counter!("alpha_collector_raw_archive_total",
+                                "result" => "failed")
+                            .increment(1);
+                            tracing::warn!(
+                                task_id,
+                                error = %e,
+                                "raw archive failed (旁路，不影响任务状态)"
+                            );
+                        }
+                    }
+                }
+
                 {
                     let mut running = self.running_tasks.write().await;
                     running.insert(task_id.to_string(), result.status.clone());
@@ -622,7 +661,7 @@ impl SimpleCollector {
 	import json
 	import urllib.request
 	import urllib.error
-	from datetime import datetime
+	from datetime import datetime, timezone
 
 	def main():
 	    url = "{}"
@@ -631,7 +670,19 @@ impl SimpleCollector {
 	    try:
 	        req = urllib.request.Request(url, headers=headers, method="GET")
 	        with urllib.request.urlopen(req, timeout=30) as resp:
-	            raw = resp.read().decode("utf-8", errors="replace")
+	            raw_bytes = resp.read()
+	            raw = raw_bytes.decode("utf-8", errors="replace")
+	            # 原始响应落盘（best-effort，RawArchiver 取证底座）：写不进不改主链路
+	            try:
+	                with open("raw_response.txt", "wb") as f:
+	                    f.write(raw_bytes)
+	                with open("raw_meta.json", "w", encoding="utf-8") as f:
+	                    json.dump({{"url": resp.geturl(), "status": resp.status,
+	                               "byte_len": len(raw_bytes),
+	                               "fetched_at": datetime.now(tz=timezone.utc).isoformat()}},
+	                              f, ensure_ascii=False)
+	            except Exception:
+	                pass
 	            try:
 	                data = json.loads(raw)
 	                print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -653,6 +704,7 @@ impl SimpleCollector {
                 format!(
                     r#"
 const https = require('https');
+const fs = require('fs');
 const url = '{}';
 https.get(url, (res) => {{
     let data = '';
@@ -660,6 +712,13 @@ https.get(url, (res) => {{
         data += chunk;
     }});
     res.on('end', () => {{
+        // 原始响应落盘（best-effort，RawArchiver 取证底座）：写不进不改主链路
+        try {{
+            fs.writeFileSync('raw_response.txt', data);
+            fs.writeFileSync('raw_meta.json', JSON.stringify({{
+                url: url, byte_len: data.length, fetched_at: new Date().toISOString()
+            }}));
+        }} catch (e) {{}}
         try {{
             const jsonData = JSON.parse(data);
             console.log(JSON.stringify(jsonData, null, 2));

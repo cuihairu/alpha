@@ -106,6 +106,22 @@ impl CloudStorage {
         }))
     }
 
+    /// 直传对象：键即最终对象键，不做 [`Self::build_key`] 的
+    /// `alpha/objects/*.bin` KV 命名空间映射——归档面按自身布局放对象
+    /// （如 `raw/2026-10-07/{task_id}/raw_response.txt`），键直接可配
+    /// 生命周期策略。bucket 取连接串 host 部分。
+    pub async fn upload_object(&self, key: &str, data: Vec<u8>) -> AlphaResult<()> {
+        let key = key.trim_matches('/');
+        if key.is_empty() {
+            return Err(AlphaError::InvalidInput(
+                "storage key cannot be empty".to_string(),
+            ));
+        }
+        self.object_storage
+            .upload(&self.config.bucket, key, data)
+            .await
+    }
+
     fn build_key(&self, key: &str) -> AlphaResult<String> {
         let key = key.trim_matches('/');
         if key.is_empty() {
