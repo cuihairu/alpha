@@ -9,7 +9,7 @@
 ## 总体架构
 ```
 Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB/ClickHouse/Redis
-                                                   -> 对象存储后端 (packages/storage，已备未接线)
+                                                   -> 对象存储后端 (packages/storage，原始归档已接线)
                                         -> API Gateway (Rust) -> Cloudflare Tunnel（规划）
 ```
 
@@ -51,7 +51,9 @@ Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB
 - **ClickHouse**：parquet 导出归档（`/clickhouse/export.parquet` 等两个导出端点，无
   INSERT 写路径）；公告/新闻/舆情主仓与倒排/全文索引为规划项。
 - **Redis**：热点缓存、限流 token、去重锁。
-- **对象存储（MinIO/S3）**：`packages/storage` 后端已实现，原始响应落盘未接线。
+- **对象存储（MinIO/S3）**：`packages/storage` 后端已实现，collector
+  `RawArchiver` 原始响应归档已接线（`ALPHA_COLLECTOR_RAW_ARCHIVE_URL`
+  门控，默认关）。
 
 ### 5. API 服务
 - **网关**：Axum，REST（`/api/v1/*` 反代）+ WebSocket 反代 + 健康/指标面；网关不终结
@@ -81,7 +83,8 @@ Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB
 - **语言**：Rust（核心处理、API、调度器）；采集模板支持 Python/Node/Go/Rust/Shell。
 - **通信**：Redis Streams（当前，唯一在用）；NATS/Kafka 不立项（review §2.4）；
   gRPC + Protobuf（data-engine）；HTTP/JSON（网关与 REST 面）。
-- **存储**：TimescaleDB/PostgreSQL、ClickHouse、Redis；MinIO/S3 后端已备未接线。
+- **存储**：TimescaleDB/PostgreSQL、ClickHouse、Redis；MinIO/S3（collector
+  原始归档已接线）。
 - **其他**：Grafana/Prometheus/Loki、GitHub Actions。
 
 ## 部署策略

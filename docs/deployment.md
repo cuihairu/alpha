@@ -24,5 +24,5 @@ CDN（web dist） ──→ real-time-feed :8082 (/ws)
 Redis Streams（行情总线） + ClickHouse（列存，见 docs/data-lake-parquet.md）
 ```
 
-生产检查清单：TLS（网关 rustls 依赖已备、接线未落——当前经反代终结，见 `docs/deployment-runbook.md`）、密钥全部走环境/secret（本仓零密钥）、
+生产检查清单：TLS（缺省反代终结；网关服务内 rustls 已接线，`--tls-cert/--tls-key` 双钥启用，见 `docs/deployment-runbook.md`）、密钥全部走环境/secret（本仓零密钥）、
 `scripts/check-compliance.sh` 对账通过、告警规则已接入 Alertmanager。
