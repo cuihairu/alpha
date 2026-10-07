@@ -107,6 +107,7 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 `security{api_keys}`。env 形如 `ALPHA__STORAGE__PERSISTENCE_ENABLED=true`。
 
 **api-gateway**：clap CLI（`--bind`、`--auth-mode off|jwt`、`--auth-secret`、
+`--auth-jwks-url`/`--auth-jwks-refresh-secs`（OIDC 键表，oct 键联调形态）、
 `--rate-*` 等），同名 env 兜底（`ALPHA_GATEWAY_*`）。鉴权细节见 docs/auth.md
 （jwt 模式下 `/ws` 升级亦需持票：`Authorization: Bearer` 头或 `?token=` 查询参数，
 客户端连 `ws://host/ws?token=<jwt>` 即可）。

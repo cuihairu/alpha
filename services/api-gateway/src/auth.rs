@@ -56,11 +56,7 @@ pub struct AuthConfig {
     /// HS256 共享 secret（自签路径；OIDC 路径不需要）
     pub secret: String,
     /// 为空 = 跳过 iss/aud 校验（开发自签默认；生产 OIDC 必须配）
-    /// （allow：OIDC JWKS 接线增量启用，本单保留字段已入库配置面）
-    #[allow(dead_code)]
     pub expected_issuer: String,
-    /// （allow：同上）
-    #[allow(dead_code)]
     pub expected_audience: String,
     /// /auth/token bootstrap 签发口令（空 = 关闭该端点）
     pub provision_key: String,
@@ -166,8 +162,6 @@ pub fn extract_bearer(headers: &axum::http::HeaderMap) -> Option<String> {
 
 /// OIDC 校验：按 token 头 `kid` 在 JWKS 映射取键 → 验签名 → 验 iss/aud
 /// （issuer/audience 为空即跳过对应项——开发联调用 HMAC 发行人时不断言）。
-/// （allow：JWKS 拉取接线增量启用；校验核本单已单测覆盖，见 tests）
-#[allow(dead_code)]
 pub fn verify_oidc_token(
     jwks: &HashMap<String, DecodingKey>,
     token: &str,
@@ -196,11 +190,9 @@ pub fn verify_oidc_token(
         .map_err(|_| AlphaError::AuthenticationError("invalid or expired token".to_string()))
 }
 
-/// 从 OIDC discovery 文档（JSON）按 `jwks_uri` 取 JWKS，再用其签发者信息校验。
-/// 网络失败原样上抛（调用方决定 fail-open 还是 fail-closed——网关取 fail-closed，
-/// 认证失败绝不放行，与限流 fail-open 方向相反）。
-/// （allow：同上，--auth-jwks-url 接线增量启用）
-#[allow(dead_code)]
+/// 从 JWKS 端点拉取键表（URL 直接指向 JWKS 文档；discovery 文档解析归
+/// 生产硬化项）。网络失败原样上抛（调用方决定 fail-open 还是 fail-closed
+/// ——网关取 fail-closed，认证失败绝不放行，与限流 fail-open 方向相反）。
 pub async fn fetch_jwks(
     http: &reqwest::Client,
     jwks_uri: &str,
@@ -233,11 +225,48 @@ pub async fn fetch_jwks(
         if entry.kty != "oct" {
             continue;
         }
-        if let Some(k) = entry.k {
-            out.insert(entry.kid, DecodingKey::from_secret(k.as_bytes()));
+        if let Some(k) = &entry.k {
+            let secret = decode_oct_k(k)?;
+            out.insert(entry.kid, DecodingKey::from_secret(&secret));
         }
     }
     Ok(out)
+}
+
+/// RFC 7517：oct 键的 `k` 是 base64url（无填充）编码的密钥字节，
+/// 不是字面字符串——按标准解码后才是 HMAC secret。
+fn decode_oct_k(k: &str) -> AlphaResult<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(k)
+        .map_err(|e| AlphaError::AuthenticationError(format!("oct 键 k 非法 base64url: {e}")))
+}
+
+/// 校验入口分流（L502 JWKS 接线）：配置了 JWKS 且 token 头带 `kid` →
+/// OIDC 路径（按 kid 选键 + iss/aud）；其余（无 kid 的 bootstrap 自签票、
+/// 未配 JWKS 的既有部署）回落 HS256 自签校验——默认部署零行为变化，
+/// bootstrap 与 IdP 票据可并存。kid 在手但不查自签表：带 kid 视为 IdP 票，
+/// unknown kid 直接拒绝，不做跨路径回退（防降级混淆）。
+pub fn verify_any(
+    config: &AuthConfig,
+    jwks: Option<&HashMap<String, DecodingKey>>,
+    token: &str,
+) -> AlphaResult<Claims> {
+    if let Some(store) = jwks {
+        let has_kid = jsonwebtoken::decode_header(token)
+            .ok()
+            .and_then(|h| h.kid)
+            .is_some();
+        if has_kid {
+            return verify_oidc_token(
+                store,
+                token,
+                &config.expected_issuer,
+                &config.expected_audience,
+            );
+        }
+    }
+    verify_token(&config.secret, token)
 }
 
 #[cfg(test)]
@@ -371,5 +400,80 @@ mod tests {
             DecodingKey::from_secret(b"idp-secret-2"),
         )]);
         assert!(verify_oidc_token(&jwks_missing, &token, "", "").is_err());
+    }
+
+    /// oct 键 `k` 按 RFC 7517 是 base64url 密钥字节，不是字面字符串
+    #[test]
+    fn oct_k_decodes_base64url() {
+        use base64::Engine as _;
+        let secret = b"idp-secret-1";
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret);
+        assert_eq!(decode_oct_k(&encoded).unwrap(), secret.to_vec());
+        assert!(decode_oct_k("!!不是 base64url!!").is_err());
+    }
+
+    /// verify_any 分流矩阵：带 kid + JWKS 在位 → OIDC 核；无 kid → 自签核；
+    /// JWKS 未配 → 全部自签核（默认部署零行为变化）；带 kid 但键表无此
+    /// kid → 拒绝且不回退自签（防降级混淆）
+    #[test]
+    fn verify_any_dispatches_by_kid_presence() {
+        use jsonwebtoken::EncodingKey;
+        let config = AuthConfig {
+            mode: AuthMode::JwtRequired,
+            secret: "self-secret".to_string(),
+            expected_issuer: String::new(),
+            expected_audience: String::new(),
+            provision_key: String::new(),
+        };
+        let jwks = HashMap::from([(
+            "key-1".to_string(),
+            DecodingKey::from_secret(b"idp-secret-1"),
+        )]);
+        let mint = |kid: Option<&str>, secret: &[u8]| {
+            encode(
+                &Header {
+                    kid: kid.map(|s| s.to_string()),
+                    ..Header::new(Algorithm::HS256)
+                },
+                &Claims {
+                    sub: "carol".into(),
+                    scope: "".into(),
+                    roles: vec![],
+                    iat: now_unix(),
+                    exp: now_unix() + 300,
+                },
+                &EncodingKey::from_secret(secret),
+            )
+            .unwrap()
+        };
+
+        let idp_token = mint(Some("key-1"), b"idp-secret-1");
+        let self_token = mint(None, b"self-secret");
+
+        assert_eq!(
+            verify_any(&config, Some(&jwks), &idp_token).unwrap().sub,
+            "carol",
+            "kid + JWKS 在位走 OIDC 核"
+        );
+        assert_eq!(
+            verify_any(&config, Some(&jwks), &self_token).unwrap().sub,
+            "carol",
+            "无 kid 走自签核（bootstrap 与 IdP 并存）"
+        );
+        assert_eq!(
+            verify_any(&config, None, &self_token).unwrap().sub,
+            "carol",
+            "JWKS 未配走自签核（既有部署零行为变化）"
+        );
+        assert!(
+            verify_any(&config, None, &idp_token).is_err(),
+            "JWKS 未配时 IdP 票自签核也验不过（fail-closed，不假装能验）"
+        );
+
+        let foreign = mint(Some("key-9"), b"other-idp-secret");
+        assert!(
+            verify_any(&config, Some(&jwks), &foreign).is_err(),
+            "unknown kid 直接拒绝，不回退自签"
+        );
     }
 }

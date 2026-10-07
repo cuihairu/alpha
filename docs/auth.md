@@ -1,7 +1,7 @@
 # 身份认证
 
 口径：**工程项**——网关 JWT 强制校验 + bootstrap 签发端点 +
-OIDC 校验核（库函数级，IdP 接线归下一增量）。
+OIDC JWKS 接线（拉取/定时刷新/分流，oct 键联调形态，见 §4）。
 
 ## 1. 模式
 
@@ -46,7 +46,8 @@ real-time-feed 连接：
 - 取票顺序：`Authorization: Bearer` 头优先，回落 `?token=` 查询参数
   （浏览器 WebSocket 无法自定义握手头；JWS compact 全部是未保留字符，
   查询参数无需 percent 解码）；
-- 校验与 REST 同一核（HS256/exp/iss/aud），401 同体同 `WWW-Authenticate`；
+- 校验与 REST 同一分流核（`verify_any`，kid→OIDC / 无 kid→自签，见 §4），
+  401 同体同 `WWW-Authenticate`；
   WS 是只读订阅面，任意已认证角色放行（与 REST 读路径同口径，不走
   authorize）；
 - off 模式零行为变化；指标 `alpha_gateway_auth_total{mode="ws_allowed"|
@@ -58,12 +59,27 @@ real-time-feed 连接：
 不经网关，不受此校验；feed 侧自身鉴权归 WS hardening 后续项（web 客户端
 经网关走 JWT 的接线同批归前端增量）。
 
-## 4. OIDC 路径（本单：校验核；接线：下一增量）
+## 4. OIDC 路径（L502 接线：JWKS 拉取 + 定时刷新）
 
-`auth.rs::verify_oidc_token`（单测覆盖）：按 token 头 `kid` 选键 →
-验签名 → 验 iss/aud（为空即跳过，开发联调不断言）。`fetch_jwks`
-支持 `oct` 对称键；RSA/EC 的 x5c 链验证 + `--auth-jwks-url` 定时刷新
-归下一增量（需后台刷新任务，本单不引入）。
+- 校验核 `auth.rs::verify_oidc_token`：按 token 头 `kid` 选键 →
+  验签名 → 验 iss/aud（为空即跳过，开发联调不断言）。
+- 键表拉取 `--auth-jwks-url`（env `ALPHA_GATEWAY_AUTH_JWKS_URL`；
+  jwt 模式下启用）：URL 直接指向 JWKS 文档，OIDC discovery 文档解析
+  （`/.well-known/openid-configuration` → `jwks_uri`）归生产硬化项。
+  只支持 `oct` 对称键（`k` 按 RFC 7517 base64url 解码）；RSA/EC 的
+  x5c 链验证归生产硬化项。
+- 启动 fail-fast：初始拉取失败或键表无 oct 键 → 拒绝启动（空表起来
+  等于认证面全拒，属配置错误不是运行态）。
+- 定时刷新 `--auth-jwks-refresh-secs`（默认 600，0 = 仅启动取一次）：
+  失败/空文档保旧键继续服务并 warn——IdP 轮换期验签不中断；认证面
+  fail-closed 语义不受影响（无键票据照旧 401）。
+- 分流规则 `verify_any`：JWKS 在位且票带 `kid` → OIDC 核（unknown kid
+  直接拒绝，不回退自签，防降级混淆）；无 `kid` 票（bootstrap 自签）
+  仍走 `--auth-secret` 自签核——IdP 票据与 bootstrap 并存；未配 JWKS
+  的既有部署零行为变化。REST 与 WS 握手（§3.1）同一分流核。
+- 边界（如实登记）：oct 是「网关校验自家/测试 IdP 签发」的联调形态，
+  主流 IdP（Keycloak/Auth0）默认签 RSA——接真实 IdP 需先落 x5c 链
+  验证（硬化项），本节接线不掩盖该缺口。
 
 完整 OAuth 2.0 授权码流程的浏览器侧（登录页/回调/刷新令牌轮换）
 归前端 + IdP（Keycloak/Auth0），网关只做资源侧校验——网关不存会话、

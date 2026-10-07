@@ -29,6 +29,7 @@ mod account;
 mod audit;
 mod auth;
 mod shield;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -101,6 +102,17 @@ struct Args {
     #[arg(long, default_value = "")]
     auth_audience: String,
 
+    /// OIDC JWKS 端点（jwt 模式下启用：票带 kid 走 IdP 键表校验，
+    /// 无 kid 票仍走 --auth-secret 自签；URL 直接指向 JWKS 文档。
+    /// env ALPHA_GATEWAY_AUTH_JWKS_URL 优先；空=关闭，默认自签路径）
+    #[arg(long, default_value = "")]
+    auth_jwks_url: String,
+
+    /// JWKS 定时刷新间隔秒（0 = 仅启动取一次；env ALPHA_GATEWAY_JWKS_REFRESH_SECS 优先；
+    /// 运行期刷新失败保旧键继续服务，认证面 fail-closed 语义不变）
+    #[arg(long, default_value = "600")]
+    auth_jwks_refresh_secs: u64,
+
     /// TLS 证书 PEM 路径（与 --tls-key 同给启用服务内 TLS；
     /// env ALPHA_GATEWAY_TLS_CERT 优先；缺省 TLS 终结归反代）
     #[arg(long, default_value = "")]
@@ -129,6 +141,10 @@ fn resolve_url(env_key: &str, arg_value: &str) -> String {
     std::env::var(env_key).unwrap_or_else(|_| arg_value.to_string())
 }
 
+/// OIDC JWKS 键表（L502）：kid → 校验键。启动拉取 + 后台定时刷新，
+/// 刷新失败保旧表（fail-closed：无键票据照旧 401，不因刷新抖动放行）
+pub type JwksStore = Arc<tokio::sync::RwLock<HashMap<String, jsonwebtoken::DecodingKey>>>;
+
 /// 网关共享状态
 #[derive(Clone)]
 struct GatewayState {
@@ -142,6 +158,8 @@ struct GatewayState {
     rate_limit_per_minute: u32,
     /// 认证配置（Off = 零行为变化直通）
     auth: auth::AuthConfig,
+    /// OIDC 键表（None = 未配 --auth-jwks-url，全部走自签核）
+    jwks: Option<JwksStore>,
     /// 防爬虫/DDoS 护栏（L486：UA 分类 + 路径扫描检测 + 秒级 burst）
     shield: shield::ShieldState,
     /// 安全审计与失败风暴检测（L487）
@@ -203,10 +221,53 @@ async fn main() -> anyhow::Result<()> {
         )
     };
 
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(PROXY_TIMEOUT_SECS))
+        .build()?;
+
+    // 认证配置前置解析 + OIDC JWKS 键表（L502）：jwt 模式配了
+    // --auth-jwks-url 即启用——初始拉取失败/空键表直接拒绝启动（空表
+    // 会让所有 kid 票 401，静默起来等于认证面全拒，属配置错误不是运行态）；
+    // 运行期刷新失败保旧键（见 refresh_jwks_once）。
+    let auth_mode = auth::AuthMode::parse(&resolve_url("ALPHA_GATEWAY_AUTH_MODE", &args.auth_mode));
+    let auth_secret = resolve_url("ALPHA_GATEWAY_AUTH_SECRET", &args.auth_secret);
+    if auth_mode == auth::AuthMode::JwtRequired && auth_secret.is_empty() {
+        anyhow::bail!("auth mode is jwt but no secret configured (set --auth-secret or ALPHA_GATEWAY_AUTH_SECRET)");
+    }
+    let jwks_url = resolve_url("ALPHA_GATEWAY_AUTH_JWKS_URL", &args.auth_jwks_url);
+    let jwks = init_jwks_store(
+        &http_client,
+        &jwks_url,
+        auth_mode == auth::AuthMode::JwtRequired,
+    )
+    .await?;
+
+    // 后台定时刷新（L502）：--auth-jwks-refresh-secs 间隔换表（0 = 仅启动
+    // 取一次不刷新）；首个 tick 立即返回故跳过（启动时已拉取）
+    if let Some(store) = jwks.clone() {
+        let refresh_secs = resolve_url(
+            "ALPHA_GATEWAY_JWKS_REFRESH_SECS",
+            &args.auth_jwks_refresh_secs.to_string(),
+        )
+        .parse::<u64>()
+        .unwrap_or(600);
+        if refresh_secs > 0 {
+            let client = http_client.clone();
+            let url = jwks_url.clone();
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(Duration::from_secs(refresh_secs));
+                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                ticker.tick().await;
+                loop {
+                    ticker.tick().await;
+                    refresh_jwks_once(&client, &url, &store).await;
+                }
+            });
+        }
+    }
+
     let state = GatewayState {
-        client: reqwest::Client::builder()
-            .timeout(Duration::from_secs(PROXY_TIMEOUT_SECS))
-            .build()?,
+        client: http_client,
         data_engine_url: resolve_url("ALPHA_GATEWAY_DATA_ENGINE_URL", &args.data_engine_url),
         realtime_url: resolve_url("ALPHA_GATEWAY_REALTIME_URL", &args.realtime_url),
         collector_url: resolve_url("ALPHA_GATEWAY_COLLECTOR_URL", &args.collector_url),
@@ -221,21 +282,16 @@ async fn main() -> anyhow::Result<()> {
         .await?,
         metrics,
         auth: {
-            let mode =
-                auth::AuthMode::parse(&resolve_url("ALPHA_GATEWAY_AUTH_MODE", &args.auth_mode));
-            let secret = resolve_url("ALPHA_GATEWAY_AUTH_SECRET", &args.auth_secret);
-            if mode == auth::AuthMode::JwtRequired && secret.is_empty() {
-                anyhow::bail!("auth mode is jwt but no secret configured (set --auth-secret or ALPHA_GATEWAY_AUTH_SECRET)");
-            }
             let mut cfg = auth::AuthConfig::disabled();
-            cfg.mode = mode;
-            cfg.secret = secret;
+            cfg.mode = auth_mode;
+            cfg.secret = auth_secret;
             cfg.expected_issuer = resolve_url("ALPHA_GATEWAY_AUTH_ISSUER", &args.auth_issuer);
             cfg.expected_audience = resolve_url("ALPHA_GATEWAY_AUTH_AUDIENCE", &args.auth_audience);
             cfg.provision_key =
                 resolve_url("ALPHA_GATEWAY_AUTH_PROVISION_KEY", &args.auth_provision_key);
             cfg
         },
+        jwks,
     };
 
     let app = build_router(state);
@@ -285,6 +341,50 @@ fn resolve_tls(cert: &str, key: &str) -> anyhow::Result<Option<(String, String)>
 /// 一致）；非空则连 Postgres KV 表写穿账户快照——**连接失败即退出**
 /// （静默降级到内存会让多副本部署各持一份互相看不见的账户数据，
 /// 比启动失败更难排查）。
+/// OIDC JWKS 键表初始化（L502）：jwt 模式 + 配置了端点才启用，初始拉取
+/// fail-fast；off 模式配置了端点则忽略 + warn（认证关闭零行为变化）。
+async fn init_jwks_store(
+    client: &reqwest::Client,
+    jwks_url: &str,
+    jwt_mode: bool,
+) -> anyhow::Result<Option<JwksStore>> {
+    if jwks_url.is_empty() {
+        return Ok(None);
+    }
+    if !jwt_mode {
+        tracing::warn!("--auth-jwks-url 配置了但 auth-mode=off，忽略（认证关闭零行为变化）");
+        return Ok(None);
+    }
+    let keys = auth::fetch_jwks(client, jwks_url)
+        .await
+        .map_err(|e| anyhow::anyhow!("auth jwks initial fetch failed: {e}"))?;
+    if keys.is_empty() {
+        anyhow::bail!("auth jwks url served no oct keys: {jwks_url}");
+    }
+    Ok(Some(Arc::new(tokio::sync::RwLock::new(keys))))
+}
+
+/// 单轮 JWKS 刷新（L502）：成功且非空 → 换表返回 true；空表/网络失败 →
+/// 保旧表返回 false（warn）。fail-closed 语义不受影响：旧表仍在，验签照旧。
+async fn refresh_jwks_once(client: &reqwest::Client, url: &str, store: &JwksStore) -> bool {
+    match auth::fetch_jwks(client, url).await {
+        Ok(keys) if !keys.is_empty() => {
+            let kid_count = keys.len();
+            *store.write().await = keys;
+            tracing::info!("JWKS refreshed: {kid_count} keys");
+            true
+        }
+        Ok(_) => {
+            tracing::warn!("JWKS refresh returned no oct keys; keeping previous keys");
+            false
+        }
+        Err(err) => {
+            tracing::warn!("JWKS refresh failed; keeping previous keys: {err}");
+            false
+        }
+    }
+}
+
 async fn init_account_store(url: &str) -> anyhow::Result<account::AccountStore> {
     if url.is_empty() {
         tracing::info!("account sync store: in-memory (no --account-store-url)");
@@ -518,8 +618,8 @@ async fn rate_limit_middleware(
 
 /// /api 认证中间件（L483）：Off 直接放行；JwtRequired 强制 Bearer 校验。
 /// 本增量走自签路径（HS256 + 启动期非空 secret）；`verify_oidc_token`
-///（auth.rs，单测覆盖）是 OIDC IdP 路径的校验核——JWKS 拉取接线
-///（--auth-jwks-url 定时刷新）归下一增量，本单不引入后台刷新任务。
+/// OIDC 键表分流（L502）经 auth::verify_any：JWKS 在位且票带 kid 走 IdP
+/// 键表校验，其余回落 HS256 自签（默认部署未配 JWKS = 零行为变化）。
 /// 认证失败一律 fail-closed（与限流 fail-open 方向相反：限流器坏了可以放，
 /// 认不出来是谁绝不能放）。401 不区分“缺头/坏签/过期”，防用户枚举。
 async fn auth_middleware(
@@ -540,7 +640,12 @@ async fn auth_middleware(
         // 缺失 token 是常规未认证流量，不进审计面（量纲归护栏/限流）
         return unauthorized();
     };
-    match auth::verify_token(&state.auth.secret, &token) {
+    // JWKS 读锁仅在验签期间持有（换表写锁无长持有者，无死锁面）
+    let jwks_guard = match state.jwks.as_ref() {
+        Some(store) => Some(store.read().await),
+        None => None,
+    };
+    match auth::verify_any(&state.auth, jwks_guard.as_deref(), &token) {
         Ok(claims) => {
             // L484：认证之后做 RBAC（401 管“你是谁”，403 管“你能干什么”）
             let method = req.method().to_string();
@@ -1022,12 +1127,21 @@ async fn ws_proxy_inner(
     uri: &Uri,
 ) -> Response {
     // WS 握手鉴权（auth.md §6 遗留项闭合）：jwt 模式下升级请求必须持票，
-    // 校验在拨上游之前——未认证流量不触发 real-time-feed 连接。WS 是只读
-    // 订阅面，任意已认证角色放行（与 REST 读路径同口径，不走 authorize）。
-    // off 模式（默认）零行为变化。
+    // 校验在拨上游之前——未认证流量不触发 real-time-feed 连接。校验分流
+    // 与 REST 同核（verify_any：JWKS 在位且票带 kid → OIDC，否则自签）。
+    // WS 是只读订阅面，任意已认证角色放行（与 REST 读路径同口径，不走
+    // authorize）。off 模式（默认）零行为变化。
     if state.auth.mode != auth::AuthMode::Off {
-        let verdict =
-            ws_auth_token(headers, uri).map(|token| auth::verify_token(&state.auth.secret, &token));
+        let verdict = match ws_auth_token(headers, uri) {
+            Some(token) => match state.jwks.as_ref() {
+                Some(store) => {
+                    let guard = store.read().await;
+                    Some(auth::verify_any(&state.auth, Some(&guard), &token))
+                }
+                None => Some(auth::verify_any(&state.auth, None, &token)),
+            },
+            None => None,
+        };
         match verdict {
             Some(Ok(claims)) => {
                 metrics::counter!("alpha_gateway_auth_total", "mode" => "ws_allowed").increment(1);
@@ -1253,6 +1367,7 @@ mod tests {
             audit: audit::AuditState::new(60_000, 20),
             account_store: account::AccountStore::in_memory(),
             auth: auth::AuthConfig::disabled(),
+            jwks: None,
             // build_recorder 不占全局 install（install_recorder 每进程一次，
             // 并行测试会冲突）；render 走本 recorder 快照
             metrics: global_metrics_handle(),
@@ -2669,6 +2784,195 @@ mod tests {
             None,
             "空头回落空参数 → None"
         );
+    }
+
+    // ---- OIDC JWKS 接线（L502）----
+
+    /// oct JWKS 文档：k = base64url(密钥字节)（RFC 7517）
+    fn jwks_doc(entries: &[(&str, &str)]) -> String {
+        use base64::Engine as _;
+        let keys: Vec<String> = entries
+            .iter()
+            .map(|(kid, secret)| {
+                let k = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret);
+                format!(r#"{{"kid":"{kid}","kty":"oct","k":"{k}"}}"#)
+            })
+            .collect();
+        format!(r#"{{"keys":[{}]}}"#, keys.join(","))
+    }
+
+    /// 本地 IdP JWKS 端点：flip=false 服务 key-1，置 true 服务 key-2
+    /// （模拟 IdP 轮换换表）
+    async fn spawn_jwks_server() -> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicBool>) {
+        let flip = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flip_state = flip.clone();
+        let app = Router::new().route(
+            "/jwks",
+            test_get(move || async move {
+                if flip_state.load(std::sync::atomic::Ordering::Relaxed) {
+                    jwks_doc(&[("key-2", "idp-secret-2")])
+                } else {
+                    jwks_doc(&[("key-1", "idp-secret-1")])
+                }
+            }),
+        );
+        let addr = spawn_on(app).await;
+        (addr, flip)
+    }
+
+    /// 铸 IdP 票：指定 kid 与签名密钥（模拟外部 IdP 签发面）
+    fn mint_idp_token(kid: &str, secret: &[u8], roles: &[String]) -> String {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        jsonwebtoken::encode(
+            &jsonwebtoken::Header {
+                kid: Some(kid.to_string()),
+                ..jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256)
+            },
+            &auth::Claims {
+                sub: "carol".to_string(),
+                scope: String::new(),
+                roles: roles.to_vec(),
+                iat: now,
+                exp: now + 300,
+            },
+            &jsonwebtoken::EncodingKey::from_secret(secret),
+        )
+        .unwrap()
+    }
+
+    /// L502：JWKS 接线 /api 面——IdP 票（kid）走键表核 200；自签票（无 kid）
+    /// 走自签核 200（bootstrap 与 IdP 并存）；unknown kid → 401 不回退自签
+    #[tokio::test]
+    async fn oidc_jwks_serves_idp_tokens_on_api_face() {
+        let (jwks_addr, _flip) = spawn_jwks_server().await;
+        let client = reqwest::Client::new();
+        let store = init_jwks_store(&client, &format!("http://{jwks_addr}/jwks"), true)
+            .await
+            .unwrap()
+            .expect("jwt 模式 + 端点必须建表");
+        let upstream = spawn_upstream().await;
+        let mut state = test_state(upstream, "http://127.0.0.1:1".to_string());
+        state.auth = auth::AuthConfig {
+            mode: auth::AuthMode::JwtRequired,
+            secret: "test-secret".to_string(),
+            expected_issuer: String::new(),
+            expected_audience: String::new(),
+            provision_key: String::new(),
+        };
+        state.jwks = Some(store);
+        let addr = spawn_on(build_router(state)).await;
+
+        let http = reqwest::Client::new();
+        let url = format!("http://{addr}/api/v1/stocks/600519/history");
+
+        let idp_ok = http
+            .post(&url)
+            .bearer_auth(mint_idp_token(
+                "key-1",
+                b"idp-secret-1",
+                &[auth::ROLE_OPERATOR.to_string()],
+            ))
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(idp_ok.status().as_u16(), 200, "IdP 票（kid）走键表核");
+
+        let self_ok = http
+            .post(&url)
+            .bearer_auth(
+                auth::create_token_with_roles(
+                    "test-secret",
+                    "bootstrap",
+                    "",
+                    &[auth::ROLE_OPERATOR.to_string()],
+                    Duration::from_secs(60),
+                )
+                .unwrap(),
+            )
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            self_ok.status().as_u16(),
+            200,
+            "自签票（无 kid）走自签核，两者并存"
+        );
+
+        let unknown = http
+            .post(&url)
+            .bearer_auth(mint_idp_token(
+                "key-9",
+                b"other-idp",
+                &[auth::ROLE_OPERATOR.to_string()],
+            ))
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            unknown.status().as_u16(),
+            401,
+            "unknown kid 拒绝且不回退自签"
+        );
+    }
+
+    /// L502：init 门禁——off 模式配端点忽略；jwt + 不可达端点 fail-fast；
+    /// jwt + 无 oct 键 fail-fast（空表起来等于认证面全拒，属配置错误）
+    #[tokio::test]
+    async fn init_jwks_store_fail_fast_gates() {
+        let client = reqwest::Client::new();
+
+        // off 模式：配置了端点也忽略（认证关闭零行为变化）
+        let (jwks_addr, _flip) = spawn_jwks_server().await;
+        let off = init_jwks_store(&client, &format!("http://{jwks_addr}/jwks"), false)
+            .await
+            .unwrap();
+        assert!(off.is_none(), "off 模式忽略 JWKS 端点");
+
+        // jwt 模式 + 不可达端点 → Err（初始拉取 fail-fast）
+        assert!(init_jwks_store(&client, "http://127.0.0.1:1/jwks", true)
+            .await
+            .is_err());
+
+        // jwt 模式 + 无 oct 键文档 → Err
+        let empty_app = Router::new().route("/jwks", test_get(|| async { r#"{"keys":[]}"# }));
+        let empty_addr = spawn_on(empty_app).await;
+        let empty = init_jwks_store(&client, &format!("http://{empty_addr}/jwks"), true).await;
+        assert!(empty.is_err(), "空键表必须拒绝启动");
+    }
+
+    /// L502：刷新换表——IdP 轮换后 refresh_jwks_once 换新表（旧 kid 401、
+    /// 新 kid 200）；空文档/失败保旧表（verify 语义不中断）
+    #[tokio::test]
+    async fn jwks_refresh_swaps_keys_and_keeps_stale_on_failure() {
+        let (jwks_addr, flip) = spawn_jwks_server().await;
+        let url = format!("http://{jwks_addr}/jwks");
+        let client = reqwest::Client::new();
+        let store = init_jwks_store(&client, &url, true).await.unwrap().unwrap();
+
+        // IdP 轮换：服务端换表
+        flip.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(refresh_jwks_once(&client, &url, &store).await, "换表成功");
+
+        let jwks_read = store.read().await;
+        assert!(
+            jwks_read.contains_key("key-2") && !jwks_read.contains_key("key-1"),
+            "键表应换到 key-2"
+        );
+        drop(jwks_read);
+
+        // 端点坏掉 → 刷新失败保旧表（key-2 仍在，验签不中断）
+        let dead = refresh_jwks_once(&client, "http://127.0.0.1:1/jwks", &store).await;
+        assert!(!dead, "失败保旧表");
+        assert!(store.read().await.contains_key("key-2"), "旧表未被清空");
     }
 
     #[test]
