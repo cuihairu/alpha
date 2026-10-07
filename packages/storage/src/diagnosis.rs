@@ -402,6 +402,65 @@ fn builtin_rules() -> Vec<DiagnosisRule> {
             runbook_url: Some("https://wiki.company.com/ops/realtime-gap".to_string()),
         },
 
+        // ===== 采集层规则（L504 源健康面，告警名经 alert-webhook 富化）=====
+        DiagnosisRule {
+            id: "COL-001".to_string(),
+            name: "采集源降级（连败 1..=3）".to_string(),
+            description: "数据源连续失败但未断绝，gauge alpha_collector_source_health=2；调度仍按 cron 重试，失败原因在 /sources/health 的 last_error".to_string(),
+            alert_patterns: vec!["CollectorSourceDegraded".to_string()],
+            required_metric_anomalies: vec![MetricAnomalyType::Drop],
+            log_patterns: vec!["task failed".to_string(), "execute".to_string(), "error".to_string()],
+            trace_indicators: vec![],
+            root_cause_category: RootCauseCategory::DependencyDegraded,
+            base_confidence: 70,
+            suggested_actions: vec![
+                SuggestedAction {
+                    action_type: ActionType::CheckDependency,
+                    description: "查源健康台账定位最近失败原因与时间（三态/连败计数/last_error 同屏）".to_string(),
+                    command: Some("curl -s http://localhost:8083/sources/health".to_string()),
+                    priority: ActionPriority::High,
+                    estimated_downtime_secs: None,
+                },
+                SuggestedAction {
+                    action_type: ActionType::ReviewLogs,
+                    description: "查原始响应归档（开启 ALPHA_COLLECTOR_RAW_ARCHIVE_URL 时 raw/{日期}/{task_id}/）甄别内容改版还是网络抖动".to_string(),
+                    command: Some("docker logs alpha-collector --since 30m".to_string()),
+                    priority: ActionPriority::Medium,
+                    estimated_downtime_secs: None,
+                },
+            ],
+            runbook_url: Some("docs/alerting-and-diagnosis.md".to_string()),
+        },
+
+        DiagnosisRule {
+            id: "COL-002".to_string(),
+            name: "采集源中断（连败 >3）".to_string(),
+            description: "数据源持续失败超过阈值，gauge=3，产出已中断；常见根因：源站宕机/被限频封禁/页面改版致解析器失效".to_string(),
+            alert_patterns: vec!["CollectorSourceDown".to_string()],
+            required_metric_anomalies: vec![MetricAnomalyType::Zero],
+            log_patterns: vec!["task failed".to_string(), "timeout".to_string(), "connection refused".to_string()],
+            trace_indicators: vec![],
+            root_cause_category: RootCauseCategory::DownstreamFailure,
+            base_confidence: 85,
+            suggested_actions: vec![
+                SuggestedAction {
+                    action_type: ActionType::CheckNetwork,
+                    description: "直接探数据源 URL 甄别可达性（连通但解析失败=改版；拒绝/超时=封禁或宕机）".to_string(),
+                    command: Some("curl -s -o /dev/null -w '%{http_code}' <数据源URL>".to_string()),
+                    priority: ActionPriority::Immediate,
+                    estimated_downtime_secs: None,
+                },
+                SuggestedAction {
+                    action_type: ActionType::Custom,
+                    description: "改版则修任务模板解析器；封禁则调模板重试参数或换源；确认短期不恢复可 POST /tasks/:id/cancel 停调度止血".to_string(),
+                    command: None,
+                    priority: ActionPriority::High,
+                    estimated_downtime_secs: None,
+                },
+            ],
+            runbook_url: Some("docs/alerting-and-diagnosis.md".to_string()),
+        },
+
         // ===== 基础设施规则 =====
         DiagnosisRule {
             id: "INFRA-001".to_string(),
@@ -861,6 +920,36 @@ mod tests {
         assert_eq!(report.matched_rules[0].rule_id, "GW-004");
         assert_eq!(report.matched_rules[0].confidence_contribution, 75);
         assert_eq!(report.root_cause.category, RootCauseCategory::CapacityLimit);
+    }
+
+    #[test]
+    fn engine_matches_collector_source_rules_without_evidence() {
+        // L504 源健康两档告警（COL-001/002）：无证据按 base 置信度入册，
+        // 根因分类随档位区分（降级=依赖劣化、中断=下游故障）
+        let engine = DiagnosisEngine::new();
+
+        let mut degraded = sample_request();
+        degraded.alert_name = "CollectorSourceDegraded".to_string();
+        let report = engine.diagnose(&degraded, vec![], vec![], vec![]);
+        assert_eq!(report.matched_rules.len(), 1);
+        assert_eq!(report.matched_rules[0].rule_id, "COL-001");
+        assert_eq!(report.matched_rules[0].confidence_contribution, 70);
+        assert_eq!(
+            report.root_cause.category,
+            RootCauseCategory::DependencyDegraded
+        );
+
+        let mut down = sample_request();
+        down.alert_name = "CollectorSourceDown".to_string();
+        let report = engine.diagnose(&down, vec![], vec![], vec![]);
+        assert_eq!(report.matched_rules.len(), 1);
+        assert_eq!(report.matched_rules[0].rule_id, "COL-002");
+        assert_eq!(report.matched_rules[0].confidence_contribution, 85);
+        assert_eq!(
+            report.root_cause.category,
+            RootCauseCategory::DownstreamFailure
+        );
+        assert!(!report.recommended_actions.is_empty());
     }
 
     #[test]

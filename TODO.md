@@ -441,7 +441,7 @@
 - [x] 开发多数据源适配器（API、网页、FTP、文件推送）
 - [x] 实现数据质量校验、清洗和标准化流程
 - [x] 构建采集状态监控和自动故障恢复机制
-- [x] 数据源健康面（L504，✅ 2026-10-07）：SourceHealthTracker 台账（成功清零连败/失败累计+错误截断 200 字符）→ 三态推导 unknown/healthy/degraded（连败 1..=3）/down（>3）+ `GET /sources/health`（任务表 ∪ 台账并集，从未执行补 unknown；删除任务同摘台账）+ gauge `alpha_collector_source_health{task}`（0/1/2/3）+ 告警两档 CollectorSourceDegraded（≥2 持续 5m warning）/CollectorSourceDown（≥3 持续 10m critical）。health_check 落法=执行结果推导而非模板声明（SourceDefinition 收敛方向末位字段，数据源健康本质是任务能否持续产出解析成功结果，声明式字段制造双源真相）；边界：诊断知识库未收录两条新告警（人工处置足够，登记 docs/alerting-and-diagnosis.md §6.3）。collector 85 测试绿（+5）。
+- [x] 数据源健康面（L504，✅ 2026-10-07）：SourceHealthTracker 台账（成功清零连败/失败累计+错误截断 200 字符）→ 三态推导 unknown/healthy/degraded（连败 1..=3）/down（>3）+ `GET /sources/health`（任务表 ∪ 台账并集，从未执行补 unknown；删除任务同摘台账）+ gauge `alpha_collector_source_health{task}`（0/1/2/3）+ 告警两档 CollectorSourceDegraded（≥2 持续 5m warning）/CollectorSourceDown（≥3 持续 10m critical）。health_check 落法=执行结果推导而非模板声明（SourceDefinition 收敛方向末位字段，数据源健康本质是任务能否持续产出解析成功结果，声明式字段制造双源真相）；边界：诊断知识库未收录两条新告警——已于同日闭合（COL-001/002 入 builtin 规则，降级=依赖劣化 70 分/中断=下游故障 85 分，11 条告警全部有规则，见 docs/alerting-and-diagnosis.md §6.3）。collector 85 测试绿（+5）。
 
 ## 存储与数据处理
 - [x] 集成 SQLx + TimescaleDB 实现时序数据存储
