@@ -21,9 +21,6 @@ pub mod source_scheduler;
 // 限流和代理模块
 pub mod rate_limiter;
 
-// 监控模块
-pub mod metrics;
-
 // 存储层模块
 pub mod storage;
 
@@ -66,11 +63,6 @@ pub use source_scheduler::{
 pub use rate_limiter::{
     DomainRateLimiter, MultiLevelRateLimiter, ProxyConfig, ProxyPool, ProxyStatus, ProxyType,
     RateLimiterConfig, RateLimiterFactory, SlidingWindowRateLimiter, TokenBucketRateLimiter,
-};
-
-// 重新导出监控模块
-pub use metrics::{
-    CollectorMetrics, ComponentHealth, HealthCheckResult, HealthChecker, HealthStatus, RequestTimer,
 };
 
 // 重新导出存储层

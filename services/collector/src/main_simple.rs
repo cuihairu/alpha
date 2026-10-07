@@ -952,8 +952,9 @@ path = "main.rs"
 }
 
 /// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
-/// install 全局接管 metrics 宏，后续复用渲染；CollectorMetrics 的宏指标
-/// 由此进入 /metrics）
+/// install 全局接管 metrics 宏，后续复用渲染；collector 指标面是单一宏
+/// 世界：`alpha_collector_*` 全部经宏进入 /metrics，prometheus crate 自
+/// 带 Registry 的第二世界已随 CollectorMetrics 死码移除，勿再引入）
 fn global_metrics_handle() -> &'static PrometheusHandle {
     static HANDLE: std::sync::OnceLock<PrometheusHandle> = std::sync::OnceLock::new();
     HANDLE.get_or_init(|| {

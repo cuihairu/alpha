@@ -22,10 +22,6 @@ pub use crate::rate_limiter::{
     RateLimiterConfig, RateLimiterFactory, SlidingWindowRateLimiter, TokenBucketRateLimiter,
 };
 
-pub use crate::metrics::{
-    CollectorMetrics, ComponentHealth, HealthCheckResult, HealthChecker, HealthStatus, RequestTimer,
-};
-
 pub use crate::storage::{
     PostgresConfig, RedisConfig, StorageConfig, StorageError, StorageLayer, StorageLayerHandle,
 };
