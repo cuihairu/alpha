@@ -60,15 +60,20 @@ pub fn volatility_annualized(returns: &[f64], periods_per_year: f64) -> Option<f
 }
 
 /// 历史在险价值（Historical VaR）：给定置信度的单期分位亏损，
-/// 返回正数（亏损幅度），如 0.03 = 单期 3% VaR
+/// 返回正数（亏损幅度），如 0.03 = 单期 3% VaR。
+///
+/// 口径：置信度 c 下「亏损超过 VaR 的概率 ≤ 1-c」，即收益升序
+/// 分位的 (1-c) 位取负（等价于损失分布的 c 分位）。取 `q(c)`
+/// 是收益的乐观端，截断后几乎恒为 0——proptest
+/// `var_monotone_in_confidence` 抓出的方向反转，勿回退。
 pub fn historical_var(returns: &[f64], confidence: f64) -> Option<f64> {
     if returns.is_empty() || !(0.0..1.0).contains(&confidence) {
         return None;
     }
     let mut sorted = returns.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    // 线性插值分位数：loss = -q(confidence)，q 为该置信度的收益分位
-    let q = quantile(&sorted, confidence)?;
+    // 线性插值分位数：loss = -q(1-confidence)，收益 (1-c) 分位在亏损侧
+    let q = quantile(&sorted, 1.0 - confidence)?;
     Some((-q).max(0.0))
 }
 
@@ -268,14 +273,19 @@ mod tests {
 
     #[test]
     fn var_is_confidence_quantile_of_losses() {
-        // 100 期收益，95% 分位约 -2%；手造确定性序列验证插值
+        // 100 期收益铺满 -0.05..0.049，手造确定性序列验证插值：
+        // q(0.05) 落在 sorted[4]..sorted[5]（亏损侧）→ VaR(0.95) = 0.04505
         let returns: Vec<f64> = (0..100).map(|i| (i as f64 - 50.0) / 1000.0).collect();
-        // 范围 -0.05..0.049，95% 分位在 -0.05 + 0.95*0.099 ≈ 0.0441 → VaR=max(0, -x)
         let var95 = historical_var(&returns, 0.95).unwrap();
         let mut sorted = returns.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let expect = -(sorted[94] * (1.0 - 0.94) + sorted[95] * 0.94);
-        assert!((var95 - expect.max(0.0)).abs() < 1e-12);
+        let expect = -(sorted[4] * (1.0 - 0.95) + sorted[5] * 0.95);
+        assert!(expect > 0.0, "5% 分位在亏损侧，否则测试失去断言力");
+        assert!((var95 - expect).abs() < 1e-12);
+        assert!(var95 > 0.0, "VaR 是正数亏损幅度");
+        // 单调：置信度越高分位越深
+        let var99 = historical_var(&returns, 0.99).unwrap();
+        assert!(var99 > var95);
         assert!(historical_var(&returns, 1.0).is_none());
     }
 
@@ -363,8 +373,7 @@ mod tests {
 
     #[test]
     fn risk_report_aggregates() {
-        // 阴跌序列：3 点样本的 95% 分位落在负收益区 → VaR > 0
-        // （正负混合的极小样本 95% 分位常落到正侧，VaR 恒 0，不构成断言面）
+        // 阴跌序列：95% 分位（收益 5% 位）落在亏损侧 → VaR > 0
         let equity = [100.0, 99.0, 98.0, 97.0];
         let returns = [-0.01, -0.0101, -0.0102];
         let r = RiskReport::compute(&equity, &returns, 0.0, 252.0);
