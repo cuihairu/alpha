@@ -58,6 +58,7 @@ use tower_http::{
 
 mod grpc;
 mod outlier;
+mod query_udfs;
 mod sequence_gap;
 mod settings;
 mod source_divergence;
@@ -274,9 +275,13 @@ impl AppState {
     }
 
     async fn register_custom_functions(&self) -> anyhow::Result<()> {
-        // 实际项目中在此注册自定义 UDF/UDAF。
-        // 目前我们只记录日志以确保 DataFusion 会话可正常工作。
-        tracing::info!("DataFusion session ready; custom UDF registration placeholder");
+        // /query 自定义聚合面：vwap/range_pct/avg_spread（query_udfs.rs），
+        // 注册后 SQL 面（含网关反代）即可直接调用。
+        query_udfs::register(&self.session);
+        tracing::info!(
+            functions = "vwap,range_pct,avg_spread",
+            "DataFusion custom aggregate functions registered"
+        );
         Ok(())
     }
 
@@ -2220,6 +2225,81 @@ mod tests {
         assert_eq!(response.data[0]["symbol"], "AAPL");
         assert_eq!(response.data[0]["max_price"], 102.0);
         assert_eq!(response.data[0]["total_volume"], 30);
+    }
+
+    /// /query 自定义聚合函数面（query_udfs.rs）：注册后经 execute_query
+    /// 对真实 market_data 列型算出 vwap/range_pct/avg_spread 三值。
+    #[tokio::test]
+    async fn execute_query_supports_custom_aggregate_udfs() {
+        let state = Arc::new(AppState::new(test_config()).await);
+        state.register_custom_functions().await.unwrap();
+        let now = Utc::now();
+
+        state
+            .storage
+            .add_market_data_batch(&[
+                MarketData {
+                    symbol: "AAPL".to_string(),
+                    timestamp: now,
+                    price: 100.0,
+                    volume: 10,
+                    bid: Some(99.5),
+                    ask: Some(100.5),
+                    open: None,
+                    high: None,
+                    low: None,
+                },
+                MarketData {
+                    symbol: "AAPL".to_string(),
+                    timestamp: now + Duration::minutes(1),
+                    price: 102.0,
+                    volume: 20,
+                    bid: Some(101.5),
+                    ask: Some(102.5),
+                    open: None,
+                    high: None,
+                    low: None,
+                },
+                MarketData {
+                    symbol: "AAPL".to_string(),
+                    timestamp: now + Duration::minutes(2),
+                    price: 95.0,
+                    volume: 0, // 零量行不改 vwap 权重
+                    bid: Some(100.0),
+                    ask: Some(101.2),
+                    open: None,
+                    high: None,
+                    low: None,
+                },
+            ])
+            .await
+            .unwrap();
+
+        let Json(response) = execute_query(
+            State(state),
+            Json(QueryRequest {
+                query:
+                    "SELECT symbol, vwap(price, volume) AS vwap, range_pct(price) AS range_pct, \
+                        avg_spread(bid, ask) AS spread FROM market_data GROUP BY symbol"
+                        .to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(response.success);
+        assert_eq!(response.row_count, 1);
+        let row = &response.data[0];
+        assert_eq!(row["symbol"], "AAPL");
+        // vwap = (100×10 + 102×20 + 95×0) / 30 = 3040/30
+        let vwap = row["vwap"].as_f64().unwrap();
+        assert!((vwap - 3040.0 / 30.0).abs() < 1e-9);
+        // 振幅 = (102−95)/95×100
+        let range_pct = row["range_pct"].as_f64().unwrap();
+        assert!((range_pct - 7.0 / 95.0 * 100.0).abs() < 1e-9);
+        // 价差均值 = (1.0 + 1.0 + 1.2) / 3
+        let spread = row["spread"].as_f64().unwrap();
+        assert!((spread - 3.2 / 3.0).abs() < 1e-9);
     }
 
     fn quote_envelope(payload: serde_json::Value) -> StreamEnvelope {

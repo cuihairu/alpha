@@ -8,7 +8,7 @@ data-engine（`:8081`）承载行情数据 REST 面；第三方两条接入路�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/query` | DataFusion SQL（market_data 表） |
+| POST | `/query` | DataFusion SQL（market_data 表；自定义聚合函数见 §5） |
 | GET | `/stocks/:symbol/history` | 历史序列 JSON（`?days=&limit=`，limit 保留最新窗口） |
 | GET | `/stocks/:symbol/history.csv` | 同源 CSV 导出（第三方表格/ETL 消费） |
 | GET | `/stocks/:symbol/indicators` | 指标快照（RSI/SMA/MACD…参数可选） |
@@ -58,3 +58,22 @@ data-engine 面，限流/TLS 归 L486 / L485。
 - **TLS**：直连路径默认明文（内网/反代终止 TLS 部署形态），服务端
   TLS 归 L485；
 - **gRPC 第三方面**：当前内部契约，未纳入对第三方承诺面。
+
+## 5. /query 自定义聚合函数
+
+`market_data` 表除 DataFusion 内置函数外，data-engine 启动时注册三个
+聚合函数（`services/data-engine/src/query_udfs.rs`）：
+
+| 函数 | 语义 | 空值/边界 |
+|---|---|---|
+| `vwap(price, volume)` | 成交量加权均价 Σ(p·v)/Σ(v) | price 或 volume 为 NULL 的行跳过；Σv=0 → NULL |
+| `range_pct(price)` | 区间振幅 (max−min)/min×100（百分数） | 无有效行或 min≤0 → NULL |
+| `avg_spread(bid, ask)` | 平均买卖价差 mean(ask−bid) | bid/ask 任一为 NULL 的行跳过；无有效行 → NULL |
+
+```bash
+curl -s -X POST http://<engine>:8081/query \
+  -H 'Content-Type: application/json' -H 'X-Api-Key: third-party-key-a' \
+  -d '{"query":"SELECT symbol, vwap(price, volume) AS vwap, range_pct(price) AS range_pct FROM market_data GROUP BY symbol"}'
+```
+
+三者均为聚合（分组内行序不影响结果）；返回 NULL 时 JSON 面为 `null`。
