@@ -2068,8 +2068,10 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
-        // 运维面豁免：无凭据的存活探测照常
-        let res = request(on, "/health", None).await.unwrap();
+        // 运维面豁免：无凭据的存活探测与抓取器照常
+        let res = request(on.clone(), "/health", None).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let res = request(on, "/metrics", None).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
     }
 
