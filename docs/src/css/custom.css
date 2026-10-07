@@ -270,6 +270,13 @@
   --alpha-dark: #eceff1;
 }
 
+/* 实心主按钮类内重定义了按钮变量，html 层变量盖不到，须类选择器直击：
+   亮档 #64b5f6 配白字约 2:1 不达 AA，换深蓝底白字 */
+[data-theme='dark'] .button--primary {
+  --ifm-button-background-color: #0d47a1;
+  --ifm-button-border-color: #0d47a1;
+}
+
 [data-theme='dark'] .markdown th,
 [data-theme='dark'] .alpha-stat-item,
 [data-theme='dark'] .theme-doc-sidebar-item-link--active {
@@ -369,4 +376,12 @@
 .alpha-stat-label {
   font-size: 0.9rem;
   opacity: 0.9;
+}
+/* 标题一律纯品牌色:禁文字渐变(background-clip:text / text-fill 透明)——
+   首页与正文大标题都走实色,模板自带的渐变铺字不进来 */
+h1, h2, h3, .navbar__title {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  -webkit-text-fill-color: currentColor;
 }
