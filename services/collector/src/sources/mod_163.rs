@@ -3,12 +3,12 @@
 //! 提供网易财经的股票行情数据获取
 
 use super::{
-    CrawlerConfig, CrawlerError, CrawlerResult, DataSource, KlineData, KlineType, Market,
-    RealtimeQuote, StockInfo,
+    CrawlerConfig, CrawlerError, CrawlerResult, DataSource, HeaderRotator, KlineData, KlineType,
+    Market, RealtimeQuote, StockInfo,
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use reqwest::Client;
+use reqwest::{Client, RequestBuilder};
 use std::time::Duration;
 
 /// 网易财经 API 基础 URL
@@ -19,6 +19,7 @@ const NETEASE_DATA_URL: &str = "https://quotes.money.126.net";
 pub struct Netease163Source {
     client: Client,
     config: CrawlerConfig,
+    rotator: HeaderRotator,
 }
 
 impl Netease163Source {
@@ -40,17 +41,32 @@ impl Netease163Source {
 
         let client = builder.build().unwrap_or_else(|_| Client::new());
 
-        Self { client, config }
+        Self {
+            client,
+            config,
+            rotator: HeaderRotator::default(),
+        }
     }
 
     /// 构建请求头
     fn build_headers() -> Vec<(&'static str, &'static str)> {
         vec![
             ("Accept", "application/json, text/plain, */*"),
-            ("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
             ("Referer", "https://money.163.com/"),
             ("Connection", "keep-alive"),
         ]
+    }
+
+    /// 抗封请求头（architecture.md 抗封策略）：UA 与 Accept-Language
+    /// 每请求轮换；config.user_agent 显式给定时不轮换 UA（定向伪装
+    /// 优先）。Referer 等源内语义头仍走 build_headers 静态池。
+    fn apply_anti_block_headers(&self, request: RequestBuilder) -> RequestBuilder {
+        request
+            .header(
+                "User-Agent",
+                self.rotator.user_agent(self.config.user_agent.as_deref()),
+            )
+            .header("Accept-Language", self.rotator.accept_language())
     }
 
     /// 格式化股票代码为网易格式
@@ -177,9 +193,7 @@ impl DataSource for Netease163Source {
         for (key, value) in Self::build_headers() {
             request = request.header(key, value);
         }
-        if let Some(ref ua) = self.config.user_agent {
-            request = request.header("User-Agent", ua);
-        }
+        request = self.apply_anti_block_headers(request);
 
         let response = request.send().await?;
 
@@ -225,9 +239,7 @@ impl DataSource for Netease163Source {
         for (key, value) in Self::build_headers() {
             request = request.header(key, value);
         }
-        if let Some(ref ua) = self.config.user_agent {
-            request = request.header("User-Agent", ua);
-        }
+        request = self.apply_anti_block_headers(request);
 
         let response = request.send().await?;
 
@@ -281,9 +293,7 @@ impl DataSource for Netease163Source {
         for (key, value) in Self::build_headers() {
             request = request.header(key, value);
         }
-        if let Some(ref ua) = self.config.user_agent {
-            request = request.header("User-Agent", ua);
-        }
+        request = self.apply_anti_block_headers(request);
 
         let response = request.send().await?;
 

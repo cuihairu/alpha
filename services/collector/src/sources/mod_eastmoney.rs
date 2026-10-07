@@ -3,12 +3,12 @@
 //! 提供东方财富网的股票行情数据获取
 
 use super::{
-    CrawlerConfig, CrawlerError, CrawlerResult, DataSource, KlineData, KlineType, Market,
-    RealtimeQuote, StockInfo,
+    CrawlerConfig, CrawlerError, CrawlerResult, DataSource, HeaderRotator, KlineData, KlineType,
+    Market, RealtimeQuote, StockInfo,
 };
 use async_trait::async_trait;
 use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
-use reqwest::Client;
+use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -20,6 +20,7 @@ const EASTMONEY_PUSH_BASE: &str = "https://push2his.eastmoney.com";
 pub struct EastmoneySource {
     client: Client,
     config: CrawlerConfig,
+    rotator: HeaderRotator,
 }
 
 impl EastmoneySource {
@@ -41,17 +42,32 @@ impl EastmoneySource {
 
         let client = builder.build().unwrap_or_else(|_| Client::new());
 
-        Self { client, config }
+        Self {
+            client,
+            config,
+            rotator: HeaderRotator::default(),
+        }
     }
 
     /// 构建请求头
     fn build_headers() -> Vec<(&'static str, &'static str)> {
         vec![
             ("Accept", "application/json"),
-            ("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
             ("Referer", "https://quote.eastmoney.com/"),
             ("Connection", "keep-alive"),
         ]
+    }
+
+    /// 抗封请求头（architecture.md 抗封策略）：UA 与 Accept-Language
+    /// 每请求轮换；config.user_agent 显式给定时不轮换 UA（定向伪装
+    /// 优先）。Referer 等源内语义头仍走 build_headers 静态池。
+    fn apply_anti_block_headers(&self, request: RequestBuilder) -> RequestBuilder {
+        request
+            .header(
+                "User-Agent",
+                self.rotator.user_agent(self.config.user_agent.as_deref()),
+            )
+            .header("Accept-Language", self.rotator.accept_language())
     }
 
     /// 格式化股票代码为东方财富格式
@@ -316,9 +332,7 @@ impl DataSource for EastmoneySource {
         for (key, value) in Self::build_headers() {
             request = request.header(key, value);
         }
-        if let Some(ref ua) = self.config.user_agent {
-            request = request.header("User-Agent", ua);
-        }
+        request = self.apply_anti_block_headers(request);
 
         let response = request.send().await?;
 
@@ -369,9 +383,7 @@ impl DataSource for EastmoneySource {
         for (key, value) in Self::build_headers() {
             request = request.header(key, value);
         }
-        if let Some(ref ua) = self.config.user_agent {
-            request = request.header("User-Agent", ua);
-        }
+        request = self.apply_anti_block_headers(request);
 
         let response = request.send().await?;
 
@@ -467,9 +479,7 @@ impl DataSource for EastmoneySource {
         for (key, value) in Self::build_headers() {
             request = request.header(key, value);
         }
-        if let Some(ref ua) = self.config.user_agent {
-            request = request.header("User-Agent", ua);
-        }
+        request = self.apply_anti_block_headers(request);
 
         let response = request.send().await?;
 
@@ -581,9 +591,7 @@ impl DataSource for EastmoneySource {
         for (key, value) in Self::build_headers() {
             request = request.header(key, value);
         }
-        if let Some(ref ua) = self.config.user_agent {
-            request = request.header("User-Agent", ua);
-        }
+        request = self.apply_anti_block_headers(request);
 
         let response = request.send().await?;
 

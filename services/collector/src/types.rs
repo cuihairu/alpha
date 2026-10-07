@@ -1,6 +1,7 @@
 //! 数据收集器类型定义
 
 use chrono::{DateTime, Utc};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -561,6 +562,35 @@ pub enum BackoffStrategy {
     ExponentialWithJitter,
 }
 
+impl BackoffStrategy {
+    /// 第 `attempt` 次重试（从 1 计）前的等待毫秒数，以 `max_delay_ms`
+    /// 封顶（0 = 不封顶）。Fixed 恒为基准值；Linear 按次数线性递增；
+    /// Exponential 逐次翻倍（首次重试 = 基准值）；ExponentialWithJitter
+    /// 在指数值上叠加 uniform(0, 50%) 随机量，令重试节奏不可预测（抗封）。
+    /// `attempt` 为 0 视同 1。
+    pub fn delay_ms(&self, base_delay_ms: u64, attempt: u32, max_delay_ms: u64) -> u64 {
+        let capped = |v: u64| {
+            if max_delay_ms > 0 {
+                v.min(max_delay_ms)
+            } else {
+                v
+            }
+        };
+        let n = attempt.max(1);
+        // 指数/抖动分支共用 base × 2^(n-1)（首次重试 = 基准值，之后翻倍）
+        let exponential = base_delay_ms.saturating_mul(2u64.saturating_pow(n - 1));
+        match self {
+            Self::Fixed => capped(base_delay_ms),
+            Self::Linear => capped(base_delay_ms.saturating_mul(u64::from(n))),
+            Self::Exponential => capped(exponential),
+            Self::ExponentialWithJitter => {
+                let jitter = (rand::thread_rng().gen_range(0.0..=0.5) * exponential as f64) as u64;
+                capped(exponential.saturating_add(jitter))
+            }
+        }
+    }
+}
+
 /// 重试条件
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RetryCondition {
@@ -1029,4 +1059,56 @@ pub enum ResearchType {
     ValuationAnalysis,
     /// 风险评估
     RiskAssessment,
+}
+
+#[cfg(test)]
+mod backoff_tests {
+    use super::*;
+
+    #[test]
+    fn fixed_is_constant_and_capped() {
+        assert_eq!(BackoffStrategy::Fixed.delay_ms(500, 1, 0), 500);
+        assert_eq!(BackoffStrategy::Fixed.delay_ms(500, 7, 0), 500);
+        assert_eq!(BackoffStrategy::Fixed.delay_ms(500, 1, 200), 200);
+    }
+
+    #[test]
+    fn linear_grows_by_attempt() {
+        assert_eq!(BackoffStrategy::Linear.delay_ms(100, 1, 0), 100);
+        assert_eq!(BackoffStrategy::Linear.delay_ms(100, 3, 0), 300);
+        assert_eq!(BackoffStrategy::Linear.delay_ms(100, 99, 250), 250);
+    }
+
+    #[test]
+    fn exponential_doubles_from_base() {
+        assert_eq!(BackoffStrategy::Exponential.delay_ms(1000, 1, 0), 1000);
+        assert_eq!(BackoffStrategy::Exponential.delay_ms(1000, 2, 0), 2000);
+        assert_eq!(BackoffStrategy::Exponential.delay_ms(1000, 4, 0), 8000);
+        // 巨大 attempt 不溢出，被 max_delay 封顶
+        assert_eq!(
+            BackoffStrategy::Exponential.delay_ms(1000, 40, 60_000),
+            60_000
+        );
+    }
+
+    #[test]
+    fn jitter_stays_within_half_of_exponential() {
+        for attempt in 1..=4u32 {
+            let exp = BackoffStrategy::Exponential.delay_ms(1000, attempt, 0);
+            for _ in 0..64 {
+                let d = BackoffStrategy::ExponentialWithJitter.delay_ms(1000, attempt, 0);
+                assert!(
+                    (exp..=exp + exp / 2).contains(&d),
+                    "attempt {attempt}: {d} 不在 [{exp}, {}] 内",
+                    exp + exp / 2
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn attempt_zero_treated_as_first_retry() {
+        assert_eq!(BackoffStrategy::Exponential.delay_ms(1000, 0, 0), 1000);
+        assert_eq!(BackoffStrategy::Linear.delay_ms(1000, 0, 0), 1000);
+    }
 }

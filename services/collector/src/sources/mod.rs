@@ -6,11 +6,13 @@ pub mod mod_163;
 pub mod mod_eastmoney;
 pub mod mod_sina;
 pub mod mod_tencent;
+pub mod ua_rotation;
 
 pub use mod_163::Netease163Source;
 pub use mod_eastmoney::EastmoneySource;
 pub use mod_sina::SinaSource;
 pub use mod_tencent::TencentSource;
+pub use ua_rotation::HeaderRotator;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -327,7 +329,8 @@ pub struct CrawlerConfig {
     pub retry_times: usize,
     /// 重试间隔（毫秒）
     pub retry_interval: u64,
-    /// User-Agent
+    /// User-Agent：None（默认）= 每请求从轮换池取（ua_rotation.rs，
+    /// 抗封）；Some(x) = 定向伪装，恒用 x 不轮换
     pub user_agent: Option<String>,
     /// 代理配置
     pub proxy: Option<ProxyConfig>,
@@ -341,9 +344,7 @@ impl Default for CrawlerConfig {
             request_interval: 100,
             retry_times: 3,
             retry_interval: 1000,
-            user_agent: Some(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36".to_string(),
-            ),
+            user_agent: None,
             proxy: None,
         }
     }

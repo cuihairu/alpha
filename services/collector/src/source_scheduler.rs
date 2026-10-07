@@ -4,7 +4,9 @@
 
 use crate::cleaner::DataCleaner;
 use crate::sources::{DataSource, KlineType, RealtimeQuote};
+use crate::types::BackoffStrategy;
 use chrono::{DateTime, Utc};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -121,6 +123,10 @@ pub enum SourceTaskResult {
     Empty,
 }
 
+/// 重试等待封顶（毫秒）：退避增长到此为止，避免失败风暴下任务
+/// 实际被饿死
+const MAX_RETRY_DELAY_MS: u64 = 60_000;
+
 /// 调度器配置
 #[derive(Debug, Clone)]
 pub struct SourceSchedulerConfig {
@@ -130,8 +136,14 @@ pub struct SourceSchedulerConfig {
     pub max_queue_size: usize,
     /// 任务超时时间（秒）
     pub task_timeout: u64,
-    /// 任务重试间隔（毫秒）
+    /// 任务重试间隔基准值（毫秒）；实际等待按 [`BackoffStrategy`] 计算
     pub retry_interval: u64,
+    /// 重试退避策略（默认带抖动指数退避）
+    pub backoff_strategy: BackoffStrategy,
+    /// 任务派发抖动上限（毫秒）：出队后随机等待 uniform(0, cap) 再执行，
+    /// 打散同时入队任务的瞬时同源并发（抗封）；0 = 关闭。调度循环为
+    /// 串行执行，此值兼作任务间最小间隔
+    pub dispatch_jitter_ms: u64,
     /// 是否启用数据清洗
     pub enable_cleaning: bool,
 }
@@ -143,6 +155,8 @@ impl Default for SourceSchedulerConfig {
             max_queue_size: 1000,
             task_timeout: 30,
             retry_interval: 1000,
+            backoff_strategy: BackoffStrategy::ExponentialWithJitter,
+            dispatch_jitter_ms: 250,
             enable_cleaning: true,
         }
     }
@@ -331,6 +345,13 @@ impl SourceScheduler {
             };
 
             if let Some(task) = task {
+                // 派发抖动：出队后随机延迟，避免同批任务以固定节拍
+                // 打向同一数据源（抗封）
+                if self.config.dispatch_jitter_ms > 0 {
+                    let jitter = rand::thread_rng().gen_range(0..=self.config.dispatch_jitter_ms);
+                    sleep(Duration::from_millis(jitter)).await;
+                }
+
                 // 执行任务
                 self.execute_task(task).await;
             } else {
@@ -415,7 +436,13 @@ impl SourceScheduler {
             task.started_at = None;
             task.completed_at = None;
 
-            sleep(Duration::from_millis(self.config.retry_interval)).await;
+            // 退避等待后再重新入队（公式与封顶见 BackoffStrategy::delay_ms）
+            let delay = self.config.backoff_strategy.delay_ms(
+                self.config.retry_interval,
+                task.retry_count as u32,
+                MAX_RETRY_DELAY_MS,
+            );
+            sleep(Duration::from_millis(delay)).await;
 
             if let Err(e) = self.submit_task(task.clone()).await {
                 error!("Failed to re-queue task {}: {}", task_id, e);
@@ -619,6 +646,37 @@ mod tests {
 
         // 检查队列长度
         assert_eq!(scheduler.queue_length().await, 1);
+    }
+
+    #[test]
+    fn default_config_enables_anti_block_scheduling() {
+        let config = SourceSchedulerConfig::default();
+        assert_eq!(
+            config.backoff_strategy,
+            BackoffStrategy::ExponentialWithJitter
+        );
+        assert_eq!(config.dispatch_jitter_ms, 250);
+        // 确定性翻倍数学走 Exponential：第 1 次重试 = 基准值，第 3 次 = 4×
+        assert_eq!(
+            BackoffStrategy::Exponential.delay_ms(config.retry_interval, 1, 0),
+            config.retry_interval
+        );
+        assert_eq!(
+            BackoffStrategy::Exponential.delay_ms(config.retry_interval, 3, 0),
+            config.retry_interval * 4
+        );
+        // 默认的抖动策略落在 [基准值, 1.5×] 区间内
+        for _ in 0..16 {
+            let d = config
+                .backoff_strategy
+                .delay_ms(config.retry_interval, 1, 0);
+            assert!(
+                (config.retry_interval..=config.retry_interval * 3 / 2).contains(&d),
+                "抖动值 {d} 不在 [{}, {}] 内",
+                config.retry_interval,
+                config.retry_interval * 3 / 2
+            );
+        }
     }
 
     #[test]
