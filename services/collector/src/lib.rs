@@ -36,6 +36,9 @@ pub mod cron_scheduler;
 // 原始响应归档（MinIO/S3 取证底座，env 门控默认关）
 pub mod raw_archive;
 
+// 数据源健康面（L504：执行结果推导三态 + /sources/health + gauge）
+pub mod source_health;
+
 // 预导出模块
 pub mod prelude;
 

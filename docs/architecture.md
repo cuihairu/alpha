@@ -26,6 +26,10 @@ Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB
 - **刷新频率执行面**：`services/collector/src/cron_scheduler.rs`（5/6 段 cron 解析 + 每秒扫描派发，`schedule` 到期自动执行，执行中不重入）；模板校验与调度执行共用同一解析器。执行链路复用 HTTP `POST /tasks/:id/execute`。
 - **执行引擎**：多语言执行器（Python/Node/Go/Rust/Shell，`multilang_simple.rs`），默认走模板解析器（json/database 等）；Playwright 未接入。
 - **抗封策略**：可插拔代理池（`ProxyPool`，可选）、失败自动重试（jittered backoff）；UA/Headers 轮换与调度级随机延迟未实现。
+- **源健康面**：由执行结果推导三态（unknown/healthy/degraded/down，
+  连败阈值 3，`services/collector/src/source_health.rs`），`GET /sources/health`
+  + gauge `alpha_collector_source_health`（review §2.2 SourceDefinition
+  收敛方向的 health_check 位——落法为推导而非声明，避免双源真相）。
 - **产出**：结构化 JSON 写入 Redis Streams（`quotes.raw` 等）；Protobuf 仅用于 data-engine 的 gRPC 面。
 
 ### 2. 消息队列
@@ -101,5 +105,5 @@ Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB
    alert-webhook；`packages`：protocols、storage、core）。
 3. ✅ 构建采集框架（任务模板、代理池、调度）。
 4. 上线最小可用数据集（指数/主板行情 + 公告）——公告域未实现。
-5. 补齐监控与自动告警（告警 9 条规则已上线）；结合 Cloudflare Tunnel 发布外部访问
+5. 补齐监控与自动告警（告警 11 条规则已上线，含 L504 采集源健康两档）；结合 Cloudflare Tunnel 发布外部访问
    地址（未配置）。

@@ -105,6 +105,29 @@ groups:
           description: "近 1 分钟实时行情消息频率低于 1 msg/s（连接中断由 ConnectionLoss 覆盖，本规则只看存活不断流）。"
           runbook: "docs/alerting-and-diagnosis.md#realtimefeedmessagegap"
 
+      # ===== 采集源健康告警（L504，gauge: 0=unknown 1=healthy 2=degraded 3=down） =====
+      - alert: CollectorSourceDegraded
+        expr: |
+          max by (task) (alpha_collector_source_health) >= 2
+          and max by (task) (alpha_collector_source_health) < 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "采集源连续失败降级（{{ $labels.task }}）"
+          description: "任务 {{ $labels.task }} 连续失败 1-3 次（degraded）。观察即可，连续失败超阈值会升级为 Down。"
+          runbook: "docs/alerting-and-diagnosis.md#collectorsourcedegraded"
+
+      - alert: CollectorSourceDown
+        expr: max by (task) (alpha_collector_source_health) >= 3
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "采集源持续失败下线（{{ $labels.task }}）"
+          description: "任务 {{ $labels.task }} 连续失败超 3 次且持续 10 分钟（down）。排查数据源可达性与解析器，原始响应见对象存储归档。"
+          runbook: "docs/alerting-and-diagnosis.md#collectorsourcedown"
+
       # ===== Prometheus 自身（标准 up 指标，无需业务埋点） =====
       - alert: PrometheusTargetDown
         expr: up == 0

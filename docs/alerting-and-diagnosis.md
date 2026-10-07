@@ -12,7 +12,7 @@ Webhook 多渠道分发 + 诊断引擎纯函数库。Jaeger OTLP 全量 span
     → 钉钉/企微/Slack/PagerDuty（env 注入缺失则仅日志）+ 结构化日志 → Loki
 ```
 
-## 2. 规则（config/alpha-alerts.yml，9 条）
+## 2. 规则（config/alpha-alerts.yml，11 条）
 
 | 告警 | 数据源（埋点位置） |
 |---|---|
@@ -24,6 +24,8 @@ Webhook 多渠道分发 + 诊断引擎纯函数库。Jaeger OTLP 全量 span
 | DataEngineMemoryPressure | data-engine `alpha_dataengine_memory_bytes{mode}` gauge，Linux /proc（L464） |
 | RealtimeFeedConnectionLoss | realtime `alpha_realtime_feed_connected` gauge（L464） |
 | RealtimeFeedMessageGap | realtime `alpha_realtime_messages_total` counter（L464） |
+| CollectorSourceDegraded | collector `alpha_collector_source_health{task}` gauge 2 档（L504） |
+| CollectorSourceDown | collector `alpha_collector_source_health{task}` gauge 3 档（L504） |
 | PrometheusTargetDown | Prometheus 自带 `up == 0`（无需业务埋点） |
 
 硬教训（已修，勿回退）：
@@ -82,9 +84,11 @@ Webhook 多渠道分发 + 诊断引擎纯函数库。Jaeger OTLP 全量 span
 1. 通知渠道只做到 Webhook 转发层；短信/电话升级链归运维侧。
 2. `repeat_interval` 默认 4h（critical 1h）：告警风暴与打扰度的折中，
    随 on-call 制度调。
-3. 诊断引擎知识库规则覆盖现配置全部 9 条告警（2026-10 补齐
+3. 诊断引擎知识库规则覆盖 9 条基础告警（2026-10 补齐
    `GatewayShieldTriggered` → GW-004，护栏只标记不封禁、按 mode 甄别的
-   处置面入规则建议动作）；新故障模式按 `DiagnosisRule` 结构增量登记，
-   置信分人工复核。
+   处置面入规则建议动作）；L504 新增的 `CollectorSourceDegraded/Down`
+   两条未入知识库（处置建议=查数据源可达性/解析器，原始响应在归档，
+   人工处置已足够），按 `DiagnosisRule` 结构增量登记归后续；置信分
+   人工复核。
 4. alert-webhook 用 reqwest 0.12（需 rustls-tls），与网关的 0.11
    并存——服务独立构建，版本不强制统一。

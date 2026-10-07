@@ -40,6 +40,7 @@ use uuid::Uuid;
 
 use crate::multilang_simple::{CrawlerConfig, CrawlerLanguage, MultilangCrawler};
 use crate::raw_archive::RawArchiver;
+use crate::source_health::{health_state, SourceHealthEntry, SourceHealthTracker};
 use crate::sources::{
     CrawlerConfig as SourceCrawlerConfig, CrawlerError, DataSource, EastmoneySource,
 };
@@ -69,6 +70,8 @@ pub struct SimpleCollector {
     event_tx: broadcast::Sender<CollectorEvent>,
     /// 原始响应归档器（env 门控，默认 None=关闭）
     raw_archive: Option<RawArchiver>,
+    /// 数据源健康台账（L504：执行结果推导三态，/sources/health 暴露）
+    health: SourceHealthTracker,
     /// 启动时间（用于 uptime 统计）
     started_at: Instant,
 }
@@ -191,6 +194,7 @@ impl SimpleCollector {
             running_tasks: Arc::new(RwLock::new(HashMap::new())),
             crawler: Arc::new(MultilangCrawler::new(&workspace_root)),
             raw_archive: None,
+            health: SourceHealthTracker::new(),
             event_tx,
             started_at: Instant::now(),
         }
@@ -471,6 +475,8 @@ impl SimpleCollector {
                 }
 
                 if result.status == TaskStatus::Completed {
+                    // 数据源健康（L504）：解析产出成功 = 源健康，清零连败
+                    self.health.record_success(task_id);
                     let _ = self.event_tx.send(CollectorEvent::TaskCompleted {
                         task_id: task_id.to_string(),
                         result,
@@ -482,6 +488,7 @@ impl SimpleCollector {
                         .error
                         .clone()
                         .unwrap_or_else(|| "crawler execution failed".to_string());
+                    self.health.record_failure(task_id, &error);
                     let _ = self.event_tx.send(CollectorEvent::TaskFailed {
                         task_id: task_id.to_string(),
                         error,
@@ -508,6 +515,8 @@ impl SimpleCollector {
                     error: e.to_string(),
                 };
                 let _ = self.event_tx.send(failed_event);
+                // 数据源健康（L504）：执行器级失败同样计入连败
+                self.health.record_failure(task_id, &e.to_string());
 
                 error!("Task {} failed: {}", task_id, e);
                 Err(e.to_string())
@@ -877,7 +886,41 @@ path = "main.rs"
         }
         self.tasks.write().await.remove(task_id);
         self.running_tasks.write().await.remove(task_id);
+        // 健康台账同摘（残留计数会让 /sources/health 虚高）
+        self.health.remove(task_id);
         Ok(())
+    }
+
+    /// 数据源健康快照（L504）：任务表 ∪ 执行台账——从未执行的任务以
+    /// unknown 呈现，健康面是「所有已登记任务的健康视图」而非只有跑过的
+    pub async fn get_sources_health(&self) -> Vec<serde_json::Value> {
+        let tasks = self.tasks.read().await;
+        let ledger = self.health.snapshot();
+        let mut task_ids: Vec<&String> = tasks.keys().chain(ledger.keys()).collect();
+        task_ids.sort();
+        task_ids.dedup();
+
+        task_ids
+            .into_iter()
+            .map(|task_id| {
+                let entry = ledger.get(task_id);
+                let state = health_state(entry);
+                let SourceHealthEntry {
+                    consecutive_failures,
+                    last_success_at,
+                    last_failure_at,
+                    last_error,
+                } = entry.cloned().unwrap_or_default();
+                serde_json::json!({
+                    "task_id": task_id,
+                    "state": state,
+                    "consecutive_failures": consecutive_failures,
+                    "last_success_at": last_success_at,
+                    "last_failure_at": last_failure_at,
+                    "last_error": last_error,
+                })
+            })
+            .collect()
     }
 
     /// 获取任务统计
@@ -928,6 +971,7 @@ pub fn build_router(collector: Arc<SimpleCollector>) -> Router {
         .route("/tasks", post(submit_task))
         .route("/tasks/:id", get(get_task_status).delete(delete_task))
         .route("/tasks", get(list_tasks))
+        .route("/sources/health", get(get_sources_health))
         .route("/tasks/:id/cancel", post(cancel_task))
         .route("/tasks/:id/execute", post(execute_task))
         .route("/streams/quotes/publish", post(publish_quotes))
@@ -1023,6 +1067,13 @@ async fn list_tasks(State(collector): State<Arc<SimpleCollector>>) -> impl IntoR
         .collect();
 
     (StatusCode::OK, Json(task_list))
+}
+
+/// 数据源健康端点（L504）：unknown=从未执行 / healthy / degraded（连败
+/// ≤阈值）/ down（连败 >阈值）；gauge `alpha_collector_source_health`
+/// 同步维护，alert 规则按阈值比对（≥2 预警、≥3 告警）
+async fn get_sources_health(State(collector): State<Arc<SimpleCollector>>) -> impl IntoResponse {
+    (StatusCode::OK, Json(collector.get_sources_health().await))
 }
 
 /// 执行任务端点
@@ -1235,6 +1286,44 @@ mod tests {
 
         // 幂等：删不存在的仍成功
         collector.delete_task("t1").await.unwrap();
+    }
+
+    /// 数据源健康面（L504）：台账记录 → 快照并集任务表（从未执行补
+    /// unknown）；删除任务同摘台账
+    #[tokio::test]
+    async fn sources_health_merges_tasks_and_ledger() {
+        let collector = SimpleCollector::new("/tmp/test_collector_health");
+        collector
+            .tasks
+            .write()
+            .await
+            .insert("t1".into(), seeded_task("t1", None));
+        collector
+            .tasks
+            .write()
+            .await
+            .insert("t2".into(), seeded_task("t2", None));
+
+        // 从未执行：unknown
+        let snap = collector.get_sources_health().await;
+        let t2 = snap.iter().find(|e| e["task_id"] == "t2").unwrap();
+        assert_eq!(t2["state"], "unknown");
+        assert_eq!(t2["consecutive_failures"], 0);
+
+        // 失败 → degraded（含错误文本）；成功 → healthy
+        collector.health.record_failure("t1", "源超时");
+        collector.health.record_success("t2");
+        let snap = collector.get_sources_health().await;
+        let t1 = snap.iter().find(|e| e["task_id"] == "t1").unwrap();
+        assert_eq!(t1["state"], "degraded");
+        assert_eq!(t1["last_error"], "源超时");
+        let t2 = snap.iter().find(|e| e["task_id"] == "t2").unwrap();
+        assert_eq!(t2["state"], "healthy");
+
+        // 删除任务摘台账
+        collector.delete_task("t1").await.unwrap();
+        let snap = collector.get_sources_health().await;
+        assert!(snap.iter().all(|e| e["task_id"] != "t1"));
     }
 
     #[test]

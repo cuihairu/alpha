@@ -154,10 +154,11 @@ real-time-feed:8082、collector:8083 各自 `/metrics`，10s 间隔。
   `ALPHA_DATAQUALITY_DIVERGENCE_PCT` 缺省 1%，单源在报期间休眠），见
   architecture-review §5 P2
 
-告警规则 9 条（`config/alpha-alerts.yml`）：GatewayRateLimitExceeded、
+告警规则 11 条（`config/alpha-alerts.yml`）：GatewayRateLimitExceeded、
 GatewayShieldTriggered、GatewayUpstreamUnhealthy、GatewayErrorRateHigh、
 DataEngineQueryLatencyHigh、DataEngineMemoryPressure、RealtimeFeedConnectionLoss、
-RealtimeFeedMessageGap、PrometheusTargetDown。链路：Prometheus → Alertmanager
+RealtimeFeedMessageGap、CollectorSourceDegraded、CollectorSourceDown（后两条
+随 L504 源健康 gauge）、PrometheusTargetDown。链路：Prometheus → Alertmanager
 （`config/alertmanager.yml`，分组/抑制/静默在档）→ alert-webhook
 （`/health`、`/alerts`、`/alerts/critical`，渠道 env：`DINGTALK_WEBHOOK_URL`、
 `WECHAT_WEBHOOK_URL`、`SLACK_WEBHOOK_URL`、`PAGERDUTY_INTEGRATION_KEY`，缺哪个
@@ -177,6 +178,7 @@ alerting-and-diagnosis §5）。
 | 行情/查询 REST | api-gateway `/v1/*` → data-engine（`/query`、`/stocks/:symbol/history`、`/instruments` 等） | docs/market-data-api.md |
 | WebSocket | api-gateway `/ws` → real-time-feed `/ws`（版本化 Full/Delta 帧） | docs/realtime-sync-protocol.md |
 | 任务管理 | collector `GET/POST /tasks`、`GET /tasks/:id`、`DELETE /tasks/:id`（204 幂等；运行中 409）、`POST /tasks/:id/cancel`（清 schedule 不再调度；运行中任务本次跑完后停）、`POST /tasks/:id/execute`（重试语义亦由它承担——对 Failed/Cancelled 任务重跑即 retry）、`GET /stats`、`GET /events`(SSE) | 内网暴露，勿上公网 |
+| 源健康 | collector `GET /sources/health`（L504：任务表 ∪ 执行台账，三态 unknown/healthy/degraded/down + 连败计数/最近成功失败/错误文本）；gauge `alpha_collector_source_health{task}`（0/1/2/3），告警 CollectorSourceDegraded（≥2 持续 5m）/ Down（≥3 持续 10m） | 健康由执行结果推导，非模板声明 |
 | 鉴权 | api-gateway `POST /auth/token`（jwt 模式） | docs/auth.md |
 | 健康/指标 | 四服务 `/health`、`/metrics` | 本文 §5 |
 
