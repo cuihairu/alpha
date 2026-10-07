@@ -550,7 +550,7 @@ pub struct RetryPolicy {
 }
 
 /// 退避策略
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum BackoffStrategy {
     /// 固定延迟
     Fixed,
@@ -558,9 +558,14 @@ pub enum BackoffStrategy {
     Linear,
     /// 指数退避
     Exponential,
-    /// 带抖动的指数退避
+    /// 带抖动的指数退避（默认）
+    #[default]
     ExponentialWithJitter,
 }
+
+/// 退避等待统一封顶（毫秒）：调度器级与请求级重试共用，避免失败
+/// 风暴下等待无界增长
+pub const MAX_BACKOFF_DELAY_MS: u64 = 60_000;
 
 impl BackoffStrategy {
     /// 第 `attempt` 次重试（从 1 计）前的等待毫秒数，以 `max_delay_ms`

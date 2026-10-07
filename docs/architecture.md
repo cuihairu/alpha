@@ -25,7 +25,7 @@ Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB
 - **任务描述**：以 YAML/JSON 定义每个数据源（URL、请求参数、解析策略、刷新频率）。已落地：`services/collector/src/task_templates.rs`（装载/校验/转 `TaskDefinition`），`ALPHA_COLLECTOR_TASKS` 指向模板文件或目录即启动装载，示例见 `config/collector.tasks.yaml`。
 - **刷新频率执行面**：`services/collector/src/cron_scheduler.rs`（5/6 段 cron 解析 + 每秒扫描派发，`schedule` 到期自动执行，执行中不重入）；模板校验与调度执行共用同一解析器。执行链路复用 HTTP `POST /tasks/:id/execute`。
 - **执行引擎**：多语言执行器（Python/Node/Go/Rust/Shell，`multilang_simple.rs`），默认走模板解析器（json/database 等）；Playwright 未接入。
-- **抗封策略**：可插拔代理池（`ProxyPool`，可选）；UA/Headers 每请求轮换（`sources/ua_rotation.rs`，UA 池 + Accept-Language 池，四个 A 股源接线，`CrawlerConfig.user_agent` 显式给定时不轮换）；任务级重试退避（`SourceSchedulerConfig.backoff_strategy`，默认带抖动指数、60s 封顶）与派发随机抖动（`dispatch_jitter_ms`，默认 250ms，0 关闭）。
+- **抗封策略**：可插拔代理池（`ProxyPool`，可选）；UA/Headers 每请求轮换（`sources/ua_rotation.rs`，UA 池 + Accept-Language 池，四个 A 股源接线，`CrawlerConfig.user_agent` 显式给定时不轮换）；请求级重试（`send_with_retry`，网络错/5xx/429 按 `retry_times` 次数上限重试，退避走 `CrawlerConfig.backoff_strategy`，health_check 探测除外）；任务级重试退避（`SourceSchedulerConfig.backoff_strategy`，同款 `BackoffStrategy`，60s 封顶）与派发随机抖动（`dispatch_jitter_ms`，默认 250ms，0 关闭）。
 - **源健康面**：由执行结果推导三态（unknown/healthy/degraded/down，
   连败阈值 3，`services/collector/src/source_health.rs`），`GET /sources/health`
   + gauge `alpha_collector_source_health`（review §2.2 SourceDefinition

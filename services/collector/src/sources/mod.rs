@@ -14,9 +14,12 @@ pub use mod_sina::SinaSource;
 pub use mod_tencent::TencentSource;
 pub use ua_rotation::HeaderRotator;
 
+use crate::types::{BackoffStrategy, MAX_BACKOFF_DELAY_MS};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use reqwest::{RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// A 股市场类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -327,8 +330,11 @@ pub struct CrawlerConfig {
     pub request_interval: u64,
     /// 重试次数
     pub retry_times: usize,
-    /// 重试间隔（毫秒）
+    /// 重试间隔基准值（毫秒）；实际等待按 [`BackoffStrategy`] 退避
     pub retry_interval: u64,
+    /// 请求级重试退避策略（默认带抖动指数退避）
+    #[serde(default)]
+    pub backoff_strategy: BackoffStrategy,
     /// User-Agent：None（默认）= 每请求从轮换池取（ua_rotation.rs，
     /// 抗封）；Some(x) = 定向伪装，恒用 x 不轮换
     pub user_agent: Option<String>,
@@ -344,8 +350,155 @@ impl Default for CrawlerConfig {
             request_interval: 100,
             retry_times: 3,
             retry_interval: 1000,
+            backoff_strategy: BackoffStrategy::ExponentialWithJitter,
             user_agent: None,
             proxy: None,
         }
+    }
+}
+
+/// 请求级重试（`CrawlerConfig.retry_times`/`retry_interval` 转正）：
+/// 网络错误、5xx、429 按 `retry_times` 次数上限重试（含首次共
+/// retry_times+1 次尝试），等待间隔走 `backoff_strategy` 退避（基准
+/// `retry_interval`，封顶 [`MAX_BACKOFF_DELAY_MS`]）。其余 4xx 属请求
+/// 本身问题，不重试直接失败；返回的成功响应必为 2xx（调用方无需再
+/// 判状态）。health_check 探测面刻意不走此路径（快速单发语义）。
+pub(crate) async fn send_with_retry(
+    request: RequestBuilder,
+    config: &CrawlerConfig,
+) -> CrawlerResult<Response> {
+    let total_attempts = config.retry_times.saturating_add(1);
+    let mut last_err: Option<CrawlerError> = None;
+
+    for attempt in 0..total_attempts {
+        if attempt > 0 {
+            let delay = config.backoff_strategy.delay_ms(
+                config.retry_interval,
+                attempt as u32,
+                MAX_BACKOFF_DELAY_MS,
+            );
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+
+        // 每次尝试都经克隆发出（保留原件供下轮重试）；不可克隆的
+        // 请求只能力争一次直发，失败即返（GET 请求恒可克隆，此为
+        // 防御分支）
+        let sendable = match request.try_clone() {
+            Some(cloned) => cloned,
+            None => return request.send().await.map_err(CrawlerError::from),
+        };
+
+        let result = sendable.send().await;
+
+        match result {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    return Ok(resp);
+                }
+                if status.is_server_error() || status.as_u16() == 429 {
+                    // 暂时性错误：记为最后一次错误后重试
+                    last_err = Some(if status.as_u16() == 429 {
+                        CrawlerError::RateLimited
+                    } else {
+                        CrawlerError::SourceError(format!("HTTP error: {status}"))
+                    });
+                    continue;
+                }
+                // 其余 4xx/3xx：请求本身有问题，不重试
+                return Err(CrawlerError::SourceError(format!("HTTP error: {status}")));
+            }
+            Err(e) => {
+                last_err = Some(CrawlerError::from(e));
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| CrawlerError::SourceError("请求未发出".to_string())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// 极简假 HTTP 服务器：按脚本逐次返回状态码，记录收到的请求数
+    fn spawn_scripted_server(script: Vec<u16>) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_clone = hits.clone();
+        std::thread::spawn(move || {
+            for status in script {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    hits_clone.fetch_add(1, Ordering::SeqCst);
+                    let mut buf = [0u8; 4096];
+                    let _ = stream.read(&mut buf);
+                    let resp = format!(
+                        "HTTP/1.1 {status} T\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                    );
+                    let _ = stream.write_all(resp.as_bytes());
+                }
+            }
+        });
+        (format!("http://{addr}/"), hits)
+    }
+
+    fn retry_config(retry_times: usize) -> CrawlerConfig {
+        CrawlerConfig {
+            retry_times,
+            retry_interval: 1,
+            ..CrawlerConfig::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn retries_transient_5xx_then_succeeds() {
+        let (url, hits) = spawn_scripted_server(vec![500, 200]);
+        let config = retry_config(3);
+        let request = reqwest::Client::new().get(&url);
+        let resp = send_with_retry(request, &config).await.unwrap();
+        assert!(resp.status().is_success());
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn client_error_returns_without_retry() {
+        let (url, hits) = spawn_scripted_server(vec![404]);
+        let config = retry_config(3);
+        let request = reqwest::Client::new().get(&url);
+        let err = send_with_retry(request, &config).await.unwrap_err();
+        assert!(matches!(err, CrawlerError::SourceError(_)));
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn exhausts_retries_and_reports_last_error() {
+        let (url, hits) = spawn_scripted_server(vec![503, 503, 503]);
+        let config = retry_config(2);
+        let request = reqwest::Client::new().get(&url);
+        let err = send_with_retry(request, &config).await.unwrap_err();
+        assert!(matches!(err, CrawlerError::SourceError(_)));
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn rate_limited_maps_to_rate_limited_error() {
+        let (url, _) = spawn_scripted_server(vec![429]);
+        let config = retry_config(0);
+        let request = reqwest::Client::new().get(&url);
+        let err = send_with_retry(request, &config).await.unwrap_err();
+        assert!(matches!(err, CrawlerError::RateLimited));
+    }
+
+    #[tokio::test]
+    async fn connection_refused_retries_then_errors() {
+        let config = retry_config(1);
+        let request = reqwest::Client::new().get("http://127.0.0.1:1/");
+        let err = send_with_retry(request, &config).await.unwrap_err();
+        assert!(matches!(err, CrawlerError::RequestError(_)));
     }
 }

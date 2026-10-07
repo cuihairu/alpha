@@ -3,8 +3,8 @@
 //! 提供东方财富网的股票行情数据获取
 
 use super::{
-    CrawlerConfig, CrawlerError, CrawlerResult, DataSource, HeaderRotator, KlineData, KlineType,
-    Market, RealtimeQuote, StockInfo,
+    send_with_retry, CrawlerConfig, CrawlerError, CrawlerResult, DataSource, HeaderRotator,
+    KlineData, KlineType, Market, RealtimeQuote, StockInfo,
 };
 use async_trait::async_trait;
 use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
@@ -334,14 +334,7 @@ impl DataSource for EastmoneySource {
         }
         request = self.apply_anti_block_headers(request);
 
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            return Err(CrawlerError::SourceError(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
+        let response = send_with_retry(request, &self.config).await?;
 
         let text = response.text().await?;
         let quote_response: EastmoneyQuoteResponse = serde_json::from_str(&text)
@@ -385,14 +378,7 @@ impl DataSource for EastmoneySource {
         }
         request = self.apply_anti_block_headers(request);
 
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            return Err(CrawlerError::SourceError(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
+        let response = send_with_retry(request, &self.config).await?;
 
         let text = response.text().await?;
         let quote_response: EastmoneyUListResponse = serde_json::from_str(&text)
@@ -481,14 +467,7 @@ impl DataSource for EastmoneySource {
         }
         request = self.apply_anti_block_headers(request);
 
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            return Err(CrawlerError::SourceError(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
+        let response = send_with_retry(request, &self.config).await?;
 
         let text = response.text().await?;
         let kline_response: EastmoneyKlineResponse = serde_json::from_str(&text)
@@ -593,14 +572,7 @@ impl DataSource for EastmoneySource {
         }
         request = self.apply_anti_block_headers(request);
 
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            return Err(CrawlerError::SourceError(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
+        let response = send_with_retry(request, &self.config).await?;
 
         let _ = response.text().await?;
 

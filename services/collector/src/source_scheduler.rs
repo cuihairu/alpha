@@ -4,7 +4,7 @@
 
 use crate::cleaner::DataCleaner;
 use crate::sources::{DataSource, KlineType, RealtimeQuote};
-use crate::types::BackoffStrategy;
+use crate::types::{BackoffStrategy, MAX_BACKOFF_DELAY_MS};
 use chrono::{DateTime, Utc};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -122,10 +122,6 @@ pub enum SourceTaskResult {
     RealtimeQuotes(Vec<RealtimeQuote>),
     Empty,
 }
-
-/// 重试等待封顶（毫秒）：退避增长到此为止，避免失败风暴下任务
-/// 实际被饿死
-const MAX_RETRY_DELAY_MS: u64 = 60_000;
 
 /// 调度器配置
 #[derive(Debug, Clone)]
@@ -440,7 +436,7 @@ impl SourceScheduler {
             let delay = self.config.backoff_strategy.delay_ms(
                 self.config.retry_interval,
                 task.retry_count as u32,
-                MAX_RETRY_DELAY_MS,
+                MAX_BACKOFF_DELAY_MS,
             );
             sleep(Duration::from_millis(delay)).await;
 

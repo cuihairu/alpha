@@ -3,8 +3,8 @@
 //! 提供腾讯财经的股票行情数据获取
 
 use super::{
-    CrawlerConfig, CrawlerError, CrawlerResult, DataSource, HeaderRotator, KlineData, KlineType,
-    Market, RealtimeQuote, StockInfo,
+    send_with_retry, CrawlerConfig, CrawlerError, CrawlerResult, DataSource, HeaderRotator,
+    KlineData, KlineType, Market, RealtimeQuote, StockInfo,
 };
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
@@ -202,14 +202,7 @@ impl DataSource for TencentSource {
         }
         request = self.apply_anti_block_headers(request);
 
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            return Err(CrawlerError::SourceError(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
+        let response = send_with_retry(request, &self.config).await?;
 
         let text = response.text().await?;
 
@@ -233,14 +226,7 @@ impl DataSource for TencentSource {
         }
         request = self.apply_anti_block_headers(request);
 
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            return Err(CrawlerError::SourceError(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
+        let response = send_with_retry(request, &self.config).await?;
 
         let text = response.text().await?;
 
@@ -299,14 +285,7 @@ impl DataSource for TencentSource {
         }
         request = self.apply_anti_block_headers(request);
 
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            return Err(CrawlerError::SourceError(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
+        let response = send_with_retry(request, &self.config).await?;
 
         let text = response.text().await?;
 
