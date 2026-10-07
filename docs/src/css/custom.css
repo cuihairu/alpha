@@ -5,17 +5,20 @@
 
 /* 全局样式 */
 :root {
-  --ifm-color-primary: #00bcd4;
-  --ifm-color-primary-dark: #00acc1;
-  --ifm-color-primary-darker: #0097a7;
-  --ifm-color-primary-darkest: #00838f;
-  --ifm-color-primary-light: #26c6da;
-  --ifm-color-primary-lighter: #4dd0e1;
-  --ifm-color-primary-lightest: #80deea;
+  /* 单一品牌蓝（与 --alpha-primary 同源）：#1565c0 对白底 5.1:1，
+     正文链接达 WCAG AA；旧双主色（链接青 #00bcd4 2.3:1 + 组件蓝）并
+     存属模板脸，统一为一个 token 源 */
+  --ifm-color-primary: #1565c0;
+  --ifm-color-primary-dark: #0d47a1;
+  --ifm-color-primary-darker: #0b3d8f;
+  --ifm-color-primary-darkest: #0a3577;
+  --ifm-color-primary-light: #2f7cc9;
+  --ifm-color-primary-lighter: #5c9ad3;
+  --ifm-color-primary-lightest: #90bce3;
 
   /* Alpha Finance 品牌色彩 */
-  --alpha-primary: #1e88e5;
-  --alpha-secondary: #00bcd4;
+  --alpha-primary: #1565c0;
+  --alpha-secondary: #0d47a1;
   --alpha-accent: #ff6f00;
   --alpha-success: #4caf50;
   --alpha-warning: #ff9800;
@@ -32,9 +35,7 @@
 /* 导航栏样式 */
 .navbar__title {
   font-weight: 700;
-  background: linear-gradient(45deg, var(--alpha-primary), var(--alpha-secondary));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--alpha-primary);
 }
 
 .navbar__logo {
@@ -187,9 +188,10 @@
   color: var(--alpha-dark);
 }
 
-/* 页脚样式 */
+/* 页脚样式：底色用固定深色值——--alpha-dark 在暗色主题下翻转为浅色值
+   （供正文内联代码 color 用），作 footer 底色会变成亮灰底白字，破坏主题锁 */
 .footer {
-  background: linear-gradient(135deg, var(--alpha-dark), #37474f);
+  background: #263238;
   border-top: 3px solid var(--alpha-primary);
 }
 
@@ -258,10 +260,27 @@
   background-color: var(--alpha-light);
 }
 
-/* 暗色主题适配 */
+/* 暗色主题适配：品牌蓝换亮档保对比（#64b5f6 对暗底 ≈7.9:1）；
+   实底品牌色元素换深蓝底白字（浅蓝底配白字仅 1.9:1 不达标） */
 [data-theme='dark'] {
+  --ifm-color-primary: #64b5f6;
+  --alpha-primary: #64b5f6;
+  --alpha-secondary: #90caf9;
   --alpha-light: #37474f;
   --alpha-dark: #eceff1;
+}
+
+[data-theme='dark'] .markdown th,
+[data-theme='dark'] .alpha-stat-item,
+[data-theme='dark'] .theme-doc-sidebar-item-link--active {
+  background: #0d47a1;
+  color: white;
+}
+
+/* 页脚固定深色身份（footer--dark 文字是浅灰，暗色模式下 --alpha-dark
+   翻白会让页脚变浅底浅字，破主题锁也破对比度） */
+[data-theme='dark'] .footer {
+  background: #263238;
 }
 
 /* 响应式设计 */
@@ -285,21 +304,8 @@
   }
 }
 
-/* 动画效果 */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.markdown > *:first-child {
-  animation: fadeIn 0.6s ease-out;
-}
+/* 动画效果：正文随导航做整段浮入属花活，已移除——文档站的动效预算
+   留给 hover/focus 反馈即可 */
 
 /* 自定义组件样式 */
 .alpha-feature-grid {
@@ -309,12 +315,14 @@
   margin: 2rem 0;
 }
 
+/* 背景随主题（暗色写死 white 会破主题锁） */
 .alpha-feature-card {
-  background: white;
+  background: var(--ifm-background-color);
+  border: 1px solid var(--ifm-color-emphasis-200);
   border-radius: 12px;
   padding: 2rem;
   text-align: center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(38, 50, 56, 0.1);
   transition: all 0.3s ease;
 }
 
@@ -345,7 +353,7 @@
 }
 
 .alpha-stat-item {
-  background: linear-gradient(135deg, var(--alpha-primary), var(--alpha-secondary));
+  background: var(--alpha-primary);
   color: white;
   padding: 1.5rem;
   border-radius: 8px;
