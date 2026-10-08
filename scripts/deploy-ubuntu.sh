@@ -141,6 +141,20 @@ sudo -u $PROJECT_USER npm install
 sudo -u $PROJECT_USER npm run build
 cd ..
 
+# 创建环境变量文件（.env 供 clickhouse-init.sh 读取连接参数；不设服务端口/密钥——
+# 服务绑址硬编码在各 systemd 单元，网关鉴权默认关闭、无密钥消费面）
+log_info "创建环境变量文件..."
+if [ ! -f ".env" ]; then
+    sudo -u $PROJECT_USER cat > .env << EOF
+# ClickHouse 连接参数：scripts/clickhouse-init.sh 初始化时从 shell 读取
+CLICKHOUSE_HOST=localhost
+CLICKHOUSE_PORT=8123
+CLICKHOUSE_USER=admin
+CLICKHOUSE_PASSWORD=admin123
+CLICKHOUSE_DATABASE=alpha_finance
+EOF
+fi
+
 # 启动 ClickHouse
 log_info "启动 ClickHouse..."
 docker-compose up -d clickhouse
@@ -153,38 +167,10 @@ sleep 30
 log_info "初始化数据库..."
 if [ -f "scripts/clickhouse-init.sh" ]; then
     chmod +x scripts/clickhouse-init.sh
-    sudo -u $PROJECT_USER ./scripts/clickhouse-init.sh
+    # 在项目用户态加载 .env 后执行，连接参数来自 .env
+    sudo -u $PROJECT_USER bash -c 'set -a; [ -f .env ] && . ./.env; set +a; ./scripts/clickhouse-init.sh'
 else
     log_warning "ClickHouse 初始化脚本未找到，跳过初始化"
-fi
-
-# 创建环境变量文件
-log_info "创建环境变量文件..."
-if [ ! -f ".env" ]; then
-    sudo -u $PROJECT_USER cat > .env << EOF
-# 数据库配置
-CLICKHOUSE_HOST=localhost
-CLICKHOUSE_PORT=8123
-CLICKHOUSE_USER=admin
-CLICKHOUSE_PASSWORD=admin123
-CLICKHOUSE_DATABASE=alpha_finance
-
-# 服务端口
-API_GATEWAY_PORT=9080
-REAL_TIME_FEED_PORT=9081
-DATA_ENGINE_PORT=9082
-COLLECTOR_PORT=9083
-
-# Web 前端
-WEB_PORT=8080
-
-# 安全配置
-JWT_SECRET=your-super-secret-jwt-key-here-$(date +%s)
-API_SECRET_KEY=your-api-secret-key-$(date +%s)
-
-# 日志级别
-RUST_LOG=info
-EOF
 fi
 
 # 创建系统服务

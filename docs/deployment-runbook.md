@@ -34,7 +34,8 @@ api-gateway 是唯一对外 REST/WS 入口；collector 的任务管理面（`/ta
 ## 2. 容器路径：docker compose
 
 ```bash
-cp .env.example .env        # 可调端口与 ClickHouse 账密，默认值即可用
+cp .env.example .env        # compose 变量替换源：告警通道、采集模板路径、落库开关、
+                            # ClickHouse 账密（键与消费面对照见文件内注释）；默认值即可用
 docker compose up -d        # 起全部服务
 docker compose ps           # HEALTHCHECK 状态（各应用镜像探 /health）
 ```
