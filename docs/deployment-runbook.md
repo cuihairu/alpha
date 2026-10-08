@@ -113,7 +113,8 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 客户端连 `ws://host/ws?token=<jwt>` 即可）。
 
 **collector**：`ALPHA_COLLECTOR_BIND`（默认 `0.0.0.0:8083`）、
-`ALPHA_COLLECTOR_TASKS`（任务模板路径，默认 `config/collector.tasks.yaml`）、
+`ALPHA_COLLECTOR_TASKS`（任务模板路径；进程未设置即不装载，示例在
+`config/collector.tasks.yaml`，docker-compose 默认挂载该示例并置此变量指向它）、
 `ALPHA_WORKSPACE_ROOT`、`ALPHA_COLLECTOR_RAW_ARCHIVE_URL`（原始响应归档，
 形如 `s3://bucket?endpoint=http://minio:9000&access_key=..&secret_key=..`；
 未设置=关闭，默认零行为变化；设置后任务工作目录的 `raw_response.txt`/

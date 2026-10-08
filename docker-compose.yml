@@ -141,14 +141,16 @@ services:
       - "8083:8083"
     environment:
       - REDIS_URL=redis://redis:6379
-      - CLICKHOUSE_URL=http://admin:admin123@clickhouse:8123/alpha_finance
-      - CLICKHOUSE_NATIVE_URL=tcp://admin:admin123@clickhouse:9000/alpha_finance
-      - TIMESCALE_URL=postgres://postgres:postgres@timescaledb:5432/alpha_finance
+      # 任务模板装载（architecture §24）：默认挂载仓内示例模板；
+      # 宿主机可用 ALPHA_COLLECTOR_TASKS 覆写为容器内其他路径，或
+      # ALPHA_COLLECTOR_TASKS="" 置空关闭装载。CLICKHOUSE_*/TIMESCALE_URL
+      # 直通变量对 collector 无效（不消费，勿配）。
+      - ALPHA_COLLECTOR_TASKS=${ALPHA_COLLECTOR_TASKS:-/app/config/collector.tasks.yaml}
       - RUST_LOG=info
+    volumes:
+      - ./config/collector.tasks.yaml:/app/config/collector.tasks.yaml:ro
     depends_on:
       - redis
-      - timescaledb
-      - clickhouse
     networks:
       - alpha-network
     restart: unless-stopped
