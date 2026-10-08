@@ -59,6 +59,7 @@
 **建议**：将 `StreamEnvelope` 迁移至 `packages/protocols`（rest.rs 的姐妹文件 `events.rs`），`redis_streams.rs` 改为引用。`packages/protocols` 已是 wasm-clean 无锁依赖的契约层，天然是正确归宿。这是「契约与实现剥离」的最小改法，也是 §3.2 envelope 升级的前置。
 
 **问题 B**：反爬能力（proxy pool / fingerprint/UA 轮换）在 README 与代码层多处出现，但 Alpha 的差异化是**数据可靠性**。采集层按「数据源运行时」收敛（已有雏形：task templates 声明 source/url/parser/schedule + cron 执行 + 重试策略），代理池保留为可选注入，不进核心叙事。
+   〔现注（2026-10-08 拍板）：代理池/多级限流（`rate_limiter.rs`）**维持 lib 组合面、不接生产链路**。依据：①本条裁定「反爬不核心化」不变；②reqwest 0.11 proxy 挂在 Client builder 上，无 per-request 注入，真池化需源级 Client 重建或连接池作废，成本超出反爬边际收益；③UA/Accept-Language 每请求轮换、请求级重试退避、派发抖动已落（4b7e428/6ae7dd0），把「可选注入」从唯一防线降为纵深之一。`rate_limiter.rs` 保留不删（「可选组件」决议仍有效）。〕
 
 **建议**：README 技术决策中反爬段落降为「可选组件，接入时按源配置」；新采集功能围绕 SourceDefinition（type/schedule/rate_limit/retry/parser/schema/health_check）扩展，不围绕反爬扩展。
 
@@ -138,7 +139,7 @@ Timescale 保留为可选 TimescaleDB 后端（data-engine persistence 已是三
 - `dataset://{domain}/{granularity}/{version}` 概念：dataset_id + source + time_range + symbols + schema_version + checksum + created_at——回测/研究引用的是**某一版数据**而非当前表。
 - Experiment 记录（experiment_id / dataset_id+version / strategy+code_version / parameters / seed / result / created_at）：回答「为什么昨天 1.32 今天 1.17」。
 - 这两个先落**协议与登记表**（小），再落包级实现（P3）。
-  〔现注：协议与登记表已落（2026-10）——契约 `protocols/src/dataset.rs`（`DatasetDescriptor`/`ExperimentRecord`，纯 serde 加性演进）+ 登记表 `storage/src/dataset_registry.rs`（内存表 + 经 `StorageBackend` 两键快照 persist/load；数据集 id+version 不可变重复注册冲突、实验只增不改）；包级 parquet 数据集 API 面仍归 P3。〕
+  〔现注：协议与登记表已落（2026-10）——契约 `protocols/src/dataset.rs`（`DatasetDescriptor`/`ExperimentRecord`，纯 serde 加性演进）+ 登记表 `storage/src/dataset_registry.rs`（内存表 + 经 `StorageBackend` 两键快照 persist/load；数据集 id+version 不可变重复注册冲突、实验只增不改）；包级 parquet 数据集 API 面仍归 P3。2026-10-08 拍板：包级 parquet API **归 data-lake-parquet.md 的湖层工程项（L447）统一落地，不另起平行实现**——湖层已定 Bronze/Silver/Gold 分层、`trade_date` 分区与 ListingTable 读面，dataset 物理面是湖层写入面的第一批消费者；脱离湖层单做会形成「HTTP 即时导出 / 湖写 / 数据集注册」三套 parquet 写路径。现有登记表协议已覆盖「引用某一版数据」的登记语义，物理面等 L447 立项。〕
 
 ### 3.6 MCP 访问面（access 域扩展，慢启动）
 
