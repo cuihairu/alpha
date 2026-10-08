@@ -104,7 +104,10 @@ pub struct TaskTemplate {
     /// 超时秒数（>=1）
     #[serde(default)]
     pub timeout_secs: Option<u64>,
-    /// 最大重试次数（缺省 3）
+    /// 最大重试次数（缺省 3）。登记为任务元数据（写入
+    /// `TaskDefinition.retry_policy`）；执行链当前单发、不消费该值
+    /// （任务级重试不立项，见 docs/architecture.md 采集调度拍板），
+    /// 实际失败补偿走请求级重试与 cron 周期性重跑
     #[serde(default)]
     pub max_retries: Option<u32>,
     /// 同源请求间隔毫秒（>=1，缺省 1000）

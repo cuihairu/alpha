@@ -21,7 +21,7 @@ tasks:
     schedule: "0 30 9 * * 1-5"
     priority: high
     timeout_secs: 30
-    max_retries: 5
+    max_retries: 5   # 任务元数据：执行链当前单发不消费（失败补偿走请求级重试与 cron 重跑）
     request_interval_ms: 2000
     tags: [kline, daily, eastmoney]
     parser:

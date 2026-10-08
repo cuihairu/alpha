@@ -534,7 +534,9 @@ pub struct ProxyAuth {
     pub password: String,
 }
 
-/// 重试策略
+/// 重试策略（任务元数据面：随 `TaskDefinition` 登记与查询，当前执行
+/// 链单发、不据此执行重试——实际失败补偿见 architecture.md 采集调度
+/// 拍板：请求级重试退避 + cron 周期性重跑）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryPolicy {
     /// 最大重试次数
