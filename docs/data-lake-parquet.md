@@ -31,8 +31,9 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
 
 - 湖是**分析侧**层：热查询仍走 ClickHouse/TimescaleDB，不迁移不替换。
 - Silver 为首批落地层（Bronze 回放价值高但优先级低；Gold 随因子工程立项）。
-- data-engine 现有 `/clickhouse/export.parquet` 端点即未来 **lake writer 接缝**：
-  从「响应体直出」改为「分区文件落湖 + 返回清单」。
+- data-engine `/clickhouse/export.parquet` 端点即 **lake writer 接缝**（已落，
+  §9 注记）：湖启用后在即时导出返回的同时写透落湖，响应体语义不变；
+  `?from_lake=true` 走湖读旁路。
 
 ## 3. 物理布局（路径规范）
 

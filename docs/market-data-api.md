@@ -8,7 +8,7 @@ data-engine（`:8081`）承载行情数据 REST 面；第三方两条接入路�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/query` | DataFusion SQL（market_data 表；自定义聚合函数见 §5） |
+| POST | `/query` | DataFusion SQL（`market_data` 热层表；`lake_market_data` 湖历史层表随 `ALPHA__LAKE__ENABLED=true` 注册，`trade_date` 分区列可 UNION 两层；自定义聚合函数见 §5） |
 | GET | `/stocks/:symbol/history` | 历史序列 JSON（`?days=&limit=`，limit 保留最新窗口） |
 | GET | `/stocks/:symbol/history.csv` | 同源 CSV 导出（第三方表格/ETL 消费） |
 | GET | `/stocks/:symbol/indicators` | 指标快照（RSI/SMA/MACD…参数可选） |
@@ -17,7 +17,7 @@ data-engine（`:8081`）承载行情数据 REST 面；第三方两条接入路�
 | GET | `/instruments` | Instrument 目录查询（`?exchange=&type=&symbol=&q=` 组合过滤） |
 | GET | `/instruments/:id` | 单 Instrument 精确查（`cn.sse.000001` 全局键） |
 | GET | `/clickhouse/exports` | Parquet 导出清单 |
-| GET | `/clickhouse/export.parquet` | Parquet 导出下载 |
+| GET | `/clickhouse/export.parquet` | Parquet 导出下载（`?from_lake=true` 走湖读旁路，需 `ALPHA__LAKE__ENABLED=true`） |
 | GET | `/clickhouse/market-data.parquet` | 同上（back-compat 别名，保留既有链接） |
 | GET | `/health`、`/metrics` | 运维面（不受 API key 门管控） |
 
