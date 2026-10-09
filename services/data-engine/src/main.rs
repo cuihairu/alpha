@@ -43,8 +43,12 @@ use datafusion::{
         datatypes::{DataType, TimeUnit},
         record_batch::RecordBatch,
     },
-    datasource::MemTable,
-    prelude::SessionContext,
+    datasource::{
+        file_format::parquet::ParquetFormat,
+        listing::{ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl},
+        MemTable,
+    },
+    prelude::{SessionConfig, SessionContext},
 };
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde::{Deserialize, Serialize};
@@ -74,6 +78,11 @@ const RAW_QUOTES_STREAM: &str = "quotes.raw";
 const NORMALIZED_QUOTES_STREAM: &str = "quotes.normalized";
 const NORMALIZER_GROUP: &str = "data-engine-normalizer";
 const QUOTES_DLQ_STREAM: &str = "quotes.dlq";
+
+/// 湖历史层在 /query SQL 里的表名（data-lake-parquet §6；与热层 MemTable
+/// `market_data` 并存，SQL 可 UNION 两层。设计稿的 `lake.market_data` 点分名
+/// 在 DataFusion 里要建同名 schema，骨架期用平名更直白）。
+const LAKE_TABLE: &str = "lake_market_data";
 
 /// normalized 层写侧去重窗口容量（条）。按内容判重的 FIFO 窗口，
 /// 容量取「远大于单进程任何瞬时重放量」的经验值。
@@ -218,13 +227,28 @@ fn global_metrics_handle() -> &'static PrometheusHandle {
     })
 }
 
+/// 会话构造：lake 启用时关掉 `listing_table_ignore_subdirectory`——湖文件在
+/// `trade_date=` 子目录下，DF 默认忽略子目录会让 ListingTable 列不到文件
+/// （表只剩分区列）。仅影响 ListingTable 列目录面，热层 MemTable 不经此路径。
+fn build_session_context(config: &AppConfig) -> SessionContext {
+    if config.lake.enabled {
+        let cfg = SessionConfig::new().set_bool(
+            "datafusion.execution.listing_table_ignore_subdirectory",
+            false,
+        );
+        return SessionContext::new_with_config(cfg);
+    }
+    SessionContext::new()
+}
+
 impl AppState {
     async fn new(config: Arc<AppConfig>) -> Self {
         let clickhouse = initialize_clickhouse(&config.clickhouse).await;
         let persistence = initialize_persistence(&config.storage).await;
         let lake = initialize_lake(&config);
+        let session = build_session_context(&config);
         Self {
-            session: SessionContext::new(),
+            session,
             storage: Arc::new(TimeSeriesStorage::new()),
             persistence,
             seen_payloads: Arc::new(Mutex::new(RecentPayloads::with_capacity(
@@ -303,7 +327,60 @@ impl AppState {
         }
         self.session
             .register_table("market_data", Arc::new(table))?;
+
+        // 湖历史层（data-lake-parquet §6 接缝）：lake 启用时注册 ListingTable，
+        // trade_date hive 目录即分区列（裁剪靠路径，零配置）。目录不存在（尚无
+        // 落湖）静默跳过——/query 每次都重走本函数，首次写透落湖后下一查即可用；
+        // 新分区文件由 ListingTable 查询期动态列目录，注册一次即可。
+        if let Some(lake) = self.lake.as_ref() {
+            self.register_lake_listing_table(lake).await;
+        }
         Ok(())
+    }
+
+    /// 把 `{lake_root}/{layer}/{table}` 注册为 DataFusion ListingTable
+    /// （lake_market_data）。失败只告警不阻断 /query（热层 MemTable 不受影响）。
+    async fn register_lake_listing_table(&self, lake: &LakeWriter) {
+        if self.session.table_exist(LAKE_TABLE).unwrap_or(false) {
+            return;
+        }
+        let dir = lake
+            .lake_root()
+            .join(&self.config.lake.layer)
+            .join(&self.config.lake.table);
+        // 尚无任何落湖分区（表目录未建）不算错误，留给后续 refresh 再试。
+        let Ok(abs) = std::fs::canonicalize(&dir) else {
+            return;
+        };
+        let Ok(table_url) = ListingTableUrl::parse(abs.to_string_lossy()) else {
+            tracing::warn!("lake listing table path invalid: {}", abs.display());
+            return;
+        };
+        let options = ListingOptions::new(Arc::new(ParquetFormat::default()))
+            .with_file_extension(".parquet")
+            .with_table_partition_cols(vec![("trade_date".to_string(), DataType::Utf8)]);
+        let config = match ListingTableConfig::new(table_url)
+            .with_listing_options(options)
+            .infer_schema(&self.session.state())
+            .await
+        {
+            Ok(config) => config,
+            Err(err) => {
+                tracing::warn!("lake listing table schema infer failed: {}", err);
+                return;
+            }
+        };
+        match ListingTable::try_new(config) {
+            Ok(table) => match self.session.register_table(LAKE_TABLE, Arc::new(table)) {
+                Ok(_) => tracing::info!(
+                    table = LAKE_TABLE,
+                    path = %abs.display(),
+                    "lake history layer registered for /query"
+                ),
+                Err(err) => tracing::warn!("lake listing table register failed: {}", err),
+            },
+            Err(err) => tracing::warn!("lake listing table build failed: {}", err),
+        }
     }
 
     async fn seed_demo_data(&self) -> Result<(), AlphaError> {
@@ -2141,8 +2218,15 @@ mod tests {
 
     /// 手工装配AppState（clickhouse/lake 按 test 需要给定，其余走默认组件）。
     fn lake_state(lake: Option<Arc<LakeWriter>>) -> Arc<AppState> {
+        let mut config = (*test_config()).clone();
+        if lake.is_some() {
+            // 与生产装配同口径：湖启用时 /query 才会注册 ListingTable，
+            // 会话也才需要关掉子目录忽略（见 build_session_context）。
+            config.lake.enabled = true;
+        }
+        let config = Arc::new(config);
         Arc::new(AppState {
-            session: SessionContext::new(),
+            session: build_session_context(&config),
             storage: Arc::new(TimeSeriesStorage::new()),
             persistence: None,
             clickhouse: None,
@@ -2152,7 +2236,7 @@ mod tests {
             mirror_retries: Arc::new(MirrorRetryBuffer::with_capacity(MIRROR_RETRY_BUFFER_CAP)),
             indicators: TechnicalIndicators::new(),
             analysis: AnalysisEngine::new(),
-            config: test_config(),
+            config,
             metrics: global_metrics_handle().clone(),
             instruments: Arc::new(RwLock::new(seed_instruments())),
             sequence_gaps: Arc::new(SequenceGapMonitor::new()),
@@ -2533,6 +2617,95 @@ mod tests {
         assert_eq!(response.data[0]["symbol"], "AAPL");
         assert_eq!(response.data[0]["max_price"], 102.0);
         assert_eq!(response.data[0]["total_volume"], 30);
+    }
+
+    /// /query 湖历史层（data-lake-parquet §6 接缝）：落湖分区注册为
+    /// ListingTable 后 SQL 直扫（trade_date hive 目录即分区列，路径裁剪零配置），
+    /// 且可与热层 MemTable UNION 两层合扫。
+    #[tokio::test]
+    async fn execute_query_scans_lake_listing_table_and_unions_hot_layer() {
+        let dir = tempfile::tempdir().unwrap();
+        let lake = Arc::new(LakeWriter::new(dir.path(), PartitionScheme::DateOnly));
+        let state = lake_state(Some(lake.clone()));
+
+        let t = Utc::now() - Duration::days(1);
+        let bars = vec![
+            MarketBar {
+                timestamp_ms: t.timestamp_millis(),
+                symbol: "600519".to_string(),
+                open: 41.0,
+                high: 43.0,
+                low: 40.5,
+                close: 42.0,
+                volume: 12.0,
+            },
+            MarketBar {
+                timestamp_ms: t.timestamp_millis(),
+                symbol: "000001".to_string(),
+                open: 9.0,
+                high: 9.5,
+                low: 8.5,
+                close: 9.2,
+                volume: 5.0,
+            },
+        ];
+        lake.write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+        let trade_date = alpha_storage::trade_date_of(t.timestamp_millis());
+
+        let Json(response) = execute_query(
+            State(state.clone()),
+            Json(QueryRequest {
+                query: format!(
+                    "SELECT symbol, MAX(close_price) AS max_close FROM {LAKE_TABLE} \
+                     WHERE trade_date = '{trade_date}' GROUP BY symbol ORDER BY symbol"
+                ),
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(response.success, "lake query failed: {:?}", response.data);
+        assert_eq!(response.row_count, 2);
+        assert_eq!(response.data[0]["symbol"], "000001");
+        assert_eq!(response.data[0]["max_close"], 9.2);
+        assert_eq!(response.data[1]["symbol"], "600519");
+        assert_eq!(response.data[1]["max_close"], 42.0);
+
+        // 热层（内存 MemTable）与湖层 UNION 两层合扫。
+        state
+            .storage
+            .add_market_data_batch(&[MarketData {
+                symbol: "AAPL".to_string(),
+                timestamp: t,
+                price: 100.0,
+                volume: 10,
+                bid: None,
+                ask: None,
+                open: None,
+                high: None,
+                low: None,
+            }])
+            .await
+            .unwrap();
+        let Json(response) = execute_query(
+            State(state),
+            Json(QueryRequest {
+                query: format!(
+                    "SELECT COUNT(*) AS total FROM ( \
+                         SELECT symbol FROM market_data \
+                         UNION ALL \
+                         SELECT symbol FROM {LAKE_TABLE} WHERE trade_date = '{trade_date}' \
+                     )"
+                ),
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(response.success, "union query failed: {:?}", response.data);
+        assert_eq!(response.row_count, 1);
+        assert_eq!(response.data[0]["total"], 3, "热层 1 条 + 湖层 2 条");
     }
 
     /// /query 自定义聚合函数面（query_udfs.rs）：注册后经 execute_query

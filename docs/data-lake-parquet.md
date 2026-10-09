@@ -76,12 +76,19 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
 
 | 引擎 | 方式 | 备注 |
 |---|---|---|
-| data-engine（DataFusion 35） | `ListingTable` 注册 `lake.market_data`，`trade_date` 分区裁剪 | 与现有 `MemTable` 热查询并存：热=MemTable，历史=ListingTable |
+| data-engine（DataFusion 35） | `ListingTable` 注册 `lake_market_data`，`trade_date` 分区列 | 与现有 `MemTable` 热查询并存：热=MemTable，历史=ListingTable |
 | web/desktop（DuckDB-WASM） | `read_parquet('.../trade_date=*/part-*.parquet')` 通配 | 既有 `read_parquet()` 消费习惯零改动 |
 | 桌面 Tauri | 同 DuckDB（本地文件系统路径） | 接缝随 L427 §6 选项 A 落地 |
 
-- data-engine 增量接缝（落地项实现）：启动/定时 `refresh_query_tables` 时
-  同步注册 ListingTable；`/query` SQL 可直接 `UNION` 热/历史两层。
+- data-engine 增量接缝（已落地 2026-10-09）：`refresh_query_tables` 每次
+  `/query` 重走时注册/复用 ListingTable（`lake_market_data`）——首次落湖后
+  下一查即可见；`/query` SQL 可直接 `UNION` 热/历史两层。
+- 实现注记：表名用平名 `lake_market_data` 而非设计稿点分 `lake.market_data`
+  （DF 点分名要建同名 schema，骨架期平名更直白）；ListingTable 走
+  `ListingOptions::with_table_partition_cols([trade_date])` + `infer_schema`
+  （路径即分区裁剪，零 metastore）；会话须设
+  `listing_table_ignore_subdirectory=false`（DF35 默认 true，会让 `trade_date=`
+  子目录下的文件列不到、表只剩分区列）。
 
 ## 7. Catalog 与元数据（骨架期取舍）
 
@@ -118,9 +125,14 @@ rename（§5）→ 返回清单；`read_partition` 扫描读回单分区。边�
 在即时导出返回的同时把同窗口行级数据按交易日写透落湖（写失败只告警不拒绝
 请求）；`?from_lake=true` 读旁路按区间枚举交易日分区读回、symbol 过滤 +
 limit 截断后直出湖 schema Parquet（读侧同 `(symbol, timestamp)` 去重，不
-暴露重放产生的重复行）。缺省路径与 ClickHouse 门控行为均不变。**未做**：
-data-engine `ListingTable` 注册（§6 接缝）、compaction 调度（L447）、对象
-存储适配（§10.1）——均保持登记。
+暴露重放产生的重复行）。缺省路径与 ClickHouse 门控行为均不变。
+
+**ListingTable 注册落地（2026-10-09）**：`refresh_query_tables` 把
+`{lake_root}/{layer}/{table}` 注册为 DataFusion ListingTable
+（`lake_market_data`，§6 接缝）——`trade_date` hive 目录即分区列，`/query`
+SQL 直扫历史层、可与热层 MemTable `UNION`；目录未建（尚无落湖）静默跳过、
+首次落湖后下一查自动注册。**未做**：compaction 调度（L447）、对象存储
+适配（§10.1）——保持登记。
 
 ## 10. 非交互假设（自行判定，已注明）
 
@@ -130,6 +142,6 @@ data-engine `ListingTable` 注册（§6 接缝）、compaction 调度（L447）�
 3. 首表 = `silver/market_data`（七列对齐 §4）；realtime_quotes 等表随落地项。
 4. 本单零代码：§6 接缝、§7 manifest、§5 compaction 均登记不实现。
 5. 写路径骨架已落（2026-10-09，`packages/storage/src/lake.rs`）：§3 布局 / §4
-   schema / §5 原子写落地；export 端点写透 + `from_lake` 读旁路已落（同日，
-   data-engine `lake.*` 默认关）；§6 ListingTable 注册、§7 manifest、
-   compaction 调度仍登记不实现。
+   schema / §5 原子写落地；export 端点写透 + `from_lake` 读旁路与 §6
+   ListingTable 注册（`lake_market_data`）已落（同日，data-engine `lake.*`
+   默认关）；§7 manifest、compaction 调度仍登记不实现。
