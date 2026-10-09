@@ -54,6 +54,10 @@ uuid = { workspace = true }
 # Base64 编码（加密载荷存储）
 base64 = "0.22"
 
+# Parquet 湖写路径（docs/data-lake-parquet.md §3–§5；版本随 workspace 统一）
+arrow = { workspace = true }
+parquet = { workspace = true }
+
 [features]
 default = []
 crypto = ["alpha-core/crypto"]

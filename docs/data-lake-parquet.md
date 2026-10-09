@@ -104,7 +104,16 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
 | 多维分区（时间/股票/交易所）与 compaction 调度 | **L447**（本设计 §3/§5 只定单维骨架） |
 | zstd 级别/列编码/行组实测调优 | **L448**（数据压缩和列式存储优化） |
 | 零拷贝读取/内存池 | 性能优化工程节 |
-| lake writer 落地（改造 export 端点 + ListingTable 注册） | 「存储与数据处理」后续工程项 |
+| lake writer 落地（改造 export 端点 + ListingTable 注册） | 本模块已落（见下）|
+
+**lake writer 落地（2026-10-09）**：`packages/storage/src/lake.rs` 交付写路径
+骨架——`LakeWriter::write_bars(layer, table, bars, seq)` 按交易日分组（复用
+L447 `partition` 策略层与 `trade_date_of` 日切）→ 编 Parquet（snappy、schema
+七列对齐 §4、文件内按 `symbol, timestamp` 排序）→ `.tmp` 写 + fsync + 原子
+rename（§5）→ 返回清单；`read_partition` 扫描读回单分区。边界同 §10：单写者、
+`seq` 由调用方分配并保证同分区单调、无 metastore（目录即清单）。**未做**：
+export 端点改造、data-engine `ListingTable` 注册（§6 接缝）、compaction 调度
+（L447）、对象存储适配（§10.1）——均保持登记。
 
 ## 10. 非交互假设（自行判定，已注明）
 
@@ -113,3 +122,6 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
 2. 单写者假设：collector 落湖与 export 落湖不同时启用（骨架期先 export 侧）。
 3. 首表 = `silver/market_data`（七列对齐 §4）；realtime_quotes 等表随落地项。
 4. 本单零代码：§6 接缝、§7 manifest、§5 compaction 均登记不实现。
+5. 写路径骨架已落（2026-10-09，`packages/storage/src/lake.rs`）：§3 布局 / §4
+   schema / §5 原子写落地；§6 ListingTable 注册、export 端点改造、§7 manifest、
+   compaction 调度仍登记不实现。
