@@ -16,6 +16,9 @@ pub struct AppConfig {
     pub sweeper: SweeperConfig,
     /// 第三方集成鉴权（L504）：api_keys 非空时行情数据面统一要求 X-Api-Key
     pub security: SecurityConfig,
+    /// Parquet 湖写透（docs/data-lake-parquet.md §8/§10）：默认关——关闭时
+    /// export 端点保持纯即时导出，零行为变化
+    pub lake: LakeSettings,
 }
 
 /// API key 门配置：空表 = 关闭（内网默认形态，历史行为不变）。
@@ -74,6 +77,17 @@ pub struct ClickHouseSettings {
     pub password: String,
 }
 
+/// Parquet 湖写透配置：启用后 `/clickhouse/export.parquet?query_id=market_data`
+/// 在返回响应的同时把数据按交易日分区落湖（写失败只告警不拒绝请求），
+/// `?from_lake=true` 读旁路可用。骨架期单写者（§10.2）、DateOnly 分区（§3）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct LakeSettings {
+    pub enabled: bool,
+    pub lake_root: String,
+    pub layer: String,
+    pub table: String,
+}
+
 impl AppConfig {
     pub fn load() -> Result<Self, ConfigError> {
         Self::load_from_builder(
@@ -129,6 +143,14 @@ impl AppConfig {
             .expect("failed to set sweeper.max_delivery_count default")
             .set_default("security.api_keys", Vec::<String>::new())
             .expect("failed to set security.api_keys default")
+            .set_default("lake.enabled", false)
+            .expect("failed to set lake.enabled default")
+            .set_default("lake.lake_root", "lake")
+            .expect("failed to set lake.lake_root default")
+            .set_default("lake.layer", "silver")
+            .expect("failed to set lake.layer default")
+            .set_default("lake.table", "market_data")
+            .expect("failed to set lake.table default")
     }
 
     fn load_from_builder(builder: ConfigBuilder<DefaultState>) -> Result<Self, ConfigError> {
@@ -181,6 +203,10 @@ mod tests {
         assert_eq!(cfg.sweeper.interval_secs, 30);
         assert_eq!(cfg.sweeper.max_delivery_count, 5);
         assert!(cfg.security.api_keys.is_empty());
+        assert!(!cfg.lake.enabled);
+        assert_eq!(cfg.lake.lake_root, "lake");
+        assert_eq!(cfg.lake.layer, "silver");
+        assert_eq!(cfg.lake.table, "market_data");
     }
 
     #[test]
@@ -202,6 +228,11 @@ mod tests {
                   url: "http://127.0.0.1:8123"
                 security:
                   api_keys: ["third-party-key-a", "third-party-key-b"]
+                lake:
+                  enabled: true
+                  lake_root: "/tmp/lake-demo"
+                  layer: "bronze"
+                  table: "market_data"
             "#,
             FileFormat::Yaml,
         ));
@@ -222,5 +253,8 @@ mod tests {
             cfg.security.api_keys,
             vec!["third-party-key-a", "third-party-key-b"]
         );
+        assert!(cfg.lake.enabled);
+        assert_eq!(cfg.lake.lake_root, "/tmp/lake-demo");
+        assert_eq!(cfg.lake.layer, "bronze");
     }
 }

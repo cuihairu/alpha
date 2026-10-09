@@ -1,13 +1,15 @@
 //! Parquet 数据湖写路径（docs/data-lake-parquet.md §3–§5 落地）。
 //!
 //! 职责边界：本模块把一批 [`MarketBar`] 按交易日分区、编码为 Parquet、经
-//! `.tmp` 临时文件 + 原子 rename 落盘，并提供单分区扫描读回。**不**做：
+//! `.tmp` 临时文件 + 原子 rename 落盘，并提供单分区（`read_partition`）与
+//! 时间窗（`read_range`）读回。**不**做：
 //! 分区策略决策（复用 [`crate::partition`] 的 L447 策略层）、DataFusion
 //! ListingTable 注册（归 data-engine 后置项）、compaction 调度（归 L447）、
 //! 对象存储适配（`lake_root` 骨架期为本机目录，§10.1）。
 //!
 //! 写路径契约（§5）：同 `(trade_date, seq)` 重写内容一致（writer 确定性），
-//! 覆盖即重放；`seq` 由调用方传入并在同分区内单调递增。
+//! 覆盖即重放；`seq` 缺省由 writer 按分区扫描分配（§3「由 writer 原子分配」，
+//! 单写者假设下无并发竞态），显式传入则覆盖重放。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -69,14 +71,15 @@ impl LakeWriter {
     /// 按交易日把一批 bar 分组写入各自分区（§5：写 `.tmp` → fsync → 原子 rename）。
     ///
     /// `layer`（如 `"silver"`）与 `table`（如 `"market_data"`）拼在一级目录前；
-    /// `seq` 由调用方按分区分配并保证单调（骨架期单写者假设，§10.2）。
-    /// 返回按分区（日期升序）排序的写入清单。
+    /// `seq`：`None` = 每分区扫描现有 `part-*.parquet` 自动分配下一个号（跨调用
+    /// 单调递增）；`Some(n)` = 全部分区用 n（重放覆盖语义，§5）。返回按分区
+    /// （日期升序）排序的写入清单。
     pub fn write_bars(
         &self,
         layer: &str,
         table: &str,
         bars: &[MarketBar],
-        seq: u64,
+        seq: Option<u64>,
     ) -> AlphaResult<Vec<LakeWriteReport>> {
         if bars.is_empty() {
             return Ok(Vec::new());
@@ -94,10 +97,17 @@ impl LakeWriter {
 
         let mut reports = Vec::with_capacity(by_date.len());
         for (date, group) in by_date {
-            let rel_dir = self.partition_dir_for(layer, table, group[0], &date);
+            let rel_dir = self.partition_dir_for(
+                layer,
+                table,
+                &group[0].symbol,
+                group[0].timestamp_ms,
+                &date,
+            );
+            let abs_dir = self.lake_root.join(&rel_dir);
+            let seq = seq.unwrap_or_else(|| next_seq(&abs_dir));
             let file_name = format!("part-{seq:05}.parquet");
             let rel_path = format!("{rel_dir}/{file_name}");
-            let abs_dir = self.lake_root.join(&rel_dir);
 
             let batch = bars_to_record_batch(&group)?;
             write_parquet_atomic(&abs_dir, &file_name, &batch)?;
@@ -132,22 +142,62 @@ impl LakeWriter {
         Ok(out)
     }
 
+    /// 读回 `[start_ms, end_ms]` 内某 symbol 的记录（读旁路用）：枚举区间覆盖的
+    /// 交易日分区逐个读，按 `timestamp` 升序返回。重复导出落湖会在同分区产生
+    /// 多个 part 文件（compaction 归 L447），同 `(symbol, timestamp)` 取文件序
+    /// 靠后者，读侧不暴露重复行。
+    pub fn read_range(
+        &self,
+        layer: &str,
+        table: &str,
+        symbol: &str,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> AlphaResult<Vec<MarketBar>> {
+        const DAY_MS: i64 = 24 * 3600 * 1000;
+        let mut dates: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+        let mut t = start_ms;
+        while t <= end_ms {
+            dates.entry(trade_date_of(t)).or_insert(t);
+            t += DAY_MS;
+        }
+        if start_ms <= end_ms {
+            dates.entry(trade_date_of(end_ms)).or_insert(end_ms);
+        }
+
+        let mut latest: std::collections::BTreeMap<i64, MarketBar> =
+            std::collections::BTreeMap::new();
+        for (date, ts) in dates {
+            let rel_dir = self.partition_dir_for(layer, table, symbol, ts, &date);
+            for record in self.read_partition(&rel_dir)? {
+                if record.symbol == symbol
+                    && record.timestamp_ms >= start_ms
+                    && record.timestamp_ms <= end_ms
+                {
+                    latest.insert(record.timestamp_ms, record);
+                }
+            }
+        }
+        Ok(latest.into_values().collect())
+    }
+
     /// 分区相对目录：`{layer}/{partition_dir(scheme, table, record)}`。
     fn partition_dir_for(
         &self,
         layer: &str,
         table: &str,
-        sample: &MarketBar,
+        symbol: &str,
+        timestamp_ms: i64,
         date: &str,
     ) -> String {
-        // 复用 L447 策略层（DateOnly 只依赖交易日；多维护展走同一函数）。
+        // 复用 L447 策略层（DateOnly 只依赖交易日；多维档走同一函数）。
         let key = crate::partition::RecordKey {
-            symbol: &sample.symbol,
+            symbol,
             exchange: "",
-            timestamp_ms: sample.timestamp_ms,
+            timestamp_ms,
         };
         let base = partition_dir(&self.scheme, table, &key);
-        // 用已算好的交易日覆盖（避免对 sample 再算一次日期产生不一致）。
+        // 用已算好的交易日覆盖（避免对时间戳再算一次日期产生不一致）。
         let base = match base.find("trade_date=") {
             Some(idx) => {
                 let head = &base[..idx];
@@ -213,6 +263,43 @@ pub fn bars_to_record_batch(bars: &[&MarketBar]) -> AlphaResult<RecordBatch> {
 
     RecordBatch::try_new(schema, vec![ts, symbol, open, high, low, close, volume])
         .map_err(|e| AlphaError::StorageError(format!("record batch: {e}")))
+}
+
+/// 扫描分区目录现有 `part-{n}.parquet`，返回下一个可用序号（无文件为 0）。
+/// 单写者假设（§10.2）下无需加锁；解析失败的文件名忽略（不阻碍后续写入）。
+fn next_seq(dir: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let n = name.strip_prefix("part-")?.strip_suffix(".parquet")?;
+            n.parse::<u64>().ok()
+        })
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0)
+}
+
+/// 把一批 bar 编码为内存 Parquet（snappy、湖 schema），供读旁路响应体直出。
+pub fn bars_to_parquet_bytes(bars: &[MarketBar]) -> AlphaResult<Vec<u8>> {
+    let refs: Vec<&MarketBar> = bars.iter().collect();
+    let batch = bars_to_record_batch(&refs)?;
+    let mut buf = Vec::new();
+    let props = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .build();
+    let mut writer = ArrowWriter::try_new(&mut buf, batch.schema(), Some(props))
+        .map_err(|e| AlphaError::StorageError(format!("arrow writer: {e}")))?;
+    writer
+        .write(&batch)
+        .map_err(|e| AlphaError::StorageError(format!("parquet write: {e}")))?;
+    writer
+        .into_inner()
+        .map_err(|e| AlphaError::StorageError(format!("parquet close: {e}")))?;
+    Ok(buf)
 }
 
 /// 原子写：写 `.tmp` → fsync → rename（§5）。
@@ -327,7 +414,7 @@ mod tests {
         let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
         let bars = vec![bar("600519", T1, 1800.5), bar("000001", T1, 12.25)];
         let reports = writer
-            .write_bars("silver", "market_data", &bars, 42)
+            .write_bars("silver", "market_data", &bars, Some(42))
             .unwrap();
         assert_eq!(reports.len(), 1, "同交易日应落一个分区");
         assert!(reports[0]
@@ -350,7 +437,7 @@ mod tests {
         let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
         let bars = vec![bar("600519", T1, 1.0), bar("600519", T2, 2.0)];
         let reports = writer
-            .write_bars("silver", "market_data", &bars, 1)
+            .write_bars("silver", "market_data", &bars, Some(1))
             .unwrap();
         assert_eq!(reports.len(), 2, "跨交易日应落两个分区");
         // 日期升序。
@@ -358,15 +445,15 @@ mod tests {
     }
 
     #[test]
-    fn reuses_seq_for_idempotent_replay() {
+    fn explicit_seq_replays_overwrite_in_place() {
         let dir = tempfile::tempdir().unwrap();
         let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
         let bars = vec![bar("600519", T1, 9.9)];
         let a = writer
-            .write_bars("silver", "market_data", &bars, 7)
+            .write_bars("silver", "market_data", &bars, Some(7))
             .unwrap();
         let b = writer
-            .write_bars("silver", "market_data", &bars, 7)
+            .write_bars("silver", "market_data", &bars, Some(7))
             .unwrap();
         assert_eq!(a[0].relative_path, b[0].relative_path, "同 seq 覆盖即重放");
         let files: Vec<_> = fs::read_dir(dir.path().join(&a[0].partition_dir))
@@ -383,11 +470,69 @@ mod tests {
     }
 
     #[test]
+    fn auto_allocates_monotonic_seq_when_unspecified() {
+        let dir = tempfile::tempdir().unwrap();
+        let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
+        let bars = vec![bar("600519", T1, 1.0)];
+        let a = writer
+            .write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+        let b = writer
+            .write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+        assert!(a[0].relative_path.ends_with("/part-00000.parquet"));
+        assert!(b[0].relative_path.ends_with("/part-00001.parquet"));
+        let back = writer.read_partition(&a[0].partition_dir).unwrap();
+        assert_eq!(back.len(), 2, "两文件按序拼接读回");
+    }
+
+    #[test]
+    fn read_range_filters_symbol_window_and_dedups_replays() {
+        let dir = tempfile::tempdir().unwrap();
+        let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
+        let bars = vec![
+            bar("600519", T1, 1.0),
+            bar("600519", T2, 2.0),
+            bar("000001", T1, 9.0),
+        ];
+        writer
+            .write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+        // 重复导出：同数据再落一个 part，读侧不应出现重复行。
+        writer
+            .write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+
+        let all = writer
+            .read_range("silver", "market_data", "600519", T1, T2)
+            .unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].close, 1.0);
+        assert_eq!(all[1].close, 2.0);
+
+        let first_only = writer
+            .read_range("silver", "market_data", "600519", T1, T1)
+            .unwrap();
+        assert_eq!(first_only.len(), 1);
+
+        let other = writer
+            .read_range("silver", "market_data", "000001", T1, T2)
+            .unwrap();
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].close, 9.0);
+
+        assert!(writer
+            .read_range("silver", "market_data", "600519", T2, T1)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn empty_batch_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
         assert!(writer
-            .write_bars("silver", "market_data", &[], 1)
+            .write_bars("silver", "market_data", &[], None)
             .unwrap()
             .is_empty());
     }

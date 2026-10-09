@@ -94,8 +94,8 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
 
 - ClickHouse/TimescaleDB 热：滚动 N 天（点查/订阅延迟敏感）；
 - 湖 Silver：持久（默认全量保留）；归档层（对象存储冷 class）挂发布/成本项；
-- 导出端点保持兼容：`/clickhouse/export.parquet` 语义不变（即时导出），
-  落湖后可新增 `?from_lake=true` 旁路。
+- 导出端点保持兼容：`/clickhouse/export.parquet` 缺省语义不变（即时导出），
+  湖启用后 `?from_lake=true` 读旁路已落（data-engine，见 §9 注记）。
 
 ## 9. 与后续 TODO 的边界
 
@@ -111,9 +111,16 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
 L447 `partition` 策略层与 `trade_date_of` 日切）→ 编 Parquet（snappy、schema
 七列对齐 §4、文件内按 `symbol, timestamp` 排序）→ `.tmp` 写 + fsync + 原子
 rename（§5）→ 返回清单；`read_partition` 扫描读回单分区。边界同 §10：单写者、
-`seq` 由调用方分配并保证同分区单调、无 metastore（目录即清单）。**未做**：
-export 端点改造、data-engine `ListingTable` 注册（§6 接缝）、compaction 调度
-（L447）、对象存储适配（§10.1）——均保持登记。
+`seq` 由调用方分配并保证同分区单调、无 metastore（目录即清单）。
+
+**export 端点改造落地（2026-10-09）**：data-engine 装配 `lake.*` 配置段
+（默认关，关闭时零行为变化）——启用后 `/clickhouse/export.parquet?query_id=market_data`
+在即时导出返回的同时把同窗口行级数据按交易日写透落湖（写失败只告警不拒绝
+请求）；`?from_lake=true` 读旁路按区间枚举交易日分区读回、symbol 过滤 +
+limit 截断后直出湖 schema Parquet（读侧同 `(symbol, timestamp)` 去重，不
+暴露重放产生的重复行）。缺省路径与 ClickHouse 门控行为均不变。**未做**：
+data-engine `ListingTable` 注册（§6 接缝）、compaction 调度（L447）、对象
+存储适配（§10.1）——均保持登记。
 
 ## 10. 非交互假设（自行判定，已注明）
 
@@ -123,5 +130,6 @@ export 端点改造、data-engine `ListingTable` 注册（§6 接缝）、compac
 3. 首表 = `silver/market_data`（七列对齐 §4）；realtime_quotes 等表随落地项。
 4. 本单零代码：§6 接缝、§7 manifest、§5 compaction 均登记不实现。
 5. 写路径骨架已落（2026-10-09，`packages/storage/src/lake.rs`）：§3 布局 / §4
-   schema / §5 原子写落地；§6 ListingTable 注册、export 端点改造、§7 manifest、
+   schema / §5 原子写落地；export 端点写透 + `from_lake` 读旁路已落（同日，
+   data-engine `lake.*` 默认关）；§6 ListingTable 注册、§7 manifest、
    compaction 调度仍登记不实现。

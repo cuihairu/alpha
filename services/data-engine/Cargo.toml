@@ -51,3 +51,6 @@ uuid = { workspace = true }
 alpha-core = { workspace = true }
 alpha-protocols = { workspace = true, features = ["grpc"] }
 alpha-storage = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.8"

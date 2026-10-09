@@ -21,6 +21,8 @@ use alpha_core::{
 };
 use alpha_storage::{
     clickhouse::{ClickHouseConfig, ClickHouseStorage},
+    lake::{bars_to_parquet_bytes, LakeWriter, MarketBar},
+    partition::PartitionScheme,
     InvalidMessage, RedisStreamQueue, StreamEnvelope, StreamMessage, TimeSeriesPoint,
     TimeSeriesStorage, TimescaleTimeSeriesStorage,
 };
@@ -201,6 +203,8 @@ struct AppState {
     /// 多源背离检测（§5 P2「Source Divergence」维度）：同 symbol 同刻
     /// 各源报价差超容差即背离；单源在报期间休眠
     source_divergence: Arc<SourceDivergenceMonitor>,
+    /// Parquet 湖写透（docs/data-lake-parquet.md；lake.enabled 装配；None = 纯即时导出）
+    lake: Option<Arc<LakeWriter>>,
 }
 
 /// 进程级唯一 Prometheus 句柄（install_recorder 每进程一次——首个调用者
@@ -218,6 +222,7 @@ impl AppState {
     async fn new(config: Arc<AppConfig>) -> Self {
         let clickhouse = initialize_clickhouse(&config.clickhouse).await;
         let persistence = initialize_persistence(&config.storage).await;
+        let lake = initialize_lake(&config);
         Self {
             session: SessionContext::new(),
             storage: Arc::new(TimeSeriesStorage::new()),
@@ -235,6 +240,7 @@ impl AppState {
             sequence_gaps: Arc::new(SequenceGapMonitor::new()),
             price_outliers: Arc::new(PriceOutlierMonitor::from_env()),
             source_divergence: Arc::new(SourceDivergenceMonitor::from_env()),
+            lake,
         }
     }
 
@@ -708,6 +714,21 @@ async fn initialize_persistence(
     }
 }
 
+/// 按配置装配 Parquet 湖 writer：未启用 → None（export 端点保持纯即时导出）。
+fn initialize_lake(config: &AppConfig) -> Option<Arc<LakeWriter>> {
+    if !config.lake.enabled {
+        return None;
+    }
+    tracing::info!(
+        lake_root = %config.lake.lake_root,
+        "Parquet lake write-through enabled"
+    );
+    Some(Arc::new(LakeWriter::new(
+        config.lake.lake_root.as_str(),
+        PartitionScheme::DateOnly,
+    )))
+}
+
 async fn start_quote_normalizer(state: Arc<AppState>) -> anyhow::Result<()> {
     let redis_url = std::env::var("ALPHA_REDIS_URL")
         .or_else(|_| std::env::var("REDIS_URL"))
@@ -1154,6 +1175,8 @@ struct MarketDataParquetParams {
     end: Option<String>,
     days: Option<u32>,
     limit: Option<u64>,
+    /// true = 读湖旁路（不查 ClickHouse，需 lake.enabled）
+    from_lake: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1167,7 +1190,13 @@ const CLICKHOUSE_EXPORTS: &[ClickhouseExportDescriptor] = &[
     ClickhouseExportDescriptor {
         id: "market_data",
         description: "OHLCV market data (timestamp, symbol, open/high/low/close, volume)",
-        params: &["symbol", "start|days", "end", "limit"],
+        params: &[
+            "symbol",
+            "start|days",
+            "end",
+            "limit",
+            "from_lake(optional)",
+        ],
     },
     ClickhouseExportDescriptor {
         id: "realtime_quotes",
@@ -1192,6 +1221,7 @@ struct ClickhouseExportParams {
     end: Option<String>,
     days: Option<u32>,
     limit: Option<u64>,
+    from_lake: Option<bool>,
 }
 
 /// 从 ClickHouse 导出预设数据集（Parquet）
@@ -1212,6 +1242,7 @@ async fn get_clickhouse_export_parquet(
                 end: params.end,
                 days: params.days,
                 limit: params.limit,
+                from_lake: params.from_lake,
             };
             export_market_data_parquet(state, req).await
         }
@@ -1227,11 +1258,17 @@ async fn export_market_data_parquet(
     state: Arc<AppState>,
     params: MarketDataParquetParams,
 ) -> Result<axum::response::Response, ApiErrorResponse> {
-    let Some(clickhouse) = state.clickhouse.as_ref() else {
+    let from_lake = params.from_lake.unwrap_or(false);
+    if from_lake && state.lake.is_none() {
+        return Err(ApiErrorResponse::bad_request(
+            "Parquet lake is not enabled".to_string(),
+        ));
+    }
+    if !from_lake && state.clickhouse.is_none() {
         return Err(ApiErrorResponse::bad_request(
             "ClickHouse backend is not enabled".to_string(),
         ));
-    };
+    }
 
     // Simple guardrails to avoid accidental huge responses
     let limit = params.limit.unwrap_or(10_000).clamp(1, 200_000);
@@ -1253,10 +1290,22 @@ async fn export_market_data_parquet(
             end - Duration::days(days as i64)
         });
 
-    let data = clickhouse
-        .query_market_data_parquet(&params.symbol, start, end, Some(limit))
-        .await
-        .map_err(ApiErrorResponse::internal)?;
+    let data = if from_lake {
+        read_market_data_from_lake(&state, &params.symbol, start, end, limit)?
+    } else {
+        let clickhouse = state
+            .clickhouse
+            .as_ref()
+            .expect("clickhouse presence checked above");
+        let data = clickhouse
+            .query_market_data_parquet(&params.symbol, start, end, Some(limit))
+            .await
+            .map_err(ApiErrorResponse::internal)?;
+        if state.lake.is_some() {
+            write_through_to_lake(&state, &params.symbol, start, end, limit).await;
+        }
+        data
+    };
 
     let mut response = axum::response::Response::new(axum::body::Body::from(data));
     response.headers_mut().insert(
@@ -1264,6 +1313,85 @@ async fn export_market_data_parquet(
         HeaderValue::from_static("application/x-parquet"),
     );
     Ok(response)
+}
+
+/// 读湖旁路：区间 + symbol 过滤后按 limit 截断，湖 schema 直出 Parquet。
+fn read_market_data_from_lake(
+    state: &AppState,
+    symbol: &str,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    limit: u64,
+) -> Result<Vec<u8>, ApiErrorResponse> {
+    let lake = state
+        .lake
+        .as_ref()
+        .expect("lake presence checked by caller");
+    let mut bars = lake
+        .read_range(
+            &state.config.lake.layer,
+            &state.config.lake.table,
+            symbol,
+            start.timestamp_millis(),
+            end.timestamp_millis(),
+        )
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
+    bars.truncate(limit as usize);
+    bars_to_parquet_bytes(&bars).map_err(|e| ApiErrorResponse::internal(e.to_string()))
+}
+
+/// 导出成功后把同一窗口的行级数据按交易日分区落湖。失败只告警，不影响响应
+/// （与 collector 归档同口径：旁路落盘失败不拒绝主请求）。
+async fn write_through_to_lake(
+    state: &AppState,
+    symbol: &str,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    limit: u64,
+) {
+    let (Some(lake), Some(clickhouse)) = (state.lake.as_ref(), state.clickhouse.as_ref()) else {
+        return;
+    };
+    let rows = match clickhouse
+        .query_market_data(symbol, start, end, Some(limit))
+        .await
+    {
+        Ok(rows) => rows,
+        Err(err) => {
+            tracing::warn!(%symbol, "lake write-through query failed: {}", err);
+            return;
+        }
+    };
+    if rows.is_empty() {
+        return;
+    }
+    let bars: Vec<MarketBar> = rows
+        .into_iter()
+        .map(|r| MarketBar {
+            timestamp_ms: r.timestamp.timestamp_millis(),
+            symbol: r.symbol,
+            open: r.open_price,
+            high: r.high_price,
+            low: r.low_price,
+            close: r.close_price,
+            volume: r.volume as f64,
+        })
+        .collect();
+    let (layer, table) = (
+        state.config.lake.layer.clone(),
+        state.config.lake.table.clone(),
+    );
+    let lake = lake.clone();
+    // 落盘是阻塞 IO（fsync），放到 blocking 线程避免占 runtime worker。
+    let result =
+        tokio::task::spawn_blocking(move || lake.write_bars(&layer, &table, &bars, None)).await;
+    match result {
+        Ok(Ok(reports)) => {
+            tracing::info!(%symbol, partitions = reports.len(), "lake write-through done");
+        }
+        Ok(Err(err)) => tracing::warn!(%symbol, "lake write-through failed: {}", err),
+        Err(err) => tracing::warn!(%symbol, "lake write-through task failed: {}", err),
+    }
 }
 
 /// 从 ClickHouse 导出市场数据（Parquet）
@@ -2011,6 +2139,184 @@ mod tests {
         Arc::new(AppConfig::default())
     }
 
+    /// 手工装配AppState（clickhouse/lake 按 test 需要给定，其余走默认组件）。
+    fn lake_state(lake: Option<Arc<LakeWriter>>) -> Arc<AppState> {
+        Arc::new(AppState {
+            session: SessionContext::new(),
+            storage: Arc::new(TimeSeriesStorage::new()),
+            persistence: None,
+            clickhouse: None,
+            seen_payloads: Arc::new(Mutex::new(RecentPayloads::with_capacity(
+                PAYLOAD_DEDUP_WINDOW,
+            ))),
+            mirror_retries: Arc::new(MirrorRetryBuffer::with_capacity(MIRROR_RETRY_BUFFER_CAP)),
+            indicators: TechnicalIndicators::new(),
+            analysis: AnalysisEngine::new(),
+            config: test_config(),
+            metrics: global_metrics_handle().clone(),
+            instruments: Arc::new(RwLock::new(seed_instruments())),
+            sequence_gaps: Arc::new(SequenceGapMonitor::new()),
+            price_outliers: Arc::new(PriceOutlierMonitor::from_env()),
+            source_divergence: Arc::new(SourceDivergenceMonitor::from_env()),
+            lake,
+        })
+    }
+
+    /// 解码导出响应体（湖 schema：col1=symbol、col5=close）。
+    fn decode_parquet_bars(bytes: &[u8]) -> Vec<(String, f64)> {
+        use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dump.parquet");
+        std::fs::write(&path, bytes).unwrap();
+        let reader = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&path).unwrap())
+            .unwrap()
+            .build()
+            .unwrap();
+        let mut rows = Vec::new();
+        for batch in reader {
+            let batch = batch.unwrap();
+            let symbol = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let close = batch
+                .column(5)
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .unwrap();
+            for i in 0..batch.num_rows() {
+                rows.push((symbol.value(i).to_string(), close.value(i)));
+            }
+        }
+        rows
+    }
+
+    #[tokio::test]
+    async fn from_lake_export_serves_written_bars_without_clickhouse() {
+        let dir = tempfile::tempdir().unwrap();
+        let lake = Arc::new(LakeWriter::new(dir.path(), PartitionScheme::DateOnly));
+        let state = lake_state(Some(lake.clone()));
+
+        // 两个 symbol、两个交易日：窗口过滤只该命中后一日的那条。
+        let t1 = Utc::now() - Duration::days(3);
+        let t2 = Utc::now() - Duration::days(1);
+        let bars = vec![
+            MarketBar {
+                timestamp_ms: t1.timestamp_millis(),
+                symbol: "600519".to_string(),
+                open: 1.0,
+                high: 2.0,
+                low: 0.5,
+                close: 1.5,
+                volume: 10.0,
+            },
+            MarketBar {
+                timestamp_ms: t2.timestamp_millis(),
+                symbol: "600519".to_string(),
+                open: 2.0,
+                high: 3.0,
+                low: 1.5,
+                close: 2.5,
+                volume: 20.0,
+            },
+            MarketBar {
+                timestamp_ms: t1.timestamp_millis(),
+                symbol: "000001".to_string(),
+                open: 9.0,
+                high: 9.5,
+                low: 8.5,
+                close: 9.2,
+                volume: 5.0,
+            },
+        ];
+        lake.write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+
+        let response = export_market_data_parquet(
+            state.clone(),
+            MarketDataParquetParams {
+                symbol: "600519".to_string(),
+                start: Some((t2 - Duration::hours(1)).to_rfc3339()),
+                end: None,
+                days: None,
+                limit: Some(10),
+                from_lake: Some(true),
+            },
+        )
+        .await
+        .unwrap()
+        .into_response();
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/x-parquet"))
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let rows = decode_parquet_bars(&body);
+        assert_eq!(rows.len(), 1, "窗口+symbol 过滤后只剩一条");
+        assert_eq!(rows[0], ("600519".to_string(), 2.5));
+
+        // limit 截断：默认 90 天回看覆盖全部两条，limit=1 只剩一条。
+        let response = export_market_data_parquet(
+            state,
+            MarketDataParquetParams {
+                symbol: "600519".to_string(),
+                start: None,
+                end: None,
+                days: None,
+                limit: Some(1),
+                from_lake: Some(true),
+            },
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(decode_parquet_bars(&body).len(), 1, "limit 截断生效");
+    }
+
+    #[tokio::test]
+    async fn lake_and_clickhouse_gate_export_modes_independently() {
+        let state = lake_state(None);
+
+        // from_lake=true 但湖未启用 → 400。
+        let err = export_market_data_parquet(
+            state.clone(),
+            MarketDataParquetParams {
+                symbol: "600519".to_string(),
+                start: None,
+                end: None,
+                days: None,
+                limit: None,
+                from_lake: Some(true),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        // 即时导出（from_lake 缺省）但 ClickHouse 未启用 → 400（行为不变）。
+        let err = export_market_data_parquet(
+            state,
+            MarketDataParquetParams {
+                symbol: "600519".to_string(),
+                start: None,
+                end: None,
+                days: None,
+                limit: None,
+                from_lake: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
     #[test]
     fn api_key_comparison_is_exact_and_full_scan() {
         let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
@@ -2729,6 +3035,7 @@ mod tests {
             sequence_gaps: Arc::new(SequenceGapMonitor::new()),
             price_outliers: Arc::new(PriceOutlierMonitor::from_env()),
             source_divergence: Arc::new(SourceDivergenceMonitor::from_env()),
+            lake: None,
         });
 
         let symbol = format!("E2E-{}", uuid::Uuid::new_v4());
