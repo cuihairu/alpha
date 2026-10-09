@@ -192,6 +192,19 @@ is_empty found for unit type ()`。
 **不能覆盖的**：链接与启动窗口仍然需要真实 WebKitGTK（或 CI 的 macOS 作业，那里
 WKWebView 内置）。假 `.pc` 只让类型系统与 lint 在 Linux 上干活。
 
+〔实机链接走查（2026-10-10，ubuntu:22.04 容器）：「真实 WebKitGTK」具体指
+`webkit2gtk-4.0` / `javascriptcoregtk-4.0` API——tauri 1.8.3 钉
+webkit2gtk 0.18 → 0.18 只对接 4.0；Debian 12+ 等现代发行版已删该 ABI（只剩
+4.1），apt 无 4.0 包，本机无法直接链接。走查经 ubuntu:22.04 容器完成
+（`libwebkit2gtk-4.0-dev` 在库），真实链接 + 启动 + 截图均通过，Linux 侧从
+「只类型检查」升级为「真运行」证据。容器要点：`CARGO_TARGET_DIR`/`CARGO_HOME`/
+`RUSTUP_HOME` 全部持久化到挂载卷（容器 `/root` 每次清空）；Xvfb + dbus + dunst
+可跑完整通知链。另记一个 debug 构建陷阱：不带 `custom-protocol` 特性时
+webview 加载 devPath（`http://localhost:5173`），无 vite dev server 即显示
+「Could not connect: Connection refused」错误页——属预期 dev 工作流，但会让
+实机截图误判为启动失败；生产路径构建须 `--features custom-protocol`（走
+tauri.conf 嵌入的 distDir 产物）。〕
+
 顺带修掉一个真实缺陷：为了在 Linux 上编 gui 特性，暴露出上游的 semver 破坏。
 依赖链是 `tauri` → `notify-rust 4`（声明 `zbus = "5"`，**仅 Linux/BSD**）→
 `zbus 5.11.0`（再声明 `zbus_macros = "^5.11.0"`，caret）。caret 区间允许解析到
@@ -372,6 +385,21 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
   边界：macOS 点击回调需 UNUserNotificationCenter delegate（Tauri 1.x 未接），
   Windows 动作信号无桌面端消费——两者维持 tauri 展示路径、点击无动作；
   服务器对 `default` 的渲染差异（GNOME/KDE/其他）属真机验收面。）
+  （**Linux 实机走查（2026-10-10，ubuntu:22.04 容器 + Xvfb + dunst 1.5）**，
+  与上面注记对账——已证：① 真实链接与启动（§4.2）；② React 产物真窗完整
+  渲染（标题栏 Product 行即 `get_app_info` 真实返回）；③ 告警闭环 E2E：
+  UI 布防 → `check_alerts` 触发 → dunst 弹系统通知（横幅带 `(A)` 动作标记，
+  dunst 日志证实通知到达）→ DesktopPanel 回显 Fired/Tray status 无告警；
+  即通知展示与 `default` 动作注册在真环境生效。**不可观测边界（诚实登记，
+  未证不算已证）**：④ 点击 → `ActionInvoked` 派发——dunst 1.5 debug 日志、
+  dbus-monitor 总线监听、显式 `[shortcuts] mouse_left_click = do_action`
+  配置三手段均未捕获派发行（无 WM 环境无法确证点击几何落在横幅动作区，
+  1.5 的 X11 事件处理也无日志可对）；⑤ `show()` 唤起生效——无 WM/托盘宿主，
+  外部 `XUnmapWindow` 不更新 GTK 内部可见态（tauri `show()` 对「它以为已
+  可见」的窗口是 no-op），模拟隐藏不可行。④⑤ 两环由单测
+  （`notification_click_maps_default_only`）+ 契约断言（wiring_contract
+  `notification_click_action`）+ macOS CI 编译覆盖静态面，动态面留真机
+  人工验收。）
 
 ## 8. 跨平台窗口管理和主题适配
 
