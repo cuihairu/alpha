@@ -536,3 +536,11 @@
 - [x] 平板断点：拍板维持待反馈（ux-consistency.md，触发条件未到）（〔拍板：维持〕）
 - [x] 护栏白名单 / 告警翻译层：拍板维持现状（GW-004「只标记不封禁」既定口径，告警翻译层已随诊断知识库 11 条规则落地，无新缺口）（〔拍板：维持〕）
 - [x] 纯发布节门控项复核（本批不动工）：Jaeger OTLP span 导出、§10.1 对象存储适配、差分更新——维持登记（〔维持〕）
+
+## 拍板登记（2026-10-10 巡检续批之二：逐项自行拍板并落记录）
+
+- [x] 导出覆盖确认（L113「写前确认未做」）：拍板**开工 → 已落**（`7fad591`）。框架层 `export_symbol_request_confirm`（判定 `overwrite_required` + 文案 `OVERWRITE_TITLE`/`overwrite_prompt` + 流程），接线层 `platform::confirm_overwrite`（tauri `dialog::blocking::ask` 原生 yes/no；async 命令非主线程故可用 blocking）；命令返回 `Option<ExportOutcome>`（取消 → `None`，前端同 saveDialog 取消口径显示「已取消」）；4 框架层单测（拒绝不动原文件/接受覆盖/无冲突不弹/无临时残留）+ wiring_contract `export_overwrite_confirm_is_framework_owned`。
+- [x] 依赖升级债（cargo audit 7 漏洞 + 11 警告行）：拍板**维持报告型不阻塞**（〔维持〕）。逐条归因（`cargo tree -i`）：①`h2 0.3.27` ← hyper 0.14 ← axum 0.6 ← **tonic 0.10**（修需 tonic 0.10→0.12，codegen/transport 大改，波及 alpha-protocols 全部 gRPC）；②`rustls-webpki 0.101.7` ×3 告警 ← rustls 0.21 ← **sqlx-core 0.7.4**（修需 sqlx 0.7→0.8）；③`sqlx 0.7.4` ← 同上；④`object_store 0.9.1` ← **datafusion 35**（修需 datafusion 35→40+）；⑤`rsa 0.9.10` ← jsonwebtoken 10.4（**上游无修复版**，Marvin 时序攻击）。五条全为传递依赖，修复均需重型框架大版本升级（契约破坏面大）→ 与既有口径一致：作业 `continue-on-error` 保持可见不阻塞，随专项消化。
+- [x] 托盘图标随状态/主题换图：拍板**登记待资产**（〔维持〕）。需多套图标资产（告警态/静默态 × 深浅色），缺资产**不自行生成代餐**（易与品牌资产冲突）；资产就位后接线点已备（`platform::system_tray` + `notify::tray_menu_model`）。
+- [x] 定时轮询取数（L114）：拍板**维持登记**（〔维持〕）。证据：`market::synthetic_series` 为按 symbol 派生的**确定性、不随时间变化**行情，告警在布防即时检查即判定完（触发即停用），后台轮询在真实时变后端接入前**无消费方、无效果**（且 §7 既定口径：托盘 tooltip 只反映告警状态不显示行情）；触发条件＝`QuoteRemote` 缝接真实时变后端后一并立项（与「无消费方证据不开工」同口径）。
+- [x] 记忆「上次所用显示器」（L115）：拍板**开工 → 已落**（`1c10638`）。`WindowGeometry.monitor`（屏名，`skip_serializing_if` 向后兼容旧状态文件）+ `MonitorRect.name`（接线层从 `tauri::Monitor::name` 翻译）；`resolve_placement` 钳制目标改为「记忆显示器（名在且仍在）否则主屏」，新增 `remembered_monitor` 按名查；接线层 `current_geometry` 记 `current_monitor` 名。代价：`WindowGeometry` 去 `Copy`（含 `String`），调用点改 `clone`。边界：最大化窗口回原屏需 `set_position`→`maximize` 平台时序，留真机多屏验收。
