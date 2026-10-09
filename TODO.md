@@ -523,3 +523,16 @@
 - [x] 构建自动更新和增量更新机制：桌面 Tauri v1 updater 通道三件套——① `desktop/tauri.conf.json` 登记 `tauri.updater` 段（active:false 保持 inert + dialog + pubkey 占位 + `{{target}}/{{current_version}}` endpoint 模板），契约测试 `updater_registered_but_inert` 锁定「已登记未激活」（翻真而无 pubkey 会让 gui 构建期失败，测试先行拦住；Url 会把 `{}` 规范化为 %7B/%7D——tauri v1 运行时两种形态都替换，测试双形态断言）；② `scripts/release-update-feed.sh` 产 Tauri v1 latest.json 更新清单（version/notes/pub_date RFC3339 UTC/platforms{signature,url}，semver 与 rust triple 入口校验、产物 JSON 合法性复检，正负路径实测）；③ 签名链路登记（tauri signer minisign：公钥入 conf、私钥进 CI secret 绝不入库，signature 字段取打包作业 .signature 产物）。增量更新现实登记：Tauri v1 为整包替换无内置差分，Windows/macOS bsdiff 与 AppImage zsync 归 L516 打包形态后复核、不自行开发 delta 协议。平台策略边界：iOS 自更新违反 App Store 条款明确不做、Android 走商店内更新、Web SW 更新流归 L506、feed 静态 CDN 托管衔接 L515；与 L472（版本管理编排）分工 = 更新通道 vs 发布自动化，feed 生成器为接缝。docs/auto-update.md 四节（✅ 2026-10-02）
 - [x] 开发平台合规性检查和适配（隐私政策、权限申请）：config/compliance/permissions-registry.txt（[allow]/[planned] 双段权限注册表——allow 为检查基线、planned 留档计划权限含加入触发条件）+ scripts/check-compliance.sh（python3 对账四面：注册表 allow 条目理由非空校验、AndroidManifest.xml <uses-permission> ⊆ android 段、tauri.conf.json allowlist 启用组**双向对账**（未登记的启用组=失败、登记但未启用的陈旧条目=失败，注册表不许腐烂）、CSP 非空；负路径实测：注入 CAMERA 未登记权限/移除注册条目均正确 exit 1）+ docs/platform-compliance.md（隐私政策工程草案六条（数据最小化/本地优先/无遥测/权限可关停，标注发布前法务复核边界）+ 四平台权限台账：Android 骨架零权限最小清单（INTERNET 按 planned 触发条件走，POST_NOTIFICATIONS 为 API 33+ 运行时申请、INTERNET/USE_BIOMETRIC 为 normal 安装期授予）、iOS 仅登记边界（L119 交付面不动：push entitlement + NSFaceIDUsageDescription 随落地项进 Info.plist）、桌面 Tauri 六 allowlist 组逐条理由与最小权限评审（组粒度收窄归 L516 复核、签名公证归 L518）、Web PWA 通知授权边界（用户手势触发、拒绝降级站内）。新增权限流程 = 注册表 conscious ack + 文档同步，CI 接线归 L467〔现注：L467 是多目标构建项不含本项，已接入 ci.yml `compliance` 作业〕（✅ 2026-10-02）
 - [x] （未来项 → 已落地 2026-09-28，见 P2「重投递封顶」条）消息投递/重送交付计数上限：claim_stale 按 delivery_count 封顶（默认 5，env 可调），超限毒消息不再重投、转 quotes.dlq 留痕并 ack 停投，与兜底扫描路径协同防止资源耗尽；毒串消息的完整运营机制（批量重放工具、DLQ 内容级再处理）留待后续
+
+## 拍板登记（2026-10-10 巡检续批：逐项按仓内决策记录自行拍板，纯发布节门控项维持不开工）
+
+- [x] 桌面 frontendDist：拍板 web-framework-selection.md §6 选项 A——`frontendDist` 改指 `web/app/dist`，桌面复用 React 产物，Tauri API 经 `@tauri-apps/api` 注入；B（桌面专属壳）撤销备选。落地三步：桥接模块 → 兜底壳能力迁移（原生导出/告警托盘）→ distDir 切换 + 门禁/契约/CI 对账（〔拍板：开工〕）
+- [x] RustSec 升级债：拍板维持报告型不阻塞（cargo audit 现状 7 漏洞 + 11 警告行逐条登记 rust-code-standards.md §12；braces CVE-2026-93687 已随依赖图变化消除）；余项随专项消化（〔拍板：维持〕）
+- [x] Cargo.lock 策略：拍板维持不入库（库惯例；deployment-runbook/docker-deployment 已登记复现性代价，关键钉版经 Cargo.toml pin 依赖兜底——先例 zbus-macros-pin）（〔拍板：维持〕）
+- [x] 三级 API 分层 / MCP 慢启动：拍板维持 P3 登记（architecture-review §5 能力面最低优先级，无新消费方证据不开工）（〔拍板：维持〕）
+- [x] announcement/news 域：拍板维持未实现（architecture.md §2，无消费方证据）（〔拍板：维持〕）
+- [x] data-privacy 客户端接线：拍板维持登记（web account.ts 纯逻辑就绪，接线随各客户端工程节消化）（〔拍板：维持〕）
+- [x] 桌面通知点击唤起主窗：拍板开工（desktop-framework.md §5 L114 / §7 登记）——D-Bus 默认动作（notify-rust xdg 后端）订阅点击 → 主窗显示/聚焦；macOS 激活回调需 app delegate（Tauri 1.x 未实现）登记边界（〔拍板：开工〕）
+- [x] 平板断点：拍板维持待反馈（ux-consistency.md，触发条件未到）（〔拍板：维持〕）
+- [x] 护栏白名单 / 告警翻译层：拍板维持现状（GW-004「只标记不封禁」既定口径，告警翻译层已随诊断知识库 11 条规则落地，无新缺口）（〔拍板：维持〕）
+- [x] 纯发布节门控项复核（本批不动工）：Jaeger OTLP span 导出、§10.1 对象存储适配、差分更新——维持登记（〔维持〕）

@@ -34,6 +34,7 @@ Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB
 
 ### 2. 消息队列
 - 当前默认方案：Redis Streams（stream：`quotes.raw`/`quotes.normalized`/`news.raw`/`announcements.raw`/`quotes.dlq`；实际在用的是 quotes 三流，公告/新闻域未实现）。
+  （拍板 2026-10-10：维持未实现——无消费方证据，域登记不立项。）
 - NATS JetStream / Kafka 为阶段化预留，architecture-review §2.4 已裁定不立项
   （吞吐、审计、回放需求明确前不升级）。
 - 当前实现已支持 consumer group + ack，异常消息进入 dead-letter stream。

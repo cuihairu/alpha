@@ -231,6 +231,8 @@ curl http://localhost:8123/ping
   明文比拒绝启动更贵）；都缺省保持反代终结形态。裸机 nginx 只配了 80 端口，
   443 需自行补证书或改走网关服务内 TLS。
 - **Cargo.lock 不入库**：容器与裸机构建每次解析最新兼容依赖，构建不完全可复现。
+  （拍板 2026-10-10：维持不入库——库惯例；关键钉版经 Cargo.toml pin 依赖兜底，
+  先例 desktop 的 `zbus-macros-pin`；复现性代价已知并接受。）
   锁文件入库策略归质量保证统筹（docker-deployment §5 登记）。
 - **单节点为界**：compose 是开发/测试栈，无副本、无编排级资源限额；
   生产加固项（镜像按 SHA 出库、secrets 注入、限额）登记在 docker-deployment §4。

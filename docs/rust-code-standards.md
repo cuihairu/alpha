@@ -134,8 +134,14 @@ CI（.github/workflows/ci.yml）：`lint` 作业 = §11 前两命令；
 
 ## 12. 已知债务（按立项顺序消化）
 
-* 依赖升级专项：dependabot open 告警已收敛至个位数（a7e3e54 清掉 braces high，
-  余 braces CVE-2026-93687 无上游修复版、持有待发）；cargo audit 余项随专项消化；
+* 依赖升级专项：dependabot open 告警已收敛至个位数（a7e3e54 清掉 braces high；
+  2026-10-10 盘点 braces 已不在依赖图与 audit 列表，CVE-2026-93687 条目消除）；
+  **拍板（2026-10-10）**：维持报告型不阻塞——`cargo audit` 现状 7 漏洞
+  （h2 RUSTSEC-2026-0258、object_store RUSTSEC-2024-0358、rsa RUSTSEC-2023-0071、
+  rustls-webpki RUSTSEC-2026-0098/0099/0104、sqlx RUSTSEC-2024-0363）+ 11 警告行
+  （bincode/fxhash/instant/paste/proc-macro-error/rustls-pemfile×2/yaml-rust
+  失维护；glib/lexical-core/rand unsound——多为传递依赖，直接消费面不可达）；
+  余项随专项消化，单条有 semver 兼容修复版时随批消化；
 * data-engine/real-time-feed/storage/collector 尚有历史遗留的结构性
   clippy 债务已于 2026-09-28 一并清零；后续新增代码直接被 `-D warnings` 拦截；
 * fmt 工具链版本漂移风险（§1）：出现首个漂移案例时引入 rust-toolchain.toml。
