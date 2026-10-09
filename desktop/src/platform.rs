@@ -120,6 +120,21 @@ pub fn show_notification(
         .map_err(|e| e.to_string())
 }
 
+/// 覆盖确认（L113 收尾）：原生 yes/no 阻塞对话框。
+///
+/// 文案（标题/提示）由框架层 [`crate::export::OVERWRITE_TITLE`] /
+/// [`crate::export::overwrite_prompt`] 定稿，本函数只做平台调用；调用方是
+/// **async 命令**（跑在 tauri 异步运行时，非主线程），故用 blocking 变体——
+/// 主线程上下文（`App::run` 闭包、非 async 命令）禁用，见 tauri dialog 文档。
+pub fn confirm_overwrite(app: &AppHandle, dest: &std::path::Path) -> bool {
+    let window = app.get_window(notify::MAIN_WINDOW_LABEL);
+    tauri::api::dialog::blocking::ask(
+        window.as_ref(),
+        crate::export::OVERWRITE_TITLE,
+        crate::export::overwrite_prompt(dest),
+    )
+}
+
 /// 批量展示（`check_alerts` 触发链用：尽力而为，单条失败仅告警不阻断其余）
 pub fn show_notifications(app: &AppHandle, identifier: &str, notifications: &[Notification]) {
     for notification in notifications {

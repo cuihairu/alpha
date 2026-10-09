@@ -94,6 +94,11 @@ export function DesktopPanel() {
         }
         const fmt = /\.json$/i.test(path) ? 'json' : 'csv'
         return exportSymbolToFile(firstSymbol, fmt, path).then((outcome) => {
+          // 目标已存在且用户在原生覆盖确认里选了「否」：同取消口径
+          if (!outcome) {
+            setExportMsg(tr('desktop.exportCancelled'))
+            return
+          }
           setExportMsg(trf('desktop.exportDone', { rows: outcome.rows, name: outcome.filename }))
         })
       })

@@ -105,15 +105,21 @@ async fn export_data(
 }
 
 /// 导出单个标的到用户自选路径（L113 原生「另存为」链路：前端经 `dialog.save`
-/// 拿到路径后传入；格式解析/标的校验/后缀一致性全在框架层 `export_symbol_request`）
+/// 拿到路径后传入；格式解析/标的校验/后缀一致性/覆盖确认流程全在框架层
+/// `export_symbol_request_confirm`，平台对话框经 `platform::confirm_overwrite`
+/// 注入——命令体仍只做委派与错误映射）
 #[tauri::command]
 async fn export_symbol_to_file(
+    app_handle: tauri::AppHandle,
     symbol: String,
     format: String,
     file_path: String,
-) -> Result<crate::export::ExportOutcome, String> {
-    export::export_symbol_request(&symbol, &format, std::path::Path::new(&file_path))
-        .map_err(|e: DesktopError| e.to_string())
+) -> Result<Option<crate::export::ExportOutcome>, String> {
+    let dest = std::path::Path::new(&file_path);
+    export::export_symbol_request_confirm(&symbol, &format, dest, |p| {
+        crate::platform::confirm_overwrite(&app_handle, p)
+    })
+    .map_err(|e: DesktopError| e.to_string())
 }
 
 /// 应用信息

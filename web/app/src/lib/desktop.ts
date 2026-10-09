@@ -192,12 +192,16 @@ export function exportData(request: {
   return invoke('export_data', { request })
 }
 
-/** 导出单个标的到用户自选路径（前端先经 saveDialog 拿路径） */
+/**
+ * 导出单个标的到用户自选路径（前端先经 saveDialog 拿路径）。
+ * 目标文件已存在时 Rust 侧弹原生覆盖确认；用户取消返回 `null`（同 saveDialog
+ * 取消口径，不落盘）。
+ */
 export function exportSymbolToFile(
   symbol: string,
   format: string,
   filePath: string,
-): Promise<ExportOutcome> {
+): Promise<ExportOutcome | null> {
   return invoke('export_symbol_to_file', { symbol, format, filePath })
 }
 

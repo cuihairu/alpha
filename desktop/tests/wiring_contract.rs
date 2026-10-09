@@ -142,7 +142,7 @@ fn command_bodies_delegate_to_framework_entry_points() {
         ("get_real_time_quotes", "quotes_request"),
         ("set_price_alert", "upsert_request"),
         ("export_data", "export_request"),
-        ("export_symbol_to_file", "export_symbol_request"),
+        ("export_symbol_to_file", "export_symbol_request_confirm"),
         ("get_app_info", "app_info"),
         ("send_notification", "notify_request"),
         ("list_notifications", "recent"),
@@ -275,6 +275,10 @@ fn framework_entry_points_are_exported() {
         "upsert_request",
         "export_request",
         "export_symbol_request",
+        "export_symbol_request_confirm",
+        "overwrite_required",
+        "overwrite_prompt",
+        "OVERWRITE_TITLE",
         "notify_request",
         "tray_status_request",
         "check_request",
@@ -388,6 +392,32 @@ fn panel_export_uses_native_save_dialog() {
     assert!(
         panel.contains("saveDialog"),
         "面板导出应经 saveDialog 拿路径（L113 链路）"
+    );
+}
+
+/// L113 收尾：覆盖确认流程在框架层（判定+文案），接线层只注入平台对话框——
+/// 命令委派 `export_symbol_request_confirm`，平台确认经 `platform::confirm_overwrite`
+/// 且文案取自框架层常量（不得在接线层自造提示串）
+#[test]
+fn export_overwrite_confirm_is_framework_owned() {
+    let gui = strip_rust_comments(&gui_source());
+    let platform =
+        std::fs::read_to_string(crate_dir().join("src/platform.rs")).expect("读 platform.rs");
+    assert!(
+        gui.contains("export_symbol_request_confirm"),
+        "export_symbol_to_file 应委派 export_symbol_request_confirm（覆盖确认在框架层）"
+    );
+    assert!(
+        gui.contains("confirm_overwrite"),
+        "接线层应注入平台确认回调 platform::confirm_overwrite"
+    );
+    assert!(
+        platform.contains("confirm_overwrite"),
+        "platform.rs 应提供 confirm_overwrite（原生阻塞对话框）"
+    );
+    assert!(
+        platform.contains("OVERWRITE_TITLE") && platform.contains("overwrite_prompt"),
+        "覆盖确认文案应取自框架层常量（接线层不得自造提示串）"
     );
 }
 

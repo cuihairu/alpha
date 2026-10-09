@@ -62,7 +62,8 @@ pub use app::{app_info, AppInfo, APP_NAME};
 pub use config::{load_or_default, resolve_theme, theme_pref, AppConfig, ConfigSource, ThemePref};
 pub use error::{DesktopError, DesktopResult};
 pub use export::{
-    export, export_request, export_symbol_request, export_to_file, ExportFormat, ExportOutcome,
+    export, export_request, export_symbol_request, export_symbol_request_confirm, export_to_file,
+    overwrite_prompt, overwrite_required, ExportFormat, ExportOutcome, OVERWRITE_TITLE,
 };
 pub use ipc::{AnalyzeRequest, ExportRequest, InitPayload};
 pub use kv::FileKeyValueStore;

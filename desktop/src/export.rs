@@ -228,6 +228,43 @@ pub fn export_symbol_request(
     export_to_file(&series, dest, format)
 }
 
+/// 覆盖确认对话框标题（框架层定稿，接线层只透传给平台对话框）
+pub const OVERWRITE_TITLE: &str = "覆盖确认";
+
+/// 目标路径是否已有文件需要确认覆盖（纯判定：存在且为普通文件）。
+///
+/// 目录/不存在都不算冲突——不存在直接写，目录会在后续写盘时报错（与既有口径一致）。
+pub fn overwrite_required(path: &Path) -> bool {
+    path.is_file()
+}
+
+/// 覆盖确认提示文案（接线层只透传，不自造文案）
+pub fn overwrite_prompt(path: &Path) -> String {
+    format!("{} 已存在，是否覆盖？", path.display())
+}
+
+/// 带覆盖确认的「另存为」导出（L113 收尾：写前确认未做的补上）。
+///
+/// `confirm` 是接线层注入的平台确认回调（真实环境为原生 yes/no 阻塞对话框，
+/// 见 `platform::confirm_overwrite`；测试为闭包）。口径：目标已存在且 `confirm`
+/// 返回 `false` → `Ok(None)`（用户取消，不落盘、不留残留）；否则走
+/// [`export_symbol_request`] 返回 `Ok(Some(outcome))`。判定与流程全在本层，
+/// 接线层只做 `ask(...)` 的机械透传（与既有薄度契约一致）。
+pub fn export_symbol_request_confirm<F>(
+    symbol: &str,
+    format_raw: &str,
+    dest: &Path,
+    confirm: F,
+) -> DesktopResult<Option<ExportOutcome>>
+where
+    F: FnOnce(&Path) -> bool,
+{
+    if overwrite_required(dest) && !confirm(dest) {
+        return Ok(None);
+    }
+    export_symbol_request(symbol, format_raw, dest).map(Some)
+}
+
 /// 可选字段的空值表示（CSV 无 null，用空单元格）
 fn optional(value: Option<f64>) -> String {
     value.map(|v| v.to_string()).unwrap_or_default()
@@ -581,5 +618,58 @@ mod tests {
         assert_eq!(json["rows"], 1);
         let back: ExportOutcome = serde_json::from_value(json).expect("往返");
         assert_eq!(back, outcome);
+    }
+
+    #[test]
+    fn overwrite_required_only_for_existing_files() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let missing = tmp.path().join("none.csv");
+        assert!(!overwrite_required(&missing), "不存在不算冲突");
+        assert!(!overwrite_required(tmp.path()), "目录不算冲突");
+        std::fs::write(&missing, "x").expect("造文件");
+        assert!(overwrite_required(&missing), "已存在文件应需确认");
+    }
+
+    #[test]
+    fn confirm_declined_keeps_existing_file_untouched() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("save-as.csv");
+        std::fs::write(&dest, "旧内容").expect("造既有文件");
+        // confirm 返回 false → 用户取消：不落盘、原文件不变、无临时残留
+        let outcome =
+            export_symbol_request_confirm("600519", "csv", &dest, |_| false).expect("取消不是错误");
+        assert!(outcome.is_none(), "取消应返回 None");
+        assert_eq!(std::fs::read_to_string(&dest).expect("读原文件"), "旧内容");
+        assert!(!tmp_sibling(&dest).exists(), "取消不应留临时文件");
+    }
+
+    #[test]
+    fn confirm_accepted_replaces_existing_file() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("save-as.csv");
+        std::fs::write(&dest, "旧内容").expect("造既有文件");
+        let outcome = export_symbol_request_confirm("600519", "csv", &dest, |_| true)
+            .expect("确认覆盖")
+            .expect("应返回结果");
+        assert_eq!(outcome.rows, crate::market::DEFAULT_BARS);
+        let body = std::fs::read_to_string(&dest).expect("读新文件");
+        assert_ne!(body, "旧内容", "应已覆盖");
+        assert!(body.contains("600519"), "新内容应含标的: {body:.40}");
+    }
+
+    #[test]
+    fn confirm_skipped_when_no_conflict() {
+        let tmp = tempfile::tempdir().expect("临时目录");
+        let dest = tmp.path().join("fresh.csv");
+        let called = std::cell::Cell::new(false);
+        let outcome = export_symbol_request_confirm("600519", "csv", &dest, |_| {
+            called.set(true);
+            false
+        })
+        .expect("无冲突直接导出")
+        .expect("应返回结果");
+        assert!(!called.get(), "无冲突不应弹确认");
+        assert!(dest.exists());
+        assert_eq!(outcome.rows, crate::market::DEFAULT_BARS);
     }
 }
