@@ -49,6 +49,7 @@ fn current_monitors<R: Runtime>(window: &tauri::Window<R>) -> Vec<window::Monito
         y: m.position().y,
         width: m.size().width,
         height: m.size().height,
+        name: m.name().cloned(),
     };
     let mut monitors: Vec<window::MonitorRect> = window
         .available_monitors()
@@ -58,7 +59,7 @@ fn current_monitors<R: Runtime>(window: &tauri::Window<R>) -> Vec<window::Monito
         .collect();
     if let Ok(Some(primary)) = window.primary_monitor() {
         let primary = rect(&primary);
-        if let Some(index) = monitors.iter().position(|m| *m == primary) {
+        if let Some(index) = monitors.iter().position(|m| m == &primary) {
             let found = monitors.remove(index);
             monitors.insert(0, found);
         }
@@ -68,15 +69,22 @@ fn current_monitors<R: Runtime>(window: &tauri::Window<R>) -> Vec<window::Monito
 
 /// 采集当前窗口几何；`outer_position`/`inner_size` 任一失败 → `None`。
 /// `is_maximized` 失败按 `false` 处理（保守回退：只影响恢复方式，不影响落盘）。
+/// 显示器名取 `current_monitor`（窗口所在屏），供下次恢复「记忆上次所用显示器」。
 fn current_geometry<R: Runtime>(window: &tauri::Window<R>) -> Option<window::WindowGeometry> {
     let position = window.outer_position().ok()?;
     let size = window.inner_size().ok()?;
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .and_then(|m| m.name().cloned());
     Some(window::WindowGeometry {
         x: position.x,
         y: position.y,
         width: size.width,
         height: size.height,
         maximized: window.is_maximized().unwrap_or(false),
+        monitor,
     })
 }
 

@@ -242,10 +242,11 @@ mod tests {
             width: 1400,
             height: 900,
             maximized: false,
+            monitor: None,
         };
         let mut tracker = state.window_tracker().lock().expect("窗口节流锁中毒");
         assert_eq!(
-            tracker.observe(chrono::Utc::now(), geometry),
+            tracker.observe(chrono::Utc::now(), geometry.clone()),
             Some(geometry),
             "首次事件应判定落盘"
         );
