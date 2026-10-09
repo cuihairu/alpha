@@ -231,7 +231,7 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 | --- | --- | --- |
 | L113 文件系统集成与本地导出 | ✅ 已落地（见 §6）：用户自选路径导出全流程 + 覆盖写原生确认（**已落 2026-10-10**） | 批量多标的仍走 `exports/` 目录导出（无确认面，登记） |
 | L114 系统通知与托盘 | ✅ 已落地（见 §7）：通知模型/队列/托盘菜单状态机 + 告警检查链（check_alerts）+ 托盘接线（platform.rs）+ 通知点击唤起主窗（**已落 2026-10-10**，见 §7 注） | 托盘图标随状态换图（**登记待资产**，2026-10-10 拍板：缺多套图标资产不自行生成代餐）；定时轮询取数（**维持登记**，2026-10-10 拍板：确定性行情不随时间变化，真实时变后端接入前无消费方）；XDG 点击真机验收 |
-| L115 窗口管理与主题适配 | ✅ 已落地（见 §8）：窗口几何持久化 + 多显示器放置 + **记忆上次所用显示器**（2026-10-10）+ 深浅色跟随/覆盖 | 托盘图标随主题换图（需多套图标资产）；最大化窗口回原屏（需 `set_position`→`maximize` 平台时序，真机多屏验收） |
+| L115 窗口管理与主题适配 | ✅ 已落地（见 §8）：窗口几何持久化 + 多显示器放置 + **记忆上次所用显示器**（2026-10-10）+ **最大化回原屏**（落屏提示逻辑+接线，2026-10-10）+ 深浅色跟随/覆盖 | 托盘图标随主题换图（需多套图标资产）；最大化回原屏跨平台表现真机多屏验收（先动后最大的闪烁、DPI 混排精度） |
 | L116 本地数据库同步与离线模式 | ✅ 已落地（见 §9）：kv 快照 + 连通探测 + 指纹增量同步 + 离线降级读 | 换 SQLite（出现范围查询需求时）；真实 HTTP 远端实现（QuoteRemote 缝已留） |
 | L117 快捷键与右键菜单 | ✅ 已落地（见 §10）：框架层组合键表/菜单模型 + 全局注册 + 壳层分发；React 产物接入后**前端消费面未迁移**（快捷键事件/右键菜单暂无消费方，命令保留注册，2026-10-09 拍板 A 落地登记） | 通知点击唤起主窗后的菜单焦点处理；「记忆上次所用显示器」已落（2026-10-10），菜单落点可随真机多屏一并校（登记） |
 
@@ -418,7 +418,7 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
 启动 setup ──▶ window_gui::restore_window（读 window-state.json → 枚举显示器）
         │            │ window::resolve_placement（框架层决策）
         ▼            ▼
-   无保存/非法 → OS 默认   maximized → maximize()
+   无保存/非法 → OS 默认   maximized → 落屏提示 set_position → maximize()
    任一屏可见 → 原样还原   否则 → 钳入记忆显示器（名在且仍在）否则主屏
 
 移动/缩放/关闭事件 ──▶ window_gui::on_window_event
@@ -441,6 +441,12 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
   已落（2026-10-10）：`remembered_monitor` 按名查，名缺/无匹配退化为按
   可见性+主屏（向后兼容旧状态文件）；被钳的屏比窗口小时尺寸钳到屏宽、
   贴原点（`clamp_axis` 处理 span < size 的负区间）；
+* `maximized_position_hint`（2026-10-10 落）：最大化恢复的落屏提示——
+  `maximize()` 只填窗口「当前所在屏」，OS 默认放置通常在主屏，记忆显示器
+  对最大化窗口本不生效；提示取记忆屏原点（外框顶在屏内 → 最大化必然落在
+  该屏），无记忆名且坐标可见 → `None` 不干预，记忆屏拔出/离屏 → 主屏
+  （`monitors[0]`）原点，无监视器信息 → `None`；接线层在 `maximize()` 前
+  `set_position` 该提示（`restore_target`，显示器枚举复用恢复时那份）；
 * `load_window_state` 缺失/损坏 → `None`（与 config/alerts 容错同口径）；
   `save_window_state` 临时文件 + rename 原子替换（负坐标往返保留）；
   `monitor` 键 `skip_serializing_if`：无记忆名不写（旧文件无该键 → `None`）；
@@ -451,18 +457,19 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
   `resolve_theme(pref, system_prefers_dark)` → `"light"`/`"dark"`，Light/Dark
   强制覆盖系统。
 
-接线（`src/window_gui.rs`，gui 门控，126 行）：`restore_window`（setup）/
+接线（`src/window_gui.rs`，gui 门控，137 行）：`restore_window`（setup）/
 `on_window_event`（Moved|Resized → 节流 observe，CloseRequested → flush）/
 `current_monitors`（`available_monitors` + `primary_monitor` 排首）/机械翻译
 `Monitor`→`MonitorRect`（含 `name`）；`gui.rs` 只加两行（setup 调恢复 + Builder
 挂事件，215 行仍在 220 上限内）；`AppState` 内嵌 `Mutex<WindowStateTracker>`（与
 通知队列同模式）。纪律由 wiring_contract `window_glue_stays_mechanical`
-（\<140 行/无命令/无自造错误串/必须引用 `window::`）与
+（\<140 行/无命令/无自造错误串/必须引用 `window::` + 最大化恢复必须取
+`maximized_position_hint` 落屏提示）与
 `window_management_is_wired` 锁定。
 真机边界（登记）：`WindowGeometry` 去 `Copy`（含 `Option<String>` 显示器名），
-调用点改 `clone`；记忆显示器只覆盖「钳制目标选择」——**最大化窗口回到
-上次所在屏**仍受限于 tauri `maximize()` 在窗口当前屏生效（需先 `set_position`
-再 maximize 的平台时序，留真机多屏验收）。
+调用点改 `clone`；最大化窗口回上次所在屏的**逻辑与接线已落**（2026-10-10：
+先按提示 `set_position` 再 maximize），跨平台时序的实际表现（先动后最大的
+闪烁、DPI 混排下的落屏判定）留真机多屏验收。
 
 主题的真实边界（假设已注明）：Tauri 1.x **没有运行期 `Window::set_theme`**
 （v2 才有），原生窗口装饰的主题只能由 `tauri.conf.json` 创建期决定——本仓

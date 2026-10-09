@@ -505,6 +505,10 @@ fn window_glue_stays_mechanical() {
         code.contains("window::"),
         "窗口胶水应从框架层 window.rs 取清洗/钳制/节流判定，而非自造"
     );
+    assert!(
+        code.contains("maximized_position_hint"),
+        "最大化恢复应先取框架层落屏提示再 maximize（记忆显示器对最大化窗口生效）"
+    );
 }
 
 /// L115 主题适配（React 产物）：配置 theme 为桌面启动基线（面板解析后写

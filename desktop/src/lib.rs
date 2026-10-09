@@ -84,6 +84,6 @@ pub use shortcuts::{
 };
 pub use state::{bootstrap_app, AppState};
 pub use window::{
-    load_window_state, resolve_placement, save_window_state, MonitorRect, WindowGeometry,
-    WindowStateTracker,
+    load_window_state, maximized_position_hint, resolve_placement, save_window_state, MonitorRect,
+    WindowGeometry, WindowStateTracker,
 };

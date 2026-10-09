@@ -26,15 +26,26 @@ pub fn restore_window<R: Runtime>(app: &tauri::App<R>) {
         return;
     };
     let saved = window::load_window_state(&config_dir.join(paths::WINDOW_STATE_FILE_NAME));
-    let Some(target) = window::resolve_placement(saved, &current_monitors(&window)) else {
+    let monitors = current_monitors(&window);
+    let Some(target) = window::resolve_placement(saved, &monitors) else {
         return;
     };
-    restore_target(&window, &target);
+    restore_target(&window, &target, &monitors);
 }
 
-/// 应用还原目标（尺寸先行、位置收尾，最终位置为准；最大化只 `maximize`）
-fn restore_target<R: Runtime>(window: &tauri::Window<R>, target: &window::WindowGeometry) {
+/// 应用还原目标（尺寸先行、位置收尾，最终位置为准）
+///
+/// 最大化：先按框架层落屏提示 [`window::maximized_position_hint`] 定位再
+/// `maximize`——否则 maximize 只填 OS 默认放置的那块屏，记忆显示器不生效
+fn restore_target<R: Runtime>(
+    window: &tauri::Window<R>,
+    target: &window::WindowGeometry,
+    monitors: &[window::MonitorRect],
+) {
     if target.maximized {
+        if let Some((x, y)) = window::maximized_position_hint(target, monitors) {
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
         let _ = window.maximize();
         return;
     }

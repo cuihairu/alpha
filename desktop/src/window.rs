@@ -113,6 +113,24 @@ pub fn resolve_placement(
     })
 }
 
+/// 最大化恢复的落屏提示（接线层在 `maximize()` **前** `set_position` 此处）
+///
+/// 为什么需要：最大化窗口恢复时 OS 先按默认策略放置（通常主屏），`maximize()`
+/// 只填满窗口「当前所在屏」——记忆显示器对最大化窗口不生效。提示取记忆屏
+/// 原点（外框顶在屏内 → 最大化必然落在该屏）；无记忆名但坐标任一屏可见 →
+/// `None` 不干预（OS 默认落点即正确）；记忆屏拔出/坐标离屏 → 回 `monitors[0]`
+/// 原点；无监视器信息 → `None`（无法判定时宁可不干预，与 [`resolve_placement`]
+/// 同口径）。最大化标志与尺寸不动（`maximize()` 自会处理）。
+pub fn maximized_position_hint(g: &WindowGeometry, monitors: &[MonitorRect]) -> Option<(i32, i32)> {
+    if let Some(m) = remembered_monitor(g, monitors) {
+        return Some((m.x, m.y));
+    }
+    if monitors.iter().any(|m| m.shows_window(g)) {
+        return None;
+    }
+    monitors.first().map(|m| (m.x, m.y))
+}
+
 /// 按名称在本次枚举的显示器里找「上次所用显示器」；无名字/无匹配 → `None`
 fn remembered_monitor<'a>(
     g: &WindowGeometry,
@@ -341,6 +359,56 @@ mod tests {
         let saved = geom_on(3000, 100, 1400, 900, "DP-2");
         let placed = resolve_placement(Some(saved), &[main]).expect("应钳回主屏");
         assert_eq!(placed.x, 1920 - 1400, "右缘贴主屏右缘");
+    }
+
+    #[test]
+    fn maximized_hint_lands_on_remembered_monitor() {
+        // 上次最大化在 DP-2：恢复时提示 DP-2 原点（先 set_position 再 maximize）
+        let main = named_monitor(0, 0, 1920, 1080, "eDP-1");
+        let side = named_monitor(1920, 0, 1600, 900, "DP-2");
+        let monitors = [main, side];
+        let mut g = geom_on(4000, 100, 1400, 900, "DP-2");
+        g.maximized = true;
+        assert_eq!(
+            maximized_position_hint(&g, &monitors),
+            Some((1920, 0)),
+            "最大化恢复应落记忆屏原点"
+        );
+    }
+
+    #[test]
+    fn maximized_hint_skips_when_position_still_visible_without_names() {
+        let main = monitor(0, 0, 1920, 1080);
+        assert_eq!(
+            maximized_position_hint(&geom(100, 100, 1400, 900), &[main]),
+            None,
+            "无名且坐标可见：OS 默认落点即正确，不干预"
+        );
+    }
+
+    #[test]
+    fn maximized_hint_falls_back_to_primary_when_remembered_monitor_gone() {
+        // 记忆的 DP-2 已拔出 → 回主屏原点；无名且坐标离屏同样回主屏原点
+        let main = named_monitor(0, 0, 1920, 1080, "eDP-1");
+        assert_eq!(
+            maximized_position_hint(
+                &geom_on(3000, 100, 1400, 900, "DP-2"),
+                std::slice::from_ref(&main)
+            ),
+            Some((0, 0)),
+            "记忆屏不在 → 主屏原点"
+        );
+        assert_eq!(
+            maximized_position_hint(&geom(3000, 100, 1400, 900), &[main]),
+            Some((0, 0)),
+            "无名且离屏 → 主屏原点"
+        );
+    }
+
+    #[test]
+    fn maximized_hint_is_none_without_monitor_info() {
+        let g = geom_on(3000, 100, 1400, 900, "DP-2");
+        assert_eq!(maximized_position_hint(&g, &[]), None, "无监视器信息不干预");
     }
 
     #[test]
