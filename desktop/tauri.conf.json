@@ -1,9 +1,9 @@
 {
   "build": {
-    "beforeBuildCommand": "cd web && npm run build",
-    "beforeDevCommand": "cd web && npm start",
-    "devPath": "http://localhost:8080",
-    "distDir": "../web/dist",
+    "beforeBuildCommand": "cd web/app && npm run build",
+    "beforeDevCommand": "cd web/app && npm run dev",
+    "devPath": "http://localhost:5173",
+    "distDir": "../web/app/dist",
     "withGlobalTauri": true
   },
   "package": {

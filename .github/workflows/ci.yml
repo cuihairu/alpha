@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  NODE_VERSION: '24'
 
 jobs:
   version:
@@ -96,7 +97,19 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       # gui 特性：Tauri 接线层（命令 + generate_context!）唯一能在无额外系统依赖的
-      # runner 上编译的作业（macOS WKWebView 内置；Linux 需 WebKitGTK/libSoup）
+      # runner 上编译的作业（macOS WKWebView 内置；Linux 需 WebKitGTK/libSoup）。
+      # generate_context! 在编译期嵌入 distDir 产物——先构建 web/app（web-framework
+      # §6 拍板 A：frontendDist 指向 web/app/dist）
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: 构建 web/app
+        run: |
+          cd web/app
+          npm ci
+          npm run build
+
       - name: 运行测试（gui 特性全量）
         run: cargo test -p alpha-desktop --all-targets
 
@@ -116,6 +129,19 @@ jobs:
 
       - name: 缓存 Cargo
         uses: Swatinem/rust-cache@v2
+
+      # 桥接单测（vitest）+ 产物构建先行：check-desktop.sh 的 distDir 断言与
+      # 桥接源码断言都以此为输入（web-framework §6 拍板 A）
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: web/app 测试与构建
+        run: |
+          cd web/app
+          npm ci
+          npm test
+          npm run build
 
       - name: 桌面端框架门禁
         run: scripts/check-desktop.sh

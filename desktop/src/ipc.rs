@@ -211,7 +211,8 @@ mod tests {
         );
     }
 
-    /// 前端契约：字段名即 DOM 读取的键，桌面兜底壳按 config/source/validation 渲染
+    /// 前端契约：字段名即序列化键，桌面面板（web/app DesktopPanel）按
+    /// config/source/validation 渲染
     #[test]
     fn init_payload_field_names_match_frontend_contract() {
         let json = serde_json::to_value(InitPayload::new(

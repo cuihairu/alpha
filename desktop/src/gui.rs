@@ -11,9 +11,8 @@
 //! `Result<(), Vec<String>>` 当 `Vec<String>` 用的编译错误）。命令体越薄，留在
 //! macOS 作业里、无法本地验证的代码量越少。
 //!
-//! 命令清单与 web 前端调用方一一对应（见 web/app.js 与
-//! `web/dist/desktop-shell.js` 的 `invoke`；一致性由
-//! `desktop/tests/wiring_contract.rs` 锁定）。
+//! 命令清单与 web 前端调用方一一对应（见 `web/app/src/lib/desktop.ts` 桥接的
+//! `invoke` 包装；一致性由 `desktop/tests/wiring_contract.rs` 锁定）。
 
 use crate::alerts;
 use crate::analysis;

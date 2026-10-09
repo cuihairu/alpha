@@ -24,7 +24,7 @@ Tauri 写死为直接依赖，整个包在 Linux CI 上无法编译——本仓�
 保证（详见 §4.1；2026-10 对账实数，见 §6）。
 
 ```
-frontend (web/dist)  ──invoke──▶  gui.rs（#[tauri::command] 薄包装）
+frontend (web/app/dist, React)  ──invoke──▶  gui.rs（#[tauri::command] 薄包装）
                                         │ 委派
                                         ▼
               config / paths / kv / market / analysis / export / alerts / app
@@ -52,6 +52,14 @@ frontend (web/dist)  ──invoke──▶  gui.rs（#[tauri::command] 薄包装
 不应再出现任何判断，见 §4.1 的薄度契约。
 
 ## 3. 前端集成与「不白屏」
+
+〔现注（2026-10-09，web-framework-selection.md §6 拍板 A 落地）：`distDir` 已改指
+`../web/app/dist`（React 产物，`cd web/app && npm run build`），`devPath` 改指
+`http://localhost:5173`（vite dev，strictPort 钉死）；兜底壳
+`web/dist/index.html` + `desktop-shell.js` 已退休删除——React 产物由 Vite 构建
+必然产出 `index.html`，不再有「新克隆空目录白屏」问题；桌面专属面迁移为
+`web/app` 的 `DesktopPanel` 组件 + `src/lib/desktop.ts` 桥接（@tauri-apps/api
+v1）。下文兜底壳机制描述保留作历史口径。〕
 
 `desktop/tauri.conf.json` 的 `build.distDir` 指向 `../web/dist`（真实 Web 前端的
 构建产物），`build.devPath` 指向 `http://localhost:8080`（`cd web && npm start`
@@ -205,7 +213,7 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 | L114 系统通知与托盘 | ✅ 已落地（见 §7）：通知模型/队列/托盘菜单状态机 + 告警检查链（check_alerts）+ 托盘接线（platform.rs） | 通知点击唤起主窗（**拍板 2026-10-10：开工**，见 §7 注）；托盘图标随状态换图（需多套图标资产）；定时轮询取数 |
 | L115 窗口管理与主题适配 | ✅ 已落地（见 §8）：窗口几何持久化 + 多显示器放置 + 深浅色跟随/覆盖 | 记忆「上次所用显示器」（现按可见性判定）；托盘图标随主题换图 |
 | L116 本地数据库同步与离线模式 | ✅ 已落地（见 §9）：kv 快照 + 连通探测 + 指纹增量同步 + 离线降级读 | 换 SQLite（出现范围查询需求时）；真实 HTTP 远端实现（QuoteRemote 缝已留） |
-| L117 快捷键与右键菜单 | ✅ 已落地（见 §10）：框架层组合键表/菜单模型 + 全局注册 + 壳层分发 | 通知点击唤起主窗后的菜单焦点处理；「记忆上次所用显示器」后再校菜单落点 |
+| L117 快捷键与右键菜单 | ✅ 已落地（见 §10）：框架层组合键表/菜单模型 + 全局注册 + 壳层分发；React 产物接入后**前端消费面未迁移**（快捷键事件/右键菜单暂无消费方，命令保留注册，2026-10-09 拍板 A 落地登记） | 通知点击唤起主窗后的菜单焦点处理；「记忆上次所用显示器」后再校菜单落点 |
 
 另：演示行情是确定性生成的占位数据，接真实后端（api-gateway）时只需替换
 `market` 模块的取数实现，分析/导出链路不动。

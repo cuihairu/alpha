@@ -11,9 +11,10 @@
 #   1. tauri.conf.json 可解析且必填字段齐全（identifier/distDir/devPath/窗口尺寸）；
 #   2. bundle.icon 列出的文件真实存在（否则打包期才炸）；
 #   3. distDir 存在且含 index.html（否则窗口全白——骨架的核心诉求之一）；
-#   4. 兜底壳用的 Tauri 版本契约：全局 API 开关在 **build** 段（v1 语义；v2 才是
-#      tauri 段，字段名/段位置写错只会在 tauri_build::build() 运行时才炸），
-#      且兜底壳代码里不得出现 v2 的 ipcRenderer（v1 全局 API 直接提供 invoke）；
+#   4. 前端桥接的 Tauri 版本契约：全局 API 开关在 **build** 段（v1 语义；v2 才是
+#      tauri 段，字段名/段位置写错只会在 tauri_build::build() 运行时才炸）——
+#      桥接（web/app/src/lib/desktop.ts）以 window.__TAURI__ 探测桌面运行时，
+#      关闭 withGlobalTauri 会让桌面面板整面隐藏；
 #   5. allowlist 放开的 API 在 desktop/Cargo.toml 里确实启用了对应 tauri 特性
 #      （allowlist 与 Rust feature 不一致是运行期 panic 的经典来源）；
 #   6. 无孤儿配置：真正的 crate 根是 desktop/，desktop/src-tauri/ 不应存在
@@ -98,10 +99,11 @@ else:
             f"build.distDir 缺少 index.html（窗口会全白）: {dist_dir}/index.html"
         )
 
-# 4) 兜底壳依赖全局 API → build 段必须 withGlobalTauri（v1 语义）
+# 4) 桥接运行时探测依赖全局 API → build 段必须 withGlobalTauri（v1 语义）
 if not build.get("withGlobalTauri"):
     errors.append(
-        "build.withGlobalTauri 未开启：distDir 兜底壳通过 window.__TAURI__ 调 Rust 命令"
+        "build.withGlobalTauri 未开启：前端桥接以 window.__TAURI__ 探测桌面运行时"
+        "（isTauriRuntime），关闭会让桌面面板整面隐藏"
     )
 if tauri.get("withGlobalTauri") is not None:
     errors.append(
@@ -109,22 +111,23 @@ if tauri.get("withGlobalTauri") is not None:
         "放在 tauri 段会让 tauri_build::build() 因 deny_unknown_fields 直接失败）"
     )
 
-# 4b) 兜底壳代码的 IPC 入口必须是 v1 的 window.__TAURI__.invoke
-if dist_dir.is_dir():
-    shell_path = dist_dir / "desktop-shell.js"
-    if not shell_path.is_file():
-        errors.append(f"兜底壳脚本缺失: {shell_path}")
-    else:
-        shell = shell_path.read_text(encoding="utf-8")
-        # 去掉注释后再断言：注释里可以解释「为什么不用 v2 的 ipcRenderer」
-        code = re.sub(r"/\*.*?\*/", "", shell, flags=re.S)
-        code = re.sub(r"(?m)^\s*//.*$", "", code)
-        if "window.__TAURI__" not in code:
-            errors.append("兜底壳未使用 window.__TAURI__（需 build.withGlobalTauri 注入）")
-        if "ipcRenderer" in code:
-            errors.append(
-                "兜底壳代码出现 ipcRenderer：那是 Tauri v2 的 API，v1 全局 API 直接提供 invoke"
-            )
+# 4b) 前端桥接（web-framework §6 拍板 A：桌面复用 React 产物）的 IPC 入口
+#     必须是 v1 invoke（@tauri-apps/api），不得出现 v2 的 ipcRenderer
+bridge_rel = "web/app/src/lib/desktop.ts"
+bridge_path = root / bridge_rel
+if not bridge_path.is_file():
+    errors.append(f"前端桥接缺失: {bridge_rel}")
+else:
+    bridge = bridge_path.read_text(encoding="utf-8")
+    # 去掉注释后再断言：注释里可以解释「为什么不用 v2 的 ipcRenderer」
+    code = re.sub(r"/\*.*?\*/", "", bridge, flags=re.S)
+    code = re.sub(r"(?m)^\s*//.*$", "", code)
+    if "invoke(" not in code:
+        errors.append("桥接未使用 invoke（@tauri-apps/api v1 传输面）")
+    if "ipcRenderer" in code:
+        errors.append(
+            "桥接代码出现 ipcRenderer：那是 Tauri v2 的 API，v1 走 @tauri-apps/api invoke"
+        )
 
 # 5) allowlist 与 Cargo.toml 的 tauri 特性对齐
 allow = tauri.get("allowlist", {})
@@ -183,14 +186,8 @@ if errors:
     sys.exit(1)
 print(f"✅ tauri.conf.json 自洽（图标 {len(icons)} 个 / distDir {dist}）")
 PY
-# 兜底壳是手写 JS（无构建期类型检查）：语法错误会让窗口功能静默失效，先做语法门禁
-DIST_DIR=$(python3 -c "import json; print(json.load(open('desktop/tauri.conf.json'))['build']['distDir'])")
-if command -v node >/dev/null 2>&1; then
-  node --check "desktop/$DIST_DIR/desktop-shell.js" || fail "兜底壳 desktop-shell.js 语法错误"
-  ok "兜底壳 JS 语法通过"
-else
-  info "无 node，跳过兜底壳语法检查（CI 的 ubuntu-latest 自带 node）"
-fi
+# 前端桥接是 TS（tsc --noEmit + vite build 全程类型/语法检查）：语法门禁由
+# web/app 构建承担（CI 的 Desktop Framework 作业在本脚本之前跑 npm test + build）
 ok "配置自洽性检查通过"
 
 echo "--- [2/5] 无孤儿 Tauri 配置"

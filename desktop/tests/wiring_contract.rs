@@ -8,12 +8,13 @@
 //! 本文件能做的是把「接线层里不该出现的东西」变成**可本地执行的断言**：
 //! * 命令体不得含业务判断（判空、错误文案、默认值兜底）——一律在框架层；
 //! * 命令体只能委派到框架层的 `*_request` / `bootstrap_app` 入口；
-//! * 命令名两侧一致（`generate_handler!` ↔ `desktop-shell.js` 的 `invoke`）。
+//! * 命令名两侧一致（`generate_handler!` ↔ `web/app/src/lib/desktop.ts` 桥接的
+//!   `invoke`；web-framework §6 拍板 A 后桌面复用 React 产物，桥接即前端契约面）。
 //!
 //! 不能覆盖的部分（诚实边界）：Tauri 自身的类型是否用对、`#[tauri::command]` 宏
 //! 展开是否成立，仍需 macOS 作业编译；手段是把留在那里的代码压到最小。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -203,9 +204,9 @@ fn wiring_layer_does_not_reach_around_request_entry_points() {
     }
 }
 
-/// 注册的命令与桌面兜底壳调用的命令必须一致
+/// 注册的命令与前端桥接的 invoke 包装必须一一对应（generate_handler! ↔ 桥接）
 #[test]
-fn registered_commands_match_fallback_shell_invocations() {
+fn registered_commands_match_bridge_invocations() {
     let gui = gui_source();
     let registered: Vec<&str> = gui
         .split("generate_handler![")
@@ -223,30 +224,25 @@ fn registered_commands_match_fallback_shell_invocations() {
         14,
         "注册命令数应与前端契约一致，实际: {registered:?}"
     );
+    let bridge = bridge_source();
     for cmd in &registered {
-        let shell =
-            std::fs::read_to_string(crate_dir().join(tauri_dist_dir()).join("desktop-shell.js"))
-                .expect("读兜底壳");
         assert!(
-            shell.contains(&format!("invoke(\"{cmd}\"")) || !shell_uses(cmd, &shell),
-            "兜底壳在调用未注册的命令 {cmd}"
+            bridge.contains(&format!("invoke('{cmd}'")),
+            "桥接应包装注册命令 {cmd}（web/app/src/lib/desktop.ts 的 invoke 面）"
         );
     }
 }
 
-fn tauri_dist_dir() -> String {
-    let value: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(crate_dir().join("tauri.conf.json")).unwrap(),
-    )
-    .expect("读配置");
-    value["build"]["distDir"]
-        .as_str()
-        .expect("distDir 应为字符串")
-        .to_string()
+/// 前端桥接源码（web-framework §6 拍板 A 后的 IPC 契约面）
+fn bridge_source() -> String {
+    std::fs::read_to_string(crate_dir().join("../web/app/src/lib/desktop.ts"))
+        .expect("读 web/app/src/lib/desktop.ts（桥接是 desktop 仓库内契约，文件必须存在）")
 }
 
-fn shell_uses(cmd: &str, shell: &str) -> bool {
-    shell.contains(&format!("invoke(\"{cmd}\""))
+/// 桌面面板源码（桥接的消费面：配置自举/导出/告警/离线的 React 装配）
+fn panel_source() -> String {
+    std::fs::read_to_string(crate_dir().join("../web/app/src/components/DesktopPanel.tsx"))
+        .expect("读 DesktopPanel.tsx")
 }
 
 /// 接线层文件本身应保持在「薄」的数量级：命令体下沉后不该再出现大段业务
@@ -348,12 +344,11 @@ fn lib_reexports_point_to_existing_items() {
     assert!(checked >= 15, "重导出条目过少，解析可能失效: {checked}");
 }
 
-/// 桌面兜底壳的四个命令在框架层都有对应入口（前后端与框架三方一致）
+/// 前端桥接的导出面在框架层都有对应入口（桥接↔框架两方一致；桥接↔generate_handler!
+/// 由 registered_commands_match_bridge_invocations 锁定）
 #[test]
-fn shell_commands_have_framework_entry_points() {
-    let shell =
-        std::fs::read_to_string(crate_dir().join(tauri_dist_dir()).join("desktop-shell.js"))
-            .expect("读兜底壳");
+fn bridge_commands_have_framework_entry_points() {
+    let bridge = bridge_source();
     for cmd in [
         "initialize_app",
         "get_app_info",
@@ -367,29 +362,32 @@ fn shell_commands_have_framework_entry_points() {
         "get_context_menu",
     ] {
         assert!(
-            shell.contains(&format!("invoke(\"{cmd}\"")),
-            "兜底壳应调用 {cmd}"
+            bridge.contains(&format!("invoke('{cmd}'")),
+            "桥接应包装 {cmd}"
         );
     }
-    let _ = Path::new("/");
 }
 
-/// L113 原生文件集成：导出必须走系统「另存为」对话框拿路径（`dialog.save`），
-/// 而不是把用户路径写死在前端——保存位置由用户在对话框里定
+/// L113 原生文件集成：导出必须走系统「另存为」对话框拿路径（saveDialog 包装
+/// @tauri-apps/api dialog），而不是把用户路径写死在前端——保存位置由用户定；
+/// 面板消费 saveDialog，桥接按 camelCase 传 filePath
 #[test]
-fn shell_export_uses_native_save_dialog() {
-    let shell =
-        std::fs::read_to_string(crate_dir().join(tauri_dist_dir()).join("desktop-shell.js"))
-            .expect("读兜底壳");
+fn panel_export_uses_native_save_dialog() {
+    let bridge = bridge_source();
+    let panel = panel_source();
     assert!(
-        shell.contains("dialog.save"),
-        "兜底壳导出应经原生另存为对话框拿路径"
+        bridge.contains("export function saveDialog"),
+        "桥接应提供 saveDialog（原生另存为对话框包装）"
     );
     assert!(
-        shell.contains("filePath"),
-        "兜底壳应把对话框返回的路径按 filePath 传给 Rust 命令——Tauri 1.x 命令
+        bridge.contains("filePath"),
+        "桥接应把对话框返回的路径按 filePath 传给 Rust 命令——Tauri 1.x 命令
         参数默认 camelCase（tauri-macros wrapper.rs 的 ArgumentCase::Camel），
         写 file_path 会在运行期静默失配（CI 只编译不启动，此断言是唯一本地拦截点）"
+    );
+    assert!(
+        panel.contains("saveDialog"),
+        "面板导出应经 saveDialog 拿路径（L113 链路）"
     );
 }
 
@@ -424,14 +422,12 @@ fn platform_glue_stays_mechanical() {
 /// （tauri-macros wrapper.rs `ArgumentCase::Camel`），snake 键会在运行期
 /// 静默失配——CI 只编译不启动，唯有源码断言能在本地拦截。
 #[test]
-fn shell_alert_loop_uses_v1_camel_case_arguments() {
-    let shell =
-        std::fs::read_to_string(crate_dir().join(tauri_dist_dir()).join("desktop-shell.js"))
-            .expect("读兜底壳");
-    for needle in ["invoke(\"set_price_alert\"", "targetPrice", "alertType"] {
+fn bridge_alert_loop_uses_v1_camel_case_arguments() {
+    let bridge = bridge_source();
+    for needle in ["invoke('set_price_alert'", "targetPrice", "alertType"] {
         assert!(
-            shell.contains(needle),
-            "兜底壳布防告警应含 {needle}（v1 参数默认 camelCase）"
+            bridge.contains(needle),
+            "桥接布防告警应含 {needle}（v1 参数默认 camelCase）"
         );
     }
 }
@@ -476,63 +472,48 @@ fn window_glue_stays_mechanical() {
     );
 }
 
-/// L115 主题适配：配置/系统的深浅色切换落在内容层 data-theme + CSS 变量，
-/// 且跟随 prefers-color-scheme（Tauri 1.x 无运行期 set_theme，原生装饰由
-/// tauri.conf.json "theme": "System" 创建期跟随系统）
+/// L115 主题适配（React 产物）：配置 theme 为桌面启动基线（面板解析后写
+/// data-theme），ThemeToggle 三态偏好接管后续切换；深浅令牌在 styles.css
+/// （Tauri 1.x 无运行期 set_theme，原生装饰由创建期跟随系统）
 #[test]
-fn shell_theme_follows_system_with_override() {
-    let dist = tauri_dist_dir();
-    let shell = std::fs::read_to_string(crate_dir().join(&dist).join("desktop-shell.js"))
-        .expect("读兜底壳");
+fn panel_theme_applies_config_with_system_fallback() {
+    let panel = panel_source();
     for needle in [
-        "data-theme",
         "prefers-color-scheme",
-        "applyTheme(cfg.theme)",
+        "dataset.theme",
+        "parseThemePref",
+        "resolveTheme",
     ] {
         assert!(
-            shell.contains(needle),
-            "兜底壳主题适配应含 {needle}（system 跟随 + 配置覆盖）"
+            panel.contains(needle),
+            "面板主题适配应含 {needle}（配置基线 + system 跟随）"
         );
     }
-    let index =
-        std::fs::read_to_string(crate_dir().join(&dist).join("index.html")).expect("读兜底壳页面");
+    let styles =
+        std::fs::read_to_string(crate_dir().join("../web/app/src/styles.css")).expect("读样式");
     assert!(
-        index.contains("[data-theme=\"light\"]"),
-        "兜底壳页面应有浅色主题覆盖块（覆盖既有组件的 CSS 变量）"
-    );
-    assert!(
-        index.contains("--chip"),
-        "既有组件的硬编码底色（badge/code/button）应主题化为变量"
+        styles.contains("[data-theme='dark']"),
+        "styles.css 应有深色主题令牌块（data-theme 驱动）"
     );
 }
 
 /// L116 离线缓存与同步的前端接线：读路径必须渲染来源标记（live/cache）与
 /// missing（缓存缺失如实上报），同步报告按字段渲染——降级语义在 Rust 侧，
-/// 壳层职责只是如实展示
+/// 面板职责只是如实展示
 #[test]
-fn shell_offline_card_renders_source_and_missing() {
-    let dist = tauri_dist_dir();
-    let shell = std::fs::read_to_string(crate_dir().join(&dist).join("desktop-shell.js"))
-        .expect("读兜底壳");
+fn panel_offline_renders_source_and_missing() {
+    let panel = panel_source();
     for needle in [
-        "invoke(\"get_offline_quotes\"",
-        "invoke(\"sync_offline_data\"",
+        "getOfflineQuotes",
+        "syncOfflineData",
         "q.source",
-        "missing",
-        "applied",
-        "unchanged",
+        "offline.missing",
+        "sync.applied",
+        "sync.unchanged",
     ] {
         assert!(
-            shell.contains(needle),
-            "兜底壳离线卡片应含 {needle}（来源标记/缺失上报/增量报告是前端契约）"
-        );
-    }
-    let index =
-        std::fs::read_to_string(crate_dir().join(&dist).join("index.html")).expect("读兜底壳页面");
-    for id in ["offline-result", "sync-result", "offline-btn", "sync-btn"] {
-        assert!(
-            index.contains(&format!("id=\"{id}\"")),
-            "兜底壳页面应有离线卡片元素 {id}"
+            panel.contains(needle),
+            "面板离线卡应含 {needle}（来源标记/缺失上报/增量报告是前端契约）"
         );
     }
 }
@@ -573,40 +554,8 @@ fn shortcut_glue_stays_mechanical() {
     );
 }
 
-/// L117 快捷键与右键菜单的前端接线：动作经 Rust 广播的 "shortcut" 事件触发、
-/// 菜单模型取自 get_context_menu（hasQuote/hasSymbols 必须 camelCase——v1 命令
-/// 参数默认 ArgumentCase::Camel，snake 键运行期静默失配，CI 不启动、源码断言
-/// 是唯一本地拦截点）、右键 preventDefault + Esc/点击收起、ACTIONS 表分发到
-/// 框架层定义的全部动作 id
-#[test]
-fn shell_keyboard_and_context_menu_wired() {
-    let dist = tauri_dist_dir();
-    let shell = std::fs::read_to_string(crate_dir().join(&dist).join("desktop-shell.js"))
-        .expect("读兜底壳");
-    for needle in [
-        "event.listen(\"shortcut\"",
-        "invoke(\"get_context_menu\"",
-        "hasQuote",
-        "hasSymbols",
-        "\"contextmenu\"",
-        "preventDefault",
-        "Escape",
-        "ACTIONS",
-        "refresh_quotes",
-        "copy_price",
-        "export_symbol",
-        "sync_offline",
-        "read_offline",
-    ] {
-        assert!(
-            shell.contains(needle),
-            "兜底壳快捷键/右键接线应含 {needle}（事件监听/模型拉取/动作分发）"
-        );
-    }
-    let index =
-        std::fs::read_to_string(crate_dir().join(&dist).join("index.html")).expect("读兜底壳页面");
-    assert!(
-        index.contains(".ctx-menu") && index.contains(".ctx-disabled"),
-        "兜底壳页面应有右键菜单样式（含置灰态）"
-    );
-}
+// L117 快捷键与右键菜单：Rust 侧注册/胶水契约见 shortcut_glue_stays_mechanical。
+// 前端消费面（"shortcut" 事件分发 / get_context_menu 菜单渲染）**未迁移**到
+// React 产物（兜底壳的 demo 面没有对应产品场景，命令保留注册、事件暂无
+// 消费方）——迁移时恢复一条面板源码断言（事件监听 + ACTIONS 分发 +
+// hasQuote/hasSymbols camelCase），边界登记 docs/desktop-framework.md §5。

@@ -116,7 +116,15 @@ CI 侧观察（登记，非阻塞）：`web/app` 引入 npm 依赖后，GitHub �
   **第一步已落（2026-10-09）**：`web/app/src/lib/desktop.ts` 桥接（运行时探测 +
   守卫 + 14 命令 camelCase 塑形，vitest 6 例）+ `DesktopPanel` 组件（配置自举/
   原生导出/告警托盘/离线同步，非桌面整面隐藏）+ App 挂载；tsc + 97 测试 +
-  `check-web.sh` 全绿。`distDir` 切换待第三步。
+  `check-web.sh` 全绿。
+  **第二步（切换与对账）已落（同日）**：`tauri.conf.json` distDir →
+  `../web/app/dist`、beforeBuild/DevCommand → `cd web/app`、devPath →
+  `http://localhost:5173`（vite strictPort 钉死）；兜底壳
+  （web/dist/index.html + desktop-shell.js）退休删除；契约测试对账桥接/面板
+  （wiring_contract 16 例 + tauri_config 11 例）；check-desktop.sh [4b] 兜底壳
+  断言 → 桥接断言；CI Desktop (macOS) 与 Desktop Framework 作业加 Node +
+  web/app 测试构建（generate_context! 编译期嵌入 distDir 产物）。L117 快捷键/
+  右键菜单的前端消费面未迁移（demo 面无产品场景，命令保留注册）。
 - **Mobile（Native，已落地）**：**不引入** React Native/Flutter——移动端共享
   的是 Rust 核心库（UniFFI FFI 面，L118 起只增不改），而非 UI 层；UI 框架
   选型对 mobile 的唯一影响是「设计语义对齐」（React 端组件状态机可作 iOS/

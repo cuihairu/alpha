@@ -7,8 +7,9 @@
 //! 本测试用纯 Rust 的 `tauri-utils` 走一遍与 `tauri-build` 完全相同的解析路径，
 //! 让这类错误在本地与常规 CI（Desktop Framework 作业）就暴露。
 //!
-//! 同时锁定「兜底壳 ↔ Tauri 全局 API」的契约：v1 的全局 API 是
-//! `window.__TAURI__.invoke`，`ipcRenderer` 是 v2 的东西——用错则窗口静默无响应。
+//! 同时锁定「前端桥接 ↔ Tauri v1 API」的契约：v1 走 `@tauri-apps/api` 的
+//! `invoke`（内部 window.__TAURI_IPC__），`ipcRenderer` / `@tauri-apps/api/core`
+//! 是 v2 的东西——用错则窗口静默无响应。
 
 use std::path::{Path, PathBuf};
 use tauri_utils::config::{parse, Config};
@@ -31,12 +32,13 @@ fn config_matches_tauri_schema() {
 }
 
 #[test]
-fn global_api_is_enabled_for_fallback_shell() {
-    // v1 字段在 build 段；兜底壳依赖 window.__TAURI__ 调 Rust 命令
+fn global_api_is_enabled_for_bridge_detection() {
+    // v1 字段在 build 段；前端桥接以 window.__TAURI__ 探测桌面运行时
+    // （web/app isTauriRuntime），关闭会让桌面面板整面隐藏
     let config = load_config();
     assert!(
         config.build.with_global_tauri,
-        "兜底壳走 window.__TAURI__，必须开启 build.withGlobalTauri"
+        "桥接走 window.__TAURI__ 探测运行时，必须开启 build.withGlobalTauri"
     );
 }
 
@@ -149,43 +151,33 @@ fn strip_js_comments(source: &str) -> String {
 }
 
 #[test]
-fn fallback_shell_uses_v1_global_invoke_api() {
-    let config = load_config();
-    if !config.build.with_global_tauri {
-        return; // 上面的用例已断言该开关必须开启
-    }
-    let shell = crate_dir()
-        .join(config.build.dist_dir.to_string())
-        .join("desktop-shell.js");
-    assert!(shell.is_file(), "兜底壳脚本缺失: {}", shell.display());
-    let raw = std::fs::read_to_string(&shell).expect("读兜底壳");
+fn bridge_uses_v1_invoke_api() {
+    let bridge = crate_dir().join("../web/app/src/lib/desktop.ts");
+    assert!(bridge.is_file(), "前端桥接缺失: {}", bridge.display());
+    let raw = std::fs::read_to_string(&bridge).expect("读桥接");
     let code = strip_js_comments(&raw);
 
     assert!(
-        code.contains("window.__TAURI__"),
-        "兜底壳应通过 window.__TAURI__ 调 Rust 命令"
+        code.contains("@tauri-apps/api/tauri"),
+        "桥接应经 @tauri-apps/api v1 的 invoke 调 Rust 命令"
     );
     assert!(
         !code.contains("ipcRenderer"),
-        "ipcRenderer 是 Tauri v2 的 API，v1 全局 API 直接提供 invoke"
+        "ipcRenderer 是 Tauri v2 的 API，v1 走 @tauri-apps/api invoke"
     );
     assert!(
-        code.contains("api.invoke"),
-        "兜底壳应从 window.__TAURI__ 上取出 invoke（v1 全局 API 的唯一 IPC 入口）"
+        !code.contains("@tauri-apps/api/core"),
+        "@tauri-apps/api/core 是 v2 的模块路径（v1 是 /tauri、/dialog）"
     );
 }
 
 #[test]
 fn committed_command_names_match_wiring_layer() {
-    // 兜底壳调用的命令必须在 gui.rs 的 generate_handler! 里注册，否则窗口静默失败
+    // 桥接包装的命令必须在 gui.rs 的 generate_handler! 里注册，否则窗口静默失败
     let gui = std::fs::read_to_string(crate_dir().join("src/gui.rs")).expect("读 gui.rs");
-    let raw_shell = std::fs::read_to_string(
-        crate_dir()
-            .join(load_config().build.dist_dir.to_string())
-            .join("desktop-shell.js"),
-    )
-    .expect("读兜底壳");
-    let shell = strip_js_comments(&raw_shell);
+    let raw_bridge =
+        std::fs::read_to_string(crate_dir().join("../web/app/src/lib/desktop.ts")).expect("读桥接");
+    let shell = strip_js_comments(&raw_bridge);
 
     for cmd in [
         "initialize_app",
@@ -193,13 +185,10 @@ fn committed_command_names_match_wiring_layer() {
         "get_real_time_quotes",
         "analyze_symbol",
     ] {
+        assert!(gui.contains(cmd), "gui.rs 未注册命令 {cmd}（桥接在调用它）");
         assert!(
-            gui.contains(cmd),
-            "gui.rs 未注册命令 {cmd}（兜底壳在调用它）"
-        );
-        assert!(
-            shell.contains(&format!("invoke(\"{cmd}\"")),
-            "兜底壳未通过 invoke 调用命令 {cmd}"
+            shell.contains(&format!("invoke('{cmd}'")),
+            "桥接未通过 invoke 调用命令 {cmd}"
         );
     }
     assert!(
