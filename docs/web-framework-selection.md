@@ -113,6 +113,10 @@ CI 侧观察（登记，非阻塞）：`web/app` 引入 npm 依赖后，GitHub �
   桌面复用 React 产物，Tauri API 经 `@tauri-apps/api` 注入；B（桌面专属壳）
   随 A 落地撤销备选。落地分三步（见 TODO 拍板登记）：桥接模块 + 产物接入
   → 兜底壳能力迁移（原生导出/告警托盘）→ `distDir` 切换与门禁/契约对账。
+  **第一步已落（2026-10-09）**：`web/app/src/lib/desktop.ts` 桥接（运行时探测 +
+  守卫 + 14 命令 camelCase 塑形，vitest 6 例）+ `DesktopPanel` 组件（配置自举/
+  原生导出/告警托盘/离线同步，非桌面整面隐藏）+ App 挂载；tsc + 97 测试 +
+  `check-web.sh` 全绿。`distDir` 切换待第三步。
 - **Mobile（Native，已落地）**：**不引入** React Native/Flutter——移动端共享
   的是 Rust 核心库（UniFFI FFI 面，L118 起只增不改），而非 UI 层；UI 框架
   选型对 mobile 的唯一影响是「设计语义对齐」（React 端组件状态机可作 iOS/

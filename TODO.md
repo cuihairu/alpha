@@ -526,7 +526,7 @@
 
 ## 拍板登记（2026-10-10 巡检续批：逐项按仓内决策记录自行拍板，纯发布节门控项维持不开工）
 
-- [x] 桌面 frontendDist：拍板 web-framework-selection.md §6 选项 A——`frontendDist` 改指 `web/app/dist`，桌面复用 React 产物，Tauri API 经 `@tauri-apps/api` 注入；B（桌面专属壳）撤销备选。落地三步：桥接模块 → 兜底壳能力迁移（原生导出/告警托盘）→ distDir 切换 + 门禁/契约/CI 对账（〔拍板：开工〕）
+- [x] 桌面 frontendDist：拍板 web-framework-selection.md §6 选项 A——`frontendDist` 改指 `web/app/dist`，桌面复用 React 产物，Tauri API 经 `@tauri-apps/api` 注入；B（桌面专属壳）撤销备选。落地三步：桥接模块 → 兜底壳能力迁移（原生导出/告警托盘）→ distDir 切换 + 门禁/契约/CI 对账（〔拍板：开工〕；第一步已落 2026-10-09：desktop.ts 桥接 + DesktopPanel + App 挂载，tsc/97 测/check-web.sh 全绿）
 - [x] RustSec 升级债：拍板维持报告型不阻塞（cargo audit 现状 7 漏洞 + 11 警告行逐条登记 rust-code-standards.md §12；braces CVE-2026-93687 已随依赖图变化消除）；余项随专项消化（〔拍板：维持〕）
 - [x] Cargo.lock 策略：拍板维持不入库（库惯例；deployment-runbook/docker-deployment 已登记复现性代价，关键钉版经 Cargo.toml pin 依赖兜底——先例 zbus-macros-pin）（〔拍板：维持〕）
 - [x] 三级 API 分层 / MCP 慢启动：拍板维持 P3 登记（architecture-review §5 能力面最低优先级，无新消费方证据不开工）（〔拍板：维持〕）

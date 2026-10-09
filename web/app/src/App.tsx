@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { demoQuotes } from './demoData'
+import { DesktopPanel } from './components/DesktopPanel'
 import { IndicatorPanel } from './components/IndicatorPanel'
 import { LiveQuoteBoard } from './components/LiveQuoteBoard'
 import { PriceChart } from './components/PriceChart'
@@ -87,6 +88,8 @@ function Shell() {
         <h2>{tr('app.liveSection')}</h2>
         <LiveQuoteBoard symbols={boardSymbols} record={buffer.record} />
       </section>
+      {/* 桌面专属面（Tauri 运行时才渲染，浏览器零 DOM） */}
+      <DesktopPanel />
       <PrivacyPanel optIn={optIn} onOptIn={toggleOptIn} />
       <section>
         <h2>{tr('app.demoSection')}</h2>
