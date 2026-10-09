@@ -118,7 +118,6 @@ proptest = "1.4"
 
 # 性能监控
 metrics = "0.22"
-prometheus = "0.13"
 
 # 内部包引用
 alpha-core = { path = "packages/core" }

@@ -31,7 +31,6 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 thiserror = { workspace = true }
 redis = { workspace = true }
 sqlx = { workspace = true }
-prometheus = { workspace = true }
 alpha-storage = { workspace = true }
 
 [dev-dependencies]
