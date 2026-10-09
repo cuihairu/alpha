@@ -22,7 +22,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 
-use crate::partition::{partition_dir, trade_date_of, PartitionScheme};
+use crate::partition::{partition_dir, trade_date_of, PartitionFile, PartitionScheme};
 
 /// 湖 Silver 层单条标准 OHLCV 记录（列名与 ClickHouse `market_data` 对齐，§4）。
 #[derive(Debug, Clone, PartialEq)]
@@ -47,6 +47,74 @@ pub struct LakeWriteReport {
     pub relative_path: String,
     /// 本批写出记录数。
     pub rows: usize,
+}
+
+/// compaction 触发参数（§5：阈值与调度归 L447 侧拍板，这里只承载配置）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactionOptions {
+    /// 分区目标文件尺寸：小于该值的文件才算「小文件」可被装箱。
+    pub target_bytes: u64,
+    /// 同分区小文件数达到该值才触发合并（低于则整分区 untouched）。
+    pub min_files: usize,
+}
+
+impl Default for CompactionOptions {
+    fn default() -> Self {
+        // §3 单文件目标 128MB~512MB：骨架期取下沿；min_files=4（避免
+        // 两三个导出就触发重写，又能在例行导出后把碎片收干净）。
+        Self {
+            target_bytes: 128 * 1024 * 1024,
+            min_files: 4,
+        }
+    }
+}
+
+/// compaction 结果：合并写出的新文件与被删除的旧文件清单。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactionReport {
+    /// 每个合并组一个重写文件（seq 取该分区现有最大号之后）。
+    pub written: Vec<LakeWriteReport>,
+    /// 合并后删除的旧文件（相对湖根）。
+    pub removed: Vec<String>,
+    /// 维持原样的文件数（小文件不足触发 + 已达目标尺寸的大文件）。
+    pub untouched_files: usize,
+}
+
+/// 扫描一个分区目录下全部 `part-*.parquet` 为计划器输入（行数取自
+/// Parquet footer，不解码数据页）。
+fn list_partition_files(lake_root: &Path, dir: &Path) -> AlphaResult<Vec<PartitionFile>> {
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    let rel_dir = dir
+        .strip_prefix(lake_root)
+        .map_err(|e| AlphaError::StorageError(format!("strip_prefix {dir:?}: {e}")))?
+        .to_string_lossy()
+        .into_owned();
+    let mut files = Vec::new();
+    for entry in
+        fs::read_dir(dir).map_err(|e| AlphaError::StorageError(format!("read_dir {dir:?}: {e}")))?
+    {
+        let path = entry
+            .map_err(|e| AlphaError::StorageError(format!("read_dir entry {dir:?}: {e}")))?
+            .path();
+        if path.extension().map(|x| x == "parquet").unwrap_or(false) {
+            let file = fs::File::open(&path)
+                .map_err(|e| AlphaError::StorageError(format!("open {path:?}: {e}")))?;
+            let rows = ParquetRecordBatchReaderBuilder::try_new(file)
+                .map_err(|e| AlphaError::StorageError(format!("footer {path:?}: {e}")))?
+                .metadata()
+                .file_metadata()
+                .num_rows();
+            files.push(PartitionFile {
+                relative_path: format!("{rel_dir}/{}", path.file_name().unwrap().to_string_lossy()),
+                bytes: fs::metadata(&path)
+                    .map_err(|e| AlphaError::StorageError(format!("metadata {path:?}: {e}")))?
+                    .len(),
+                rows: rows.max(0) as u64,
+            });
+        }
+    }
+    Ok(files)
 }
 
 /// Parquet 湖 writer：绑定一个湖根目录与分区档位。
@@ -179,6 +247,95 @@ impl LakeWriter {
             }
         }
         Ok(latest.into_values().collect())
+    }
+
+    /// 全表 compaction（§5 小文件治理的执行侧，策略消费 L447 `plan_compaction`）：
+    /// 扫 `{layer}/{table}` 下全部分区的小文件 → 装箱计划 → 组内按文件名升序
+    /// 拼接（同 `(symbol, timestamp)` 取后写者，重放语义与读侧一致）→ 以新
+    /// seq 落合并文件（全部组写成功后才删旧文件：中途崩溃最多留重复数据，
+    /// 读侧按文件序去重，不丢数）。
+    ///
+    /// 骨架期无调度器（§7/§10）：由调用方按需触发（写透后/定时均可），
+    /// 多维分区档下本函数按目录逐分区自然生效。
+    pub fn compact_table(
+        &self,
+        layer: &str,
+        table: &str,
+        opts: &CompactionOptions,
+    ) -> AlphaResult<CompactionReport> {
+        let table_dir = self.lake_root.join(layer).join(table);
+        let mut files = Vec::new();
+        if table_dir.exists() {
+            let mut dirs: Vec<PathBuf> = fs::read_dir(&table_dir)
+                .map_err(|e| AlphaError::StorageError(format!("read_dir {table_dir:?}: {e}")))?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.is_dir())
+                .collect();
+            dirs.sort();
+            for dir in dirs {
+                files.extend(list_partition_files(&self.lake_root, &dir)?);
+            }
+        }
+
+        let plan = crate::partition::plan_compaction(&files, opts.target_bytes, opts.min_files);
+        let mut report = CompactionReport {
+            written: Vec::with_capacity(plan.merge_groups.len()),
+            removed: Vec::new(),
+            untouched_files: plan.untouched.len(),
+        };
+        if plan.merge_groups.is_empty() {
+            return Ok(report);
+        }
+
+        // 每分区分配新 seq：现有最大号之后连续递增（合并文件名同样单调，
+        // 读侧文件序去重时合并结果天然靠后胜出）。
+        let mut next_seq_by_dir: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        let mut written: Vec<LakeWriteReport> = Vec::new();
+        for group in &plan.merge_groups {
+            let rel_dir = group[0]
+                .relative_path
+                .rsplit_once('/')
+                .map(|(dir, _)| dir.to_string())
+                .unwrap_or_default();
+            let seq = *next_seq_by_dir
+                .entry(rel_dir.clone())
+                .or_insert_with(|| next_seq(&self.lake_root.join(&rel_dir)));
+            next_seq_by_dir.insert(rel_dir.clone(), seq + 1);
+
+            // 文件名升序拼接 + 去重（后写者胜出，与 read_range 读语义一致）。
+            let mut latest: std::collections::BTreeMap<(String, i64), MarketBar> =
+                std::collections::BTreeMap::new();
+            for file in group {
+                let path = self.lake_root.join(&file.relative_path);
+                for record in read_parquet_file(&path)? {
+                    latest.insert((record.symbol.clone(), record.timestamp_ms), record);
+                }
+            }
+            let rows = latest.len();
+            let bars: Vec<MarketBar> = latest.into_values().collect();
+
+            let file_name = format!("part-{seq:05}.parquet");
+            let batch = bars_to_record_batch(&bars.iter().collect::<Vec<_>>())?;
+            write_parquet_atomic(&self.lake_root.join(&rel_dir), &file_name, &batch)?;
+            written.push(LakeWriteReport {
+                relative_path: format!("{rel_dir}/{file_name}"),
+                partition_dir: rel_dir,
+                rows,
+            });
+        }
+
+        // 全部组写成功后才删旧文件（§5：合并不可丢数）。
+        for group in &plan.merge_groups {
+            for file in group {
+                fs::remove_file(self.lake_root.join(&file.relative_path)).map_err(|e| {
+                    AlphaError::StorageError(format!("remove {}: {e}", file.relative_path))
+                })?;
+                report.removed.push(file.relative_path.clone());
+            }
+        }
+        report.written = written;
+        Ok(report)
     }
 
     /// 分区相对目录：`{layer}/{partition_dir(scheme, table, record)}`。
@@ -535,6 +692,85 @@ mod tests {
             .write_bars("silver", "market_data", &[], None)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn compaction_merges_small_files_and_removes_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
+        let bars = vec![bar("600519", T1, 1.0), bar("000001", T1, 9.0)];
+        for _ in 0..3 {
+            writer
+                .write_bars("silver", "market_data", &bars, None)
+                .unwrap();
+        }
+
+        let report = writer
+            .compact_table(
+                "silver",
+                "market_data",
+                &CompactionOptions {
+                    target_bytes: 1024 * 1024,
+                    min_files: 2,
+                },
+            )
+            .unwrap();
+        assert_eq!(report.written.len(), 1);
+        assert_eq!(report.removed.len(), 3);
+        assert_eq!(report.untouched_files, 0);
+
+        // 分区里只剩合并文件，读回行数 = 去重后的 2 条（3 份同数据重放）。
+        let part_dir = &report.written[0].partition_dir;
+        let parquet_count = fs::read_dir(dir.path().join(part_dir))
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().extension().unwrap() == "parquet")
+            .count();
+        assert_eq!(parquet_count, 1);
+        let back = writer.read_partition(part_dir).unwrap();
+        assert_eq!(back.len(), 2, "重放重复行合并时去重");
+        assert_eq!(report.written[0].rows, 2);
+
+        // 合并后 seq 单调：再次写透分配的序号仍在合并文件之后。
+        let a = writer
+            .write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+        assert!(a[0].relative_path > report.written[0].relative_path);
+    }
+
+    #[test]
+    fn compaction_skips_partition_below_min_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
+        let bars = vec![bar("600519", T1, 1.0)];
+        writer
+            .write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+
+        let report = writer
+            .compact_table(
+                "silver",
+                "market_data",
+                &CompactionOptions {
+                    target_bytes: 1024 * 1024,
+                    min_files: 2,
+                },
+            )
+            .unwrap();
+        assert!(report.written.is_empty());
+        assert!(report.removed.is_empty());
+        assert_eq!(report.untouched_files, 1, "小文件不足不触发重写");
+    }
+
+    #[test]
+    fn compaction_on_missing_table_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
+        let report = writer
+            .compact_table("silver", "market_data", &CompactionOptions::default())
+            .unwrap();
+        assert!(report.written.is_empty());
+        assert!(report.removed.is_empty());
+        assert_eq!(report.untouched_files, 0);
     }
 
     #[test]

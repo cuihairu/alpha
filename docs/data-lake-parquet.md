@@ -71,6 +71,11 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
 3. 元数据登记（骨架期**无外部 metastore**，见 §7）。
 - 重放安全：同 `(trade_date, seq)` 重写内容一致（writer 确定性），覆盖即重放。
 - 小文件治理：单分区文件数阈值触发 compaction 合并（阈值与调度归 L447）。
+  执行侧已落（2026-10-09，`LakeWriter::compact_table`）：扫 `{layer}/{table}`
+  全分区 → 装箱计划（消费 L447 `plan_compaction`）→ 组内按文件名升序拼接
+  （同 `(symbol, timestamp)` 后写者胜出，与读侧去重口径一致）→ 新 seq 落合并
+  文件 → 全部组写成功后删旧文件。手动触发（写透后/定时由调用方定），无内置
+  调度器（§7）。
 
 ## 6. 读路径（多引擎）
 
@@ -131,8 +136,9 @@ limit 截断后直出湖 schema Parquet（读侧同 `(symbol, timestamp)` 去重
 `{lake_root}/{layer}/{table}` 注册为 DataFusion ListingTable
 （`lake_market_data`，§6 接缝）——`trade_date` hive 目录即分区列，`/query`
 SQL 直扫历史层、可与热层 MemTable `UNION`；目录未建（尚无落湖）静默跳过、
-首次落湖后下一查自动注册。**未做**：compaction 调度（L447）、对象存储
-适配（§10.1）——保持登记。
+首次落湖后下一查自动注册。**未做**：compaction 内置调度器（执行侧
+`compact_table` 已落，触发时机由调用方定）、对象存储适配（§10.1）——
+保持登记。
 
 ## 10. 非交互假设（自行判定，已注明）
 
@@ -142,6 +148,7 @@ SQL 直扫历史层、可与热层 MemTable `UNION`；目录未建（尚无落�
 3. 首表 = `silver/market_data`（七列对齐 §4）；realtime_quotes 等表随落地项。
 4. 本单零代码：§6 接缝、§7 manifest、§5 compaction 均登记不实现。
 5. 写路径骨架已落（2026-10-09，`packages/storage/src/lake.rs`）：§3 布局 / §4
-   schema / §5 原子写落地；export 端点写透 + `from_lake` 读旁路与 §6
-   ListingTable 注册（`lake_market_data`）已落（同日，data-engine `lake.*`
-   默认关）；§7 manifest、compaction 调度仍登记不实现。
+   schema / §5 原子写落地；export 端点写透 + `from_lake` 读旁路、§6
+   ListingTable 注册（`lake_market_data`）、§5 compaction 执行侧
+   （`compact_table`，无内置调度器）已落（同日，data-engine `lake.*`
+   默认关）；§7 manifest、对象存储适配（§10.1）仍登记不实现。
