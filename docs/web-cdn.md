@@ -14,8 +14,10 @@
 3. **cache-manifest.json**：文件 → hash/size/Cache-Control 清单，部署
    脚本逐文件下发缓存头，策略与 nginx 配置同源。
 
-保护约束：`desktop-shell.js` 为 `.gitignore` 入库豁免的桌面壳兜底文件
-（tauri distDir 首启依赖），**不参与指纹重命名**（优化器 NO_RENAME 集）。
+保护约束：~~`desktop-shell.js` 为 `.gitignore` 入库豁免的桌面壳兜底文件
+（tauri distDir 首启依赖），不参与指纹重命名~~——兜底壳已于 2026-10-10 随
+frontendDist 拍板 A 退休删除（桌面 distDir 改指 `web/app/dist`），`web/dist`
+现仅 Web 部署面资产，无入库豁免文件，指纹重命名无例外集。
 
 ## 2. 缓存策略（三处同源：优化器清单 / nginx / 部署脚本）
 

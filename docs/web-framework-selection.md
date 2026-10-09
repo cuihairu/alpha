@@ -62,6 +62,9 @@ Yew/Leptos 是从零自行开发。
 → L432 主题 → L499 实时行情 → L508 工作区标签 → L488 隐私面板）。
 另：`web/app` 构建产物不部署、不进桌面 `distDir`，线上与桌面用户面
 始终是 `web/` 根原生页；React 端由 CI 测试与构建覆盖。
+〔现注（2026-10-10，拍板 A 落地）：上半句已过时——桌面 `distDir` 现指
+`web/app/dist`，桌面用户面即本 React 产物（见 §6）；「不部署、线上仍
+`web/` 根原生页」维持不变。〕
 
 ```
 web/app/                    Vite + React 18 + TypeScript（独立工程，不动 web/ 根）

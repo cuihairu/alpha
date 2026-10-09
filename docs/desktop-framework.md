@@ -95,29 +95,35 @@ WebKitGTK，跑不了）——于是只能等 CI 的 `Desktop (macOS)` 作业变
 
 ## 4. 构建门禁
 
-`scripts/check-desktop.sh`（非交互，CI 作业 `Desktop Framework` 与本地一致）：
+`scripts/check-desktop.sh`（非交互，CI 作业 `Desktop Framework` 与本地一致；
+frontendDist 拍板 A 落地后各步对账 React 产物/前端桥接，2026-10-10 同步）：
 
 1. **配置自洽性**（`tauri.conf.json`，纯 Python 快速检查）：必填字段（identifier /
-   productName / devPath / 窗口尺寸）、`bundle.icon` 文件真实存在、`distDir` 存在且含
-   `index.html`、**`build.withGlobalTauri` 已开且不在 `tauri` 段**、兜底壳代码用
-   `window.__TAURI__` 且无 `ipcRenderer`、**allowlist 放开的 API 在
-   `desktop/Cargo.toml` 里确实启用了对应 tauri 特性**（两者漂移是运行期 panic 的
-   经典来源）、`desktop/src-tauri/` 不存在。
+   productName / devPath / 窗口尺寸）、`bundle.icon` 文件真实存在、`distDir`（现
+   `../web/app/dist`）存在且含 `index.html`、**`build.withGlobalTauri` 已开且不在
+   `tauri` 段**（桥接以 `window.__TAURI__` 探测桌面运行时）、前端桥接
+   `web/app/src/lib/desktop.ts` 在场且走 v1 `invoke`（去注释后断言，出现 v2 的
+   `ipcRenderer` 即红）、**allowlist 放开的 API 在 `desktop/Cargo.toml` 里确实启用了
+   对应 tauri 特性**（两者漂移是运行期 panic 的经典来源）、`desktop/src-tauri/` 不存在。
 2. **无孤儿配置**：真正的 crate 根是 `desktop/`，早期脚手架残留的
    `desktop/src-tauri/tauri.conf.json` 已删除（它 allowlist/devPath 与生效配置不同，
    留着只会让人改错文件）。
 3. **框架层 clippy**：`cargo clippy -p alpha-desktop --no-default-features --all-targets -- -D warnings`。
-4. **框架层单测 + 配置契约测试**：`cargo test -p alpha-desktop --no-default-features --all-targets`。
+4. **框架层单测 + 配置/接线契约测试**：`cargo test -p alpha-desktop --no-default-features --all-targets`。
+5. **GUI 接线层类型检查 + clippy**（gui 特性 + 假 pkg-config，见下；只类型检查
+   不链接——链接与运行由 CI Desktop (macOS) 作业验证）。
 
 `desktop/tests/tauri_config.rs`（11 例）是第 1 步的**编译期加强版**：用
 `tauri-utils` 走 `tauri_build::build()` 完全相同的解析路径
 （`config::parse::read_from` → `serde_json::from_value::<Config>`），把字段名/段位置
-是否匹配 Tauri 1.x schema 从「CI macOS 运行时才发现」前移到本地与常规 CI；另加
-兜底壳 ↔ 接线层契约（命令名两侧一致、v1 IPC 入口、distDir 有入口文件、无孤儿目录）。
+是否匹配 Tauri 1.x schema 从「CI macOS 运行时才发现」前移到本地与常规 CI。
+`desktop/tests/wiring_contract.rs`（16 例）锁桥接/面板 ↔ 接线层契约：14 命令两侧
+一致、告警命令 v1 camelCase 参数、原生另存为导出、主题应用链路、离线读/同步呈现、
+胶水薄度行数锁（gui.rs / platform.rs / window_gui.rs / shortcut_gui.rs）。
 
-第 1 步与契约测试均已用反向用例验证：把 `withGlobalTauri` 挪回 `tauri` 段、把兜底壳
-的 `api.invoke` 改成 `api.ipcRenderer.invoke`、给 allowlist 加未启用的 `fs-exists`、
-抽走 `distDir/index.html` —— 均被拦下（改配置时 10 例中 9 例转红）。
+第 1 步与契约测试均已用反向用例验证：把 `withGlobalTauri` 挪回 `tauri` 段、把桥接
+的 `invoke` 换成 `ipcRenderer.invoke`、给 allowlist 加未启用的 `fs-exists`、抽走
+`distDir/index.html` —— 均被拦下（契约测试首次引入时 10 例实测 9 例转红）。
 
 ### 4.1 接线层薄度契约（首轮 CI 红灯的直接产物）
 
@@ -140,11 +146,12 @@ WebKitGTK，跑不了）——于是只能等 CI 的 `Desktop (macOS)` 作业变
 | `export_symbol_to_file`（L113） | `export::export_symbol_request` | 格式解析、空标的、后缀一致性（见 §6） |
 | `get_app_info` | `app::app_info` | 纯读取（唯一无失败路径的命令） |
 
-`desktop/tests/wiring_contract.rs`（9 例）把这个约定变成可本地执行的断言：命令体不得
-出现判空/兜底/自造错误串；每个命令必须委派到上表的入口并 `map_err`；接线层不得绕过
-入口直接调底层（`config::load_or_default`、`AlertKind::parse` 等）；`generate_handler!`
-注册的命令与兜底壳 `invoke` 一致；`lib.rs` 的重导出都指向真实存在的项；文件行数上限
-（防止接线层重新长胖）；兜底壳导出走原生 `dialog.save`（L113，见 §6）。反向用例已实测：在 `get_app_info` 里塞回 `validate().unwrap_or_default()`
+`desktop/tests/wiring_contract.rs`（16 例；frontendDist 切换后断言对象为前端桥接/
+面板源码）把这个约定变成可本地执行的断言：命令体不得出现判空/兜底/自造错误串；
+每个命令必须委派到上表的入口并 `map_err`；接线层不得绕过入口直接调底层
+（`config::load_or_default`、`AlertKind::parse` 等）；`generate_handler!`
+注册的命令与前端桥接 `invoke` 一致；`lib.rs` 的重导出都指向真实存在的项；文件行数上限
+（防止接线层重新长胖）；面板导出走原生 `dialog.save`（L113，见 §6）。反向用例已实测（9 例时代）：在 `get_app_info` 里塞回 `validate().unwrap_or_default()`
 这类判断，9 例中 2 例转红。
 
 诚实边界：`tests/wiring_contract.rs` 是**源码契约**断言，它能守住「接线层不该干什么」，
@@ -225,7 +232,7 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 两条路径复用同一 CSV/JSON 序列化口径。
 
 ```
-兜底壳导出卡片 ──dialog.save──▶ 用户选路径 ──invoke──▶ gui::export_symbol_to_file
+桌面面板导出按钮（DesktopPanel）──saveDialog──▶ 用户选路径 ──invoke──▶ gui::export_symbol_to_file
         │ 薄委派                                              │ 无判断
         ▼                                                     ▼
             export::export_symbol_request（格式解析/空标的/取数）
@@ -245,8 +252,9 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 
 接线与前端：`gui::export_symbol_to_file` 只做「透传三参 → 委派 →
 `map_err`」（注册命令 6 → 7，`gui.rs` 仍在 160 行薄度上限内）；
-兜底壳加导出卡片（`dialog.save` 取路径、后缀定格式、取消显示"已取消"，
-非 Tauri 环境按钮禁用并注明）；`dialog`/`fs` 的 allowlist 与 Cargo 特性
+导出按钮现居桌面面板 DesktopPanel（`saveDialog` 取路径、后缀定格式、
+取消提示已取消；非 Tauri 运行时整面隐藏——原兜底壳实现随 frontendDist
+切换迁移）；`dialog`/`fs` 的 allowlist 与 Cargo 特性
 在 L112 已对齐，本轮无需改配置。
 
 门禁增量：`check-desktop.sh` [1/5] 加 `node --check`（手写 JS 无构建期
@@ -520,9 +528,11 @@ id 唯一/文案非空/提示与默认表一致；可用性规则（无行情→
 接线：`gui.rs` 注册 13 → 14（`get_context_menu` 纯模型构造，与 `get_app_info`
 同不映射错误；薄度上限 260 → 280），setup 挂 `shortcut_gui::register_global_shortcuts`
 （新胶水文件，行数上限 120，同 platform/window_gui 纪律）；注册失败（组合键被
-系统/其它应用占用）只告警降级为无此快捷键，不阻断启动。壳层（desktop-shell.js）
-把行情/导出/离线/同步四段流程抽成可复用函数，`ACTIONS` 表同时服务快捷键事件
-与右键菜单；右键菜单是内容层 DOM（Tauri 1.x 无原生 context menu API，v2 才有
+系统/其它应用占用）只告警降级为无此快捷键，不阻断启动。原壳层（desktop-shell.js，
+已退休）曾把行情/导出/离线/同步四段流程抽成可复用函数、`ACTIONS` 表同时服务
+快捷键事件与右键菜单；frontendDist 切 React 产物后该前端消费面未迁移（快捷键/
+右键菜单暂无前端消费方，命令保留注册，见 §5 L117 行）。右键菜单是内容层 DOM
+（Tauri 1.x 无原生 context menu API，v2 才有
 `Menu::popup`），菜单**数据**来自 Rust——可用性判定留在框架层单测可覆盖的边界内。
 
 非交互假设（自行判定，已注明）：全局快捷键系统级生效，故默认表只收带修饰键
