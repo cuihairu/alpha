@@ -126,7 +126,8 @@
   §6 设计说明。注：核心代码/测试/文档为并行会话未提交 WIP（静默 6 分钟无编译/
   测试进程，按既定并发协议接管收口——门禁+TODO+commit，其文件原样入库未改动）；
   非交互假设：单文件单标的（批量多标的仍走 exports/ 目录导出）、覆盖写直接替换
-  （写前确认未做）、dialog.save 取消返回 null 按「已取消」处理。门禁：
+  （写前确认未做〔现注 2026-10-10：覆盖确认已落 `7fad591`，见 §拍板登记〕）、
+  dialog.save 取消返回 null 按「已取消」处理。门禁：
   check-desktop.sh ✅ / check-lint.sh ✅ / 全仓 231 测 0 失败 ✅ /
   check-cross-platform.sh 四步 ✅）
 - [x] 开发系统通知和托盘集成功能（2026-09-30 最小可用版本：通知/托盘纯逻辑下沉框架层 +
@@ -544,3 +545,4 @@
 - [x] 托盘图标随状态/主题换图：拍板**登记待资产**（〔维持〕）。需多套图标资产（告警态/静默态 × 深浅色），缺资产**不自行生成代餐**（易与品牌资产冲突）；资产就位后接线点已备（`platform::system_tray` + `notify::tray_menu_model`）。
 - [x] 定时轮询取数（L114）：拍板**维持登记**（〔维持〕）。证据：`market::synthetic_series` 为按 symbol 派生的**确定性、不随时间变化**行情，告警在布防即时检查即判定完（触发即停用），后台轮询在真实时变后端接入前**无消费方、无效果**（且 §7 既定口径：托盘 tooltip 只反映告警状态不显示行情）；触发条件＝`QuoteRemote` 缝接真实时变后端后一并立项（与「无消费方证据不开工」同口径）。
 - [x] 记忆「上次所用显示器」（L115）：拍板**开工 → 已落**（`1c10638`）。`WindowGeometry.monitor`（屏名，`skip_serializing_if` 向后兼容旧状态文件）+ `MonitorRect.name`（接线层从 `tauri::Monitor::name` 翻译）；`resolve_placement` 钳制目标改为「记忆显示器（名在且仍在）否则主屏」，新增 `remembered_monitor` 按名查；接线层 `current_geometry` 记 `current_monitor` 名。代价：`WindowGeometry` 去 `Copy`（含 `String`），调用点改 `clone`。边界：最大化窗口回原屏需 `set_position`→`maximize` 平台时序，留真机多屏验收。
+- [x] L117 前端消费面（快捷键/右键菜单）：拍板**维持不迁移**（〔维持〕），理由具体化：React 桌面面无行情展示面（行情走 web `LiveQuoteBoard` + `real-time-feed` WS，非桌面命令）→「刷新行情」「复制最新价」无 UI 落点；「导出/同步/离线」面板已有按钮，第二入口暂无产品需求；全局快捷键无消费方时为空操作、不影响其它路径。触发条件＝桌面需要行情展示面（接 `QuoteRemote` 真实后端并落表）时一并立项（见 docs/desktop-framework.md §10）。
