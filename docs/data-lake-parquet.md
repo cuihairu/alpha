@@ -101,6 +101,10 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
   ListingTable 目录遍历即元数据；避免首个落地项背全栈表格式复杂度。
 - 升级路径：分区清单文件（`_manifest.json`：分区→文件→行数/字节统计）作为
   catalog v1，挂后续项；再往后的 ACID 事务需求出现时才评估 Delta/Iceberg。
+  **已落（2026-10-09）**：`LakeWriter::rebuild_manifest`/`read_manifest`——
+  按需全量重建 `{layer}/{table}/_manifest.json`（行数取 Parquet footer、
+  原子替换、serde 可序列化）；读侧不依赖（仍列目录），清单只作统计面与
+  catalog 升级底座。
 
 ## 8. 保留与冷热分层
 
@@ -150,5 +154,6 @@ SQL 直扫历史层、可与热层 MemTable `UNION`；目录未建（尚无落�
 5. 写路径骨架已落（2026-10-09，`packages/storage/src/lake.rs`）：§3 布局 / §4
    schema / §5 原子写落地；export 端点写透 + `from_lake` 读旁路、§6
    ListingTable 注册（`lake_market_data`）、§5 compaction 执行侧
-   （`compact_table`，无内置调度器）已落（同日，data-engine `lake.*`
-   默认关）；§7 manifest、对象存储适配（§10.1）仍登记不实现。
+   （`compact_table`，无内置调度器）、§7 manifest（`rebuild_manifest`，
+   按需重建）已落（同日，data-engine `lake.*` 默认关）；对象存储适配
+   （§10.1，随发布节）仍登记不实现。

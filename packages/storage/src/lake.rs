@@ -2,10 +2,12 @@
 //!
 //! 职责边界：本模块把一批 [`MarketBar`] 按交易日分区、编码为 Parquet、经
 //! `.tmp` 临时文件 + 原子 rename 落盘，并提供单分区（`read_partition`）与
-//! 时间窗（`read_range`）读回。**不**做：
-//! 分区策略决策（复用 [`crate::partition`] 的 L447 策略层）、DataFusion
-//! ListingTable 注册（归 data-engine 后置项）、compaction 调度（归 L447）、
-//! 对象存储适配（`lake_root` 骨架期为本机目录，§10.1）。
+//! 时间窗（`read_range`）读回、小文件 compaction 执行（`compact_table`，消费
+//! L447 计划器）与表级 manifest 统计（`rebuild_manifest`，§7 catalog v1）。
+//! **不**做：分区策略决策（复用 [`crate::partition`] 的 L447 策略层）、
+//! DataFusion ListingTable 注册（归 data-engine 后置项）、compaction 内置
+//! 调度器（触发时机由调用方定，§5）、对象存储适配（`lake_root` 骨架期为本机
+//! 目录，§10.1）。
 //!
 //! 写路径契约（§5）：同 `(trade_date, seq)` 重写内容一致（writer 确定性），
 //! 覆盖即重放；`seq` 缺省由 writer 按分区扫描分配（§3「由 writer 原子分配」，
@@ -78,6 +80,39 @@ pub struct CompactionReport {
     pub removed: Vec<String>,
     /// 维持原样的文件数（小文件不足触发 + 已达目标尺寸的大文件）。
     pub untouched_files: usize,
+}
+
+/// manifest 文件名（§7 catalog v1）。
+pub const MANIFEST_NAME: &str = "_manifest.json";
+
+/// 表级统计清单（§7：分区→文件→行数/字节），serde 可序列化落
+/// `{layer}/{table}/_manifest.json`。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LakeManifest {
+    /// 生成时刻（Unix 毫秒）——清单是时点快照，落湖后须重建。
+    pub generated_at_ms: i64,
+    /// 分区相对目录 → 统计。
+    pub partitions: std::collections::BTreeMap<String, LakePartitionStats>,
+    pub total_files: u64,
+    pub total_rows: u64,
+    pub total_bytes: u64,
+}
+
+/// 单分区统计。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LakePartitionStats {
+    /// 文件级明细（路径为相对湖根）。
+    pub files: Vec<LakeFileStats>,
+    pub total_rows: u64,
+    pub total_bytes: u64,
+}
+
+/// 单文件统计。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LakeFileStats {
+    pub path: String,
+    pub bytes: u64,
+    pub rows: u64,
 }
 
 /// 扫描一个分区目录下全部 `part-*.parquet` 为计划器输入（行数取自
@@ -363,6 +398,80 @@ impl LakeWriter {
             None => base,
         };
         format!("{layer}/{base}")
+    }
+
+    /// 全量重建表级 manifest（§7 catalog v1：`_manifest.json`，分区→文件→
+    /// 行数/字节统计）。骨架期「目录即清单」，本函数按需重建（写透/compaction
+    /// 后或调度侧定期），读侧不依赖它（读路径直接列目录，manifest 只作统计
+    /// 面与下游 catalog 升级底座）。原子写（.tmp + rename），行数取 Parquet
+    /// footer 不解码数据页。
+    pub fn rebuild_manifest(&self, layer: &str, table: &str) -> AlphaResult<LakeManifest> {
+        let table_dir = self.lake_root.join(layer).join(table);
+        let mut manifest = LakeManifest::default();
+        if table_dir.exists() {
+            let mut dirs: Vec<PathBuf> = fs::read_dir(&table_dir)
+                .map_err(|e| AlphaError::StorageError(format!("read_dir {table_dir:?}: {e}")))?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.is_dir())
+                .collect();
+            dirs.sort();
+            for dir in dirs {
+                let files = list_partition_files(&self.lake_root, &dir)?;
+                if files.is_empty() {
+                    continue;
+                }
+                let rel_dir = dir
+                    .strip_prefix(&self.lake_root)
+                    .map_err(|e| AlphaError::StorageError(format!("strip_prefix {dir:?}: {e}")))?
+                    .to_string_lossy()
+                    .into_owned();
+                let entry = LakePartitionStats {
+                    files: files
+                        .iter()
+                        .map(|f| LakeFileStats {
+                            path: f.relative_path.clone(),
+                            bytes: f.bytes,
+                            rows: f.rows,
+                        })
+                        .collect(),
+                    total_rows: files.iter().map(|f| f.rows).sum(),
+                    total_bytes: files.iter().map(|f| f.bytes).sum(),
+                };
+                manifest.total_files += entry.files.len() as u64;
+                manifest.total_rows += entry.total_rows;
+                manifest.total_bytes += entry.total_bytes;
+                manifest.partitions.insert(rel_dir, entry);
+            }
+        }
+        manifest.generated_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        let dir = self.lake_root.join(layer).join(table);
+        fs::create_dir_all(&dir)
+            .map_err(|e| AlphaError::StorageError(format!("create_dir_all {dir:?}: {e}")))?;
+        let body = serde_json::to_vec_pretty(&manifest)
+            .map_err(|e| AlphaError::StorageError(format!("manifest serialize: {e}")))?;
+        let tmp = dir.join(".manifest.tmp");
+        fs::write(&tmp, body)
+            .map_err(|e| AlphaError::StorageError(format!("write {tmp:?}: {e}")))?;
+        fs::rename(&tmp, dir.join(MANIFEST_NAME))
+            .map_err(|e| AlphaError::StorageError(format!("rename manifest: {e}")))?;
+        Ok(manifest)
+    }
+
+    /// 读回上次 `rebuild_manifest` 落的清单；未生成过返回 None。
+    pub fn read_manifest(&self, layer: &str, table: &str) -> AlphaResult<Option<LakeManifest>> {
+        let path = self.lake_root.join(layer).join(table).join(MANIFEST_NAME);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let body =
+            fs::read(&path).map_err(|e| AlphaError::StorageError(format!("read {path:?}: {e}")))?;
+        serde_json::from_slice(&body)
+            .map(Some)
+            .map_err(|e| AlphaError::StorageError(format!("manifest parse: {e}")))
     }
 }
 
@@ -771,6 +880,63 @@ mod tests {
         assert!(report.written.is_empty());
         assert!(report.removed.is_empty());
         assert_eq!(report.untouched_files, 0);
+    }
+
+    #[test]
+    fn manifest_rebuilds_and_roundtrips_across_writes_and_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
+        let bars = vec![bar("600519", T1, 1.0), bar("000001", T1, 9.0)];
+        let bars2 = vec![bar("600519", T2, 2.0)];
+
+        assert!(writer
+            .read_manifest("silver", "market_data")
+            .unwrap()
+            .is_none());
+
+        writer
+            .write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+        writer
+            .write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+        writer
+            .write_bars("silver", "market_data", &bars2, None)
+            .unwrap();
+
+        let m1 = writer.rebuild_manifest("silver", "market_data").unwrap();
+        assert_eq!(m1.total_files, 3);
+        assert_eq!(m1.total_rows, 5);
+        assert_eq!(m1.partitions.len(), 2, "两个交易日分区");
+        let round = writer
+            .read_manifest("silver", "market_data")
+            .unwrap()
+            .unwrap();
+        assert_eq!(round, m1, "落盘清单与返回值一致");
+
+        // 合并后再重建：文件数收敛、行数按去重口径统计。
+        writer
+            .compact_table(
+                "silver",
+                "market_data",
+                &CompactionOptions {
+                    target_bytes: 1024 * 1024,
+                    min_files: 2,
+                },
+            )
+            .unwrap();
+        let m2 = writer.rebuild_manifest("silver", "market_data").unwrap();
+        assert_eq!(m2.total_files, 2, "首日 3 文件并 1 + 次日 1 文件");
+        assert_eq!(m2.total_rows, 3, "首日重放去重 2 行 + 次日 1 行");
+    }
+
+    #[test]
+    fn manifest_on_missing_table_is_empty_not_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let writer = LakeWriter::new(dir.path(), PartitionScheme::DateOnly);
+        let m = writer.rebuild_manifest("silver", "market_data").unwrap();
+        assert_eq!(m.total_files, 0);
+        assert!(m.partitions.is_empty());
     }
 
     #[test]
