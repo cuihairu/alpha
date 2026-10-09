@@ -135,7 +135,8 @@ async fn send_notification(
             .map_err(|e: DesktopError| e.to_string())?
     };
     // identifier 是应用标识（bundle id）；平台胶水收拢在 platform.rs
-    crate::platform::show_notification(&identifier_from(&app_handle), &notification)?;
+    //（app 句柄供 XDG 点击监听唤起主窗）
+    crate::platform::show_notification(&app_handle, &identifier_from(&app_handle), &notification)?;
     Ok(notification)
 }
 
@@ -178,7 +179,7 @@ async fn check_alerts(
         notify::check_request(&state.paths().alerts_file(), &mut queue, Utc::now())
             .map_err(|e: DesktopError| e.to_string())?
     };
-    crate::platform::show_notifications(&identifier_from(&app_handle), &fired);
+    crate::platform::show_notifications(&app_handle, &identifier_from(&app_handle), &fired);
     Ok(fired)
 }
 

@@ -210,7 +210,7 @@ zbus 5.11 未导出的 `DispatchResult2` 等符号，`cargo check` 到 `zbus` �
 | TODO | 现状 | 下一步 |
 | --- | --- | --- |
 | L113 文件系统集成与本地导出 | ✅ 已落地（见 §6）：用户自选路径导出全流程 | 覆盖已存在文件直接替换（写前确认未做，留待后续） |
-| L114 系统通知与托盘 | ✅ 已落地（见 §7）：通知模型/队列/托盘菜单状态机 + 告警检查链（check_alerts）+ 托盘接线（platform.rs） | 通知点击唤起主窗（**拍板 2026-10-10：开工**，见 §7 注）；托盘图标随状态换图（需多套图标资产）；定时轮询取数 |
+| L114 系统通知与托盘 | ✅ 已落地（见 §7）：通知模型/队列/托盘菜单状态机 + 告警检查链（check_alerts）+ 托盘接线（platform.rs）+ 通知点击唤起主窗（**已落 2026-10-10**，见 §7 注） | 托盘图标随状态换图（需多套图标资产）；定时轮询取数；XDG 点击真机验收 |
 | L115 窗口管理与主题适配 | ✅ 已落地（见 §8）：窗口几何持久化 + 多显示器放置 + 深浅色跟随/覆盖 | 记忆「上次所用显示器」（现按可见性判定）；托盘图标随主题换图 |
 | L116 本地数据库同步与离线模式 | ✅ 已落地（见 §9）：kv 快照 + 连通探测 + 指纹增量同步 + 离线降级读 | 换 SQLite（出现范围查询需求时）；真实 HTTP 远端实现（QuoteRemote 缝已留） |
 | L117 快捷键与右键菜单 | ✅ 已落地（见 §10）：框架层组合键表/菜单模型 + 全局注册 + 壳层分发；React 产物接入后**前端消费面未迁移**（快捷键事件/右键菜单暂无消费方，命令保留注册，2026-10-09 拍板 A 落地登记） | 通知点击唤起主窗后的菜单焦点处理；「记忆上次所用显示器」后再校菜单落点 |
@@ -334,7 +334,8 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
   `alerts::deactivate` 停用落盘（沿用既有持久化语义：停用保留记录；一次性
   告警避免确定性恒价行情下反复触发）。单测覆盖：触发即停用且二次检查空手、
   未触发保持生效、同文重复布防被队列去重但状态机照常停用、缺文件按空表。
-* **前端联动**（`desktop-shell.js` + `index.html` 告警卡片）：布防
+* **前端联动**（原兜底壳告警卡片；frontendDist 切换 React 产物后为
+  `web/app` DesktopPanel，消费面见 `web/app/src/lib/desktop.ts` 桥接）：布防
   （`set_price_alert`，演示目标价＝现价−1%）→ `check_alerts`（Rust 弹系统
   通知 + 入队 + 停用）→ `set_tray_status`（tooltip 同步）。注册命令 10 → 11，
   gui.rs 薄度上限 200 → 220 行。
@@ -350,10 +351,19 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
 弹出与权限授予；托盘图标出现与 `iconAsTemplate` 深浅色适配；菜单点击
 显示/隐藏/退出真实生效（macOS `menuOnLeftClick=false` → 右键出菜单，Linux
 行为另有差异）；tooltip 随 `set_tray_status` 变化；菜单可用态随窗口可见性
-翻转；通知点击唤起主窗未做（v1 通知点击事件属后续）。
-  （拍板 2026-10-10：开工通知点击唤起主窗——经 D-Bus 默认动作（notify-rust
-  xdg 后端）订阅点击事件 → 主窗显示/聚焦；macOS 激活回调需 app delegate，
-  Tauri 1.x 未实现，登记边界；Windows 待真机验。）
+翻转；通知点击唤起主窗已接（XDG 真机验收待人工观察，见下注）。
+  （**通知点击唤起主窗已落（2026-10-10）**：tauri 1.x 包装层的 `show()` 丢弃
+  notify-rust 句柄（spawn 后弃返回值）、点击事件拿不到——XDG 侧（Linux/BSD）
+  改直用 notify-rust 注册 `default` 动作（按规范不渲染为按钮、由点击通知本体
+  触发），点击经框架层 `notification_click_action` 映射复用
+  `TrayAction::ShowWindow`（与托盘「显示主窗口」单一路径）→ 主窗显示/聚焦；
+  `wait_for_action` 阻塞至通知关闭（zbus `block_on`），监听放独立线程。
+  Cargo.toml 增 XDG 目标限定可选依赖 `notify-rust = "4"`（依赖树内既有实现，
+  显式化引用不新增编译单元）；wiring_contract 加 `notification_click_action`
+  断言、行数锁 120 → 150（两 cfg 分支各持一份展示翻译）。
+  边界：macOS 点击回调需 UNUserNotificationCenter delegate（Tauri 1.x 未接），
+  Windows 动作信号无桌面端消费——两者维持 tauri 展示路径、点击无动作；
+  服务器对 `default` 的渲染差异（GNOME/KDE/其他）属真机验收面。）
 
 ## 8. 跨平台窗口管理和主题适配
 

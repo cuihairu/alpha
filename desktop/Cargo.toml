@@ -37,6 +37,14 @@ tauri = { version = "1.5", optional = true, features = ["dialog-open", "dialog-s
 # 见 docs/desktop-framework.md §4.2。
 zbus-macros-pin = { package = "zbus_macros", version = "=5.11.0", optional = true }
 
+# 通知点击回调（XDG 后端，Linux/BSD）：tauri::api::notification 的 show() 丢弃
+# notify-rust 句柄（tauri 1.x src/api/notification.rs spawn 后弃返回值），点击
+# 事件拿不到——需句柄上的 wait_for_action（阻塞，接线层放独立线程）。notify-rust
+# 本就是 tauri 通知的底层实现（依赖树内、主版本同为 4），显式声明只是拿引用，
+# 不新增编译单元；macOS/Windows 无此回调面，不声明（边界见 docs/desktop-framework.md §7）。
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+notify-rust = { version = "4", optional = true }
+
 # 异步运行时
 tokio = { workspace = true }
 # alpha-core 平台适配层 trait（KeyValueStore 等）为 async-trait 定义
@@ -76,6 +84,6 @@ path = "src/main.rs"
 # 默认开启以保持 `cargo build`/`tauri dev` 行为不变；CI 的框架层门禁用
 # --no-default-features 只编译测试 lib（见 scripts/check-desktop.sh）。
 default = ["gui"]
-gui = ["dep:tauri"]
+gui = ["dep:tauri", "dep:notify-rust"]
 # 生产构建自定义协议（tauri CLI 传 --features custom-protocol；此项同时拉起 gui）
 custom-protocol = ["gui", "tauri?/custom-protocol"]

@@ -1,8 +1,9 @@
 //! Tauri 平台胶水（`gui` 特性；L114 托盘接线 + 通知展示）
 //!
 //! 与 [`crate::gui`] 同口径：**业务判断全在框架层** [`crate::notify`]（菜单模型、
-//! id→动作映射、通知文案），本模块只把框架层模型机械翻译成 Tauri 类型并执行
-//! 平台调用（窗口显示/隐藏、退出进程、`Notification::show`、`set_tooltip`）。
+//! id→动作映射、通知文案、点击动作映射），本模块只把框架层模型机械翻译成 Tauri
+//! 类型并执行平台调用（窗口显示/隐藏、退出进程、通知展示与点击监听、
+//! `set_tooltip`）。
 //!
 //! 验证边界：单测覆盖不了平台调用——类型用法由 `check-desktop.sh` [5/5] 假
 //! pkg-config 在 Linux 门禁类型检查，链接与运行由 CI Desktop (macOS) 作业验证；
@@ -70,8 +71,48 @@ pub fn on_tray_event(app: &AppHandle, event: SystemTrayEvent) {
     }
 }
 
-/// 展示单条通知（`send_notification` 用：显式用户动作，失败要报给前端）
-pub fn show_notification(identifier: &str, notification: &Notification) -> Result<(), String> {
+/// 展示单条通知（`send_notification` 显式动作 / `check_alerts` 触发链共用）。
+///
+/// tauri 包装层的 `show()` 丢弃 notify-rust 句柄（tauri 1.x api/notification.rs
+/// spawn 后弃返回值），点击事件拿不到——XDG 侧直用 notify-rust 注册
+/// `default` 动作，点击通知本体经框架层 [`notify::notification_click_action`]
+/// 唤起主窗（与托盘显示同路径）；`wait_for_action` 阻塞至通知关闭（zbus
+/// block_on），监听放独立线程，进程退出即随之终结。非 XDG 平台无此回调面，
+/// 维持 tauri 展示路径（边界登记 docs/desktop-framework.md §7）。
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn show_notification(
+    app: &AppHandle,
+    _identifier: &str,
+    notification: &Notification,
+) -> Result<(), String> {
+    let handle = notify_rust::Notification::new()
+        .summary(&notification.title)
+        .body(&notification.body)
+        .auto_icon()
+        .action(notify::NOTIFY_ACTION_OPEN, "打开主窗口")
+        .show()
+        .map_err(|e| e.to_string())?;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        handle.wait_for_action(move |action| {
+            if let Some(TrayAction::ShowWindow) = notify::notification_click_action(action) {
+                if let Some(window) = app.get_window(notify::MAIN_WINDOW_LABEL) {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        });
+    });
+    Ok(())
+}
+
+/// macOS/Windows 展示（无点击回调面，见 [`show_notification`] doc）
+#[cfg(any(target_os = "macos", windows))]
+pub fn show_notification(
+    _app: &AppHandle,
+    identifier: &str,
+    notification: &Notification,
+) -> Result<(), String> {
     tauri::api::notification::Notification::new(identifier)
         .title(&notification.title)
         .body(&notification.body)
@@ -80,9 +121,9 @@ pub fn show_notification(identifier: &str, notification: &Notification) -> Resul
 }
 
 /// 批量展示（`check_alerts` 触发链用：尽力而为，单条失败仅告警不阻断其余）
-pub fn show_notifications(identifier: &str, notifications: &[Notification]) {
+pub fn show_notifications(app: &AppHandle, identifier: &str, notifications: &[Notification]) {
     for notification in notifications {
-        if let Err(e) = show_notification(identifier, notification) {
+        if let Err(e) = show_notification(app, identifier, notification) {
             tracing::warn!(id = %notification.id, error = %e, "系统通知展示失败");
         }
     }

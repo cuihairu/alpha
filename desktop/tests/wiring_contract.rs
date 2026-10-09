@@ -399,8 +399,9 @@ fn platform_glue_stays_mechanical() {
         std::fs::read_to_string(crate_dir().join("src/platform.rs")).expect("读 platform.rs");
     let lines = platform.lines().count();
     assert!(
-        lines < 120,
-        "platform.rs 涨到 {lines} 行（平台胶水应保持机械翻译，判断下沉 notify.rs）"
+        lines < 150,
+        "platform.rs 涨到 {lines} 行（平台胶水应保持机械翻译，判断下沉 notify.rs；
+        L114 通知点击接线后 120 → 150：XDG/非 XDG 两 cfg 分支各持一份展示翻译）"
     );
     assert!(
         !platform.contains("#[tauri::command]"),
@@ -414,6 +415,10 @@ fn platform_glue_stays_mechanical() {
     assert!(
         code.contains("notify::"),
         "平台胶水应从框架层 notify.rs 取菜单模型/动作映射，而非自造"
+    );
+    assert!(
+        code.contains("notification_click_action"),
+        "通知点击应经框架层 notification_click_action 映射（唤起主窗单一路径）"
     );
 }
 

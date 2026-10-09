@@ -292,6 +292,22 @@ pub fn tray_action(id: &str) -> Option<TrayAction> {
     }
 }
 
+/// 通知点击动作 id：XDG 通知规范约定点击通知本体触发 `default` 动作（注册时不
+/// 显示为按钮）；notify-rust 4 在通知关闭（超时/手动消去）时回调 `__closed` 哨兵。
+pub const NOTIFY_ACTION_OPEN: &str = "default";
+
+/// 通知点击动作 → 窗口动作（未知动作返回 None，接线层忽略而非 panic）
+///
+/// 点击通知本体与托盘「显示主窗口」同语义，复用 [`TrayAction::ShowWindow`]——
+/// 唤起主窗保持单一路径；`__closed` 与未知 id 都不是「打开」。
+pub fn notification_click_action(action: &str) -> Option<TrayAction> {
+    if action == NOTIFY_ACTION_OPEN {
+        Some(TrayAction::ShowWindow)
+    } else {
+        None
+    }
+}
+
 /// 告警检查（`check_alerts` 命令的实现体）：告警集合 → 触发判定 → 通知入队 +
 /// 触发者停用落盘。返回「本次真正新入队」的通知——平台只弹这些，重复内容由
 /// [`NotificationQueue`] 的同文去重抑制，不再打扰用户。
@@ -570,6 +586,22 @@ mod tests {
         assert_eq!(tray_action(TRAY_ITEM_QUIT), Some(TrayAction::Quit));
         assert_eq!(tray_action("tray-nope"), None, "未知 id 不 panic");
         assert_eq!(tray_action(TRAY_ID), None, "托盘 id 不是菜单项 id");
+    }
+
+    #[test]
+    fn notification_click_maps_default_only() {
+        assert_eq!(
+            notification_click_action(NOTIFY_ACTION_OPEN),
+            Some(TrayAction::ShowWindow),
+            "点击通知本体=唤起主窗（与托盘显示同路径）"
+        );
+        assert_eq!(notification_click_action("__closed"), None, "关闭不是打开");
+        assert_eq!(notification_click_action(""), None);
+        assert_eq!(
+            notification_click_action(TRAY_ITEM_SHOW),
+            None,
+            "托盘菜单 id 不是通知动作"
+        );
     }
 
     #[test]

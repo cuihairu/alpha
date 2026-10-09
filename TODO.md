@@ -532,7 +532,7 @@
 - [x] 三级 API 分层 / MCP 慢启动：拍板维持 P3 登记（architecture-review §5 能力面最低优先级，无新消费方证据不开工）（〔拍板：维持〕）
 - [x] announcement/news 域：拍板维持未实现（architecture.md §2，无消费方证据）（〔拍板：维持〕）
 - [x] data-privacy 客户端接线：拍板维持登记（web account.ts 纯逻辑就绪，接线随各客户端工程节消化）（〔拍板：维持〕）
-- [x] 桌面通知点击唤起主窗：拍板开工（desktop-framework.md §5 L114 / §7 登记）——D-Bus 默认动作（notify-rust xdg 后端）订阅点击 → 主窗显示/聚焦；macOS 激活回调需 app delegate（Tauri 1.x 未实现）登记边界（〔拍板：开工〕）
+- [x] 桌面通知点击唤起主窗：拍板开工 → **已落（2026-10-10）**：notify.rs 加 `NOTIFY_ACTION_OPEN` 常量 + `notification_click_action` 映射（复用 `TrayAction::ShowWindow` 单一路径，`__closed`/未知 id 非「打开」）；platform.rs XDG 分支（Linux/BSD）直用 notify-rust 注册 `default` 动作、独立线程 `wait_for_action`（zbus 阻塞）→ 主窗显示/聚焦——tauri 1.x 包装层 `show()` 丢弃句柄、点击事件拿不到；Cargo.toml 加 XDG 目标限定可选依赖 notify-rust 4（树内既有不新增编译单元）；wiring_contract 加映射断言 + platform.rs 行数锁 120→150；边界：macOS 需 UNUserNotificationCenter delegate（Tauri 1.x 未接）、Windows 动作信号无消费，两者维持 tauri 展示点击无动作，XDG 真机验收待人工（desktop-framework.md §7）
 - [x] 平板断点：拍板维持待反馈（ux-consistency.md，触发条件未到）（〔拍板：维持〕）
 - [x] 护栏白名单 / 告警翻译层：拍板维持现状（GW-004「只标记不封禁」既定口径，告警翻译层已随诊断知识库 11 条规则落地，无新缺口）（〔拍板：维持〕）
 - [x] 纯发布节门控项复核（本批不动工）：Jaeger OTLP span 导出、§10.1 对象存储适配、差分更新——维持登记（〔维持〕）
