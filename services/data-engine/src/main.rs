@@ -21,7 +21,7 @@ use alpha_core::{
 };
 use alpha_storage::{
     clickhouse::{ClickHouseConfig, ClickHouseStorage},
-    lake::{bars_to_parquet_bytes, LakeWriter, MarketBar},
+    lake::{bars_to_parquet_bytes, CompactionOptions, LakeWriter, MarketBar},
     partition::PartitionScheme,
     InvalidMessage, RedisStreamQueue, StreamEnvelope, StreamMessage, TimeSeriesPoint,
     TimeSeriesStorage, TimescaleTimeSeriesStorage,
@@ -441,6 +441,7 @@ async fn main() -> anyhow::Result<()> {
     }
     start_quote_normalizer(state.clone()).await?;
     start_mirror_retry_worker(state.clone());
+    start_lake_maintenance_worker(state.clone());
 
     let router = build_router(state.clone());
     let addr = config.server.addr.clone();
@@ -913,6 +914,68 @@ fn start_mirror_retry_worker(state: Arc<AppState>) {
             }
         }
     });
+}
+
+/// 湖维护后台任务（data-lake-parquet §5/§7）：周期执行 compaction + manifest
+/// 重建。lake 未启用或 `maintenance_interval_secs=0`（默认）时不启动——
+/// 湖默认只作写透与读旁路，维护是显式 opt-in。
+fn start_lake_maintenance_worker(state: Arc<AppState>) {
+    let Some(lake) = state.lake.clone() else {
+        return;
+    };
+    let secs = state.config.lake.maintenance_interval_secs;
+    if secs == 0 {
+        tracing::info!("Lake maintenance worker not started: interval disabled");
+        return;
+    }
+    let layer = state.config.lake.layer.clone();
+    let table = state.config.lake.table.clone();
+    tokio::spawn(async move {
+        let mut ticker = interval(StdDuration::from_secs(secs.max(1)));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        ticker.tick().await; // interval 首个 tick 立即返回，跳过以保证先等一个周期
+
+        loop {
+            ticker.tick().await;
+            run_lake_maintenance_round(&lake, &layer, &table).await;
+        }
+    });
+}
+
+/// 单轮湖维护：compaction（小文件装箱合并，失败只告警）后重建 manifest
+/// （统计面与 catalog v1 底座）。阻塞 fs IO 放 blocking 线程，不占 worker。
+async fn run_lake_maintenance_round(lake: &Arc<LakeWriter>, layer: &str, table: &str) {
+    let compact_lake = lake.clone();
+    let (l, t) = (layer.to_string(), table.to_string());
+    match tokio::task::spawn_blocking(move || {
+        compact_lake.compact_table(&l, &t, &CompactionOptions::default())
+    })
+    .await
+    {
+        Ok(Ok(report)) if !report.removed.is_empty() => tracing::info!(
+            merged = report.written.len(),
+            removed = report.removed.len(),
+            untouched = report.untouched_files,
+            "lake compaction round done"
+        ),
+        Ok(Ok(_)) => {}
+        Ok(Err(err)) => tracing::warn!("lake compaction failed: {}", err),
+        Err(err) => tracing::warn!("lake compaction task failed: {}", err),
+    }
+
+    let manifest_lake = lake.clone();
+    let (l, t) = (layer.to_string(), table.to_string());
+    match tokio::task::spawn_blocking(move || manifest_lake.rebuild_manifest(&l, &t)).await {
+        Ok(Ok(m)) if m.total_files > 0 => tracing::info!(
+            partitions = m.partitions.len(),
+            files = m.total_files,
+            rows = m.total_rows,
+            "lake manifest rebuilt"
+        ),
+        Ok(Ok(_)) => {}
+        Ok(Err(err)) => tracing::warn!("lake manifest rebuild failed: {}", err),
+        Err(err) => tracing::warn!("lake manifest task failed: {}", err),
+    }
 }
 
 /// 单轮补写：按序重写缓冲批次；任一条失败则该条起（含未尝试）按原序回队首，
@@ -2399,6 +2462,38 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    /// 湖维护单轮（compaction + manifest 重建）：默认阈值下小湖不触发合并，
+    /// manifest 必须落盘且统计口径正确——后台 worker 只是周期调用本函数。
+    #[tokio::test]
+    async fn lake_maintenance_round_rebuilds_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let lake = Arc::new(LakeWriter::new(dir.path(), PartitionScheme::DateOnly));
+        let bars = vec![MarketBar {
+            timestamp_ms: Utc::now().timestamp_millis(),
+            symbol: "600519".to_string(),
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: 10.0,
+        }];
+        lake.write_bars("silver", "market_data", &bars, None)
+            .unwrap();
+
+        run_lake_maintenance_round(&lake, "silver", "market_data").await;
+
+        let manifest = lake
+            .read_manifest("silver", "market_data")
+            .unwrap()
+            .unwrap();
+        assert_eq!(manifest.total_files, 1);
+        assert_eq!(manifest.total_rows, 1);
+        assert!(dir
+            .path()
+            .join("silver/market_data/_manifest.json")
+            .exists());
     }
 
     #[test]

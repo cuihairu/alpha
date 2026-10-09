@@ -80,12 +80,15 @@ pub struct ClickHouseSettings {
 /// Parquet 湖写透配置：启用后 `/clickhouse/export.parquet?query_id=market_data`
 /// 在返回响应的同时把数据按交易日分区落湖（写失败只告警不拒绝请求），
 /// `?from_lake=true` 读旁路可用。骨架期单写者（§10.2）、DateOnly 分区（§3）。
+/// `maintenance_interval_secs` 为后台维护周期（compaction + manifest 重建），
+/// 0 = 不启动维护任务（默认， lake 只作写透与读旁路）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct LakeSettings {
     pub enabled: bool,
     pub lake_root: String,
     pub layer: String,
     pub table: String,
+    pub maintenance_interval_secs: u64,
 }
 
 impl AppConfig {
@@ -151,6 +154,8 @@ impl AppConfig {
             .expect("failed to set lake.layer default")
             .set_default("lake.table", "market_data")
             .expect("failed to set lake.table default")
+            .set_default("lake.maintenance_interval_secs", 0_u64)
+            .expect("failed to set lake.maintenance_interval_secs default")
     }
 
     fn load_from_builder(builder: ConfigBuilder<DefaultState>) -> Result<Self, ConfigError> {
@@ -207,6 +212,7 @@ mod tests {
         assert_eq!(cfg.lake.lake_root, "lake");
         assert_eq!(cfg.lake.layer, "silver");
         assert_eq!(cfg.lake.table, "market_data");
+        assert_eq!(cfg.lake.maintenance_interval_secs, 0);
     }
 
     #[test]
@@ -233,6 +239,7 @@ mod tests {
                   lake_root: "/tmp/lake-demo"
                   layer: "bronze"
                   table: "market_data"
+                  maintenance_interval_secs: 600
             "#,
             FileFormat::Yaml,
         ));
@@ -256,5 +263,6 @@ mod tests {
         assert!(cfg.lake.enabled);
         assert_eq!(cfg.lake.lake_root, "/tmp/lake-demo");
         assert_eq!(cfg.lake.layer, "bronze");
+        assert_eq!(cfg.lake.maintenance_interval_secs, 600);
     }
 }

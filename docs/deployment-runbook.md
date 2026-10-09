@@ -105,7 +105,11 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 `storage{persistence_enabled,timescale_url}` /
 `clickhouse{enabled,url,database,user,password}` /
 `sweeper{enabled,min_idle_ms,interval_secs,max_delivery_count}` /
+`lake{enabled,lake_root,layer,table,maintenance_interval_secs}` /
 `security{api_keys}`。env 形如 `ALPHA__STORAGE__PERSISTENCE_ENABLED=true`。
+`lake.enabled=true` 打开 Parquet 湖写透与 `?from_lake=true` 读旁路（见
+docs/data-lake-parquet.md）；`lake.maintenance_interval_secs>0` 才启动湖
+维护后台任务（compaction + manifest 重建），默认 0 不启动。
 
 **api-gateway**：clap CLI（`--bind`、`--auth-mode off|jwt`、`--auth-secret`、
 `--auth-jwks-url`/`--auth-jwks-refresh-secs`（OIDC 键表，oct 键联调形态）、
