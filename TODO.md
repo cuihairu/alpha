@@ -528,7 +528,7 @@
 ## 拍板登记（2026-10-10 巡检续批：逐项按仓内决策记录自行拍板，纯发布节门控项维持不开工）
 
 - [x] 桌面 frontendDist：拍板 web-framework-selection.md §6 选项 A——`frontendDist` 改指 `web/app/dist`，桌面复用 React 产物，Tauri API 经 `@tauri-apps/api` 注入；B（桌面专属壳）撤销备选。**已全落（2026-10-09）**：①desktop.ts 桥接 + DesktopPanel（配置自举/原生导出/告警托盘/离线同步）+ App 挂载，tsc/97 测/check-web.sh 全绿；②distDir 切换 + 兜底壳退休 + 契约测试对账桥接（16+11 例）+ check-desktop.sh 桥接断言 + CI 双桌面作业接 Node/web/app 构建（generate_context! 编译期嵌入产物）；边界：L117 快捷键/右键菜单前端消费面未迁移（demo 面无产品场景，命令保留注册），devPath 5173 strictPort
-- [x] RustSec 升级债：拍板维持报告型不阻塞（cargo audit 现状 7 漏洞 + 11 警告行逐条登记 rust-code-standards.md §12；braces CVE-2026-93687 已随依赖图变化消除）；余项随专项消化（〔拍板：维持〕）
+- [x] RustSec 升级债：拍板维持报告型不阻塞（cargo audit 现状 7 漏洞 + 11 警告行逐条登记 rust-code-standards.md §12；braces CVE-2026-93687 已随依赖图变化消除）；余项随专项消化（〔拍板：维持〕）。**收口归类（2026-10-10，逐条核 Solution+用法面）**：可升级 **0**（各 Solution 均需大版本跳或上游无修复版）；误报 **2**——object_store RUSTSEC-2024-0358（用法不涉及：RawArchiver 走 `s3://…&access_key=…&secret_key=…` access-key 口径，无 WebIdentityToken 路径）、rsa RUSTSEC-2023-0071（用法不涉及：JWT 全 HS256 对称口径 `Algorithm::HS256`，无 RSA 私钥运算，将来启用 RS256 需重评）；记录风险 **3**——h2 RUSTSEC-2026-0258（gRPC/HTTP2 主链路在用，需 axum 0.6→0.7 + tonic 0.10→0.12）、rustls-webpki ×3 RUSTSEC-2026-0098/0099/0104（条件性：默认部署 `postgres://` 无 TLS，rustls 路径不启用，启用 TLS 时暴露真实，需 sqlx 0.7→0.8）、sqlx RUSTSEC-2024-0363（无条件：PG 线协议解析每次查询都走，需 0.7→0.8）。处置：全部登记，无随批可消化项（〔拍板：收口归类，维持〕）
 - [x] Cargo.lock 策略：拍板维持不入库（库惯例；deployment-runbook/docker-deployment 已登记复现性代价，关键钉版经 Cargo.toml pin 依赖兜底——先例 zbus-macros-pin）（〔拍板：维持〕）
 - [x] 三级 API 分层 / MCP 慢启动：拍板维持 P3 登记（architecture-review §5 能力面最低优先级，无新消费方证据不开工）（〔拍板：维持〕）
 - [x] announcement/news 域：拍板维持未实现（architecture.md §2，无消费方证据）（〔拍板：维持〕）

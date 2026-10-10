@@ -117,7 +117,7 @@ frontendDist 拍板 A 落地后各步对账 React 产物/前端桥接，2026-10-
 `tauri-utils` 走 `tauri_build::build()` 完全相同的解析路径
 （`config::parse::read_from` → `serde_json::from_value::<Config>`），把字段名/段位置
 是否匹配 Tauri 1.x schema 从「CI macOS 运行时才发现」前移到本地与常规 CI。
-`desktop/tests/wiring_contract.rs`（16 例）锁桥接/面板 ↔ 接线层契约：14 命令两侧
+`desktop/tests/wiring_contract.rs`（17 例）锁桥接/面板 ↔ 接线层契约：14 命令两侧
 一致、告警命令 v1 camelCase 参数、原生另存为导出、主题应用链路、离线读/同步呈现、
 胶水薄度行数锁（gui.rs / platform.rs / window_gui.rs / shortcut_gui.rs）。
 
@@ -146,7 +146,7 @@ frontendDist 拍板 A 落地后各步对账 React 产物/前端桥接，2026-10-
 | `export_symbol_to_file`（L113） | `export::export_symbol_request` | 格式解析、空标的、后缀一致性（见 §6） |
 | `get_app_info` | `app::app_info` | 纯读取（唯一无失败路径的命令） |
 
-`desktop/tests/wiring_contract.rs`（16 例；frontendDist 切换后断言对象为前端桥接/
+`desktop/tests/wiring_contract.rs`（17 例；frontendDist 切换后断言对象为前端桥接/
 面板源码）把这个约定变成可本地执行的断言：命令体不得出现判空/兜底/自造错误串；
 每个命令必须委派到上表的入口并 `map_err`；接线层不得绕过入口直接调底层
 （`config::load_or_default`、`AlertKind::parse` 等）；`generate_handler!`
@@ -482,11 +482,9 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
 底色提取为 `--chip` 变量一并主题化——「覆盖既有组件」由 wiring_contract
 `shell_theme_follows_system_with_override` 锁定。
 
-真机验收边界（CI Desktop 只编译+链接，需真实桌面人工观察）：双显示器拖拽
-后重启位置还原、拔掉副屏后窗口钳回主屏；最大化还原；系统深浅色实时切换时
-壳层跟随（native 装饰由 conf System 跟随，两边一致性取决于 WM）；Linux 上
-托盘图标不随主题换图（单图标资产，已登记后续）；多屏 DPI 混排时物理像素
-口径的还原精度。
+真机验收边界（CI Desktop 只编译+链接，需真实桌面人工观察）：全功能面
+逐步走查清单见 **§11**（窗口恢复/导出确认/通知托盘/快捷键菜单/主题/离线，
+每条注明框架层自动化覆盖与真机观察点）。
 
 ## 9. 本地数据库同步和离线模式
 
@@ -610,3 +608,40 @@ macOS/Windows/Linux 上 ⌘R/Ctrl+R 实际触发与系统快捷键冲突时的�
 右键菜单在深浅色主题下的观感与置灰态；多显示器下菜单落点（是否越出屏幕
 边缘）；Esc 与点击收起的时序；全局快捷键在窗口失焦时是否仍触发（设计上
 会，未实测）。
+
+## 11. 真机走查清单（验收打磨）
+
+CI 覆盖边界：Linux 门禁跑框架层纯逻辑（205 lib + 11 配置 + 17 接线契约），
+CI Desktop (macOS) 编译+链接接线层；**平台注册、真实事件、WM 行为、原生
+对话框/通知/托盘**只能真机人工观察。以下按功能面逐条走查，每条注明现有
+自动化覆盖（框架层断言/契约）与真机需观察点：
+
+1. **窗口恢复（L115）**：①单屏拖拽+缩放后重启 → 位置尺寸还原（框架层
+   `resolve_placement` 任一屏可见原样返回，`window.rs` 单测覆盖）；②双屏拖
+   拽到副屏后重启 → 回副屏（`remembered_monitor` 按名查，单测覆盖）；③拔
+   掉副屏后重启 → 钳回主屏且尺寸不超屏（`clamp_axis` 负区间，单测覆盖）；
+   ④最大化窗口重启 → 回上次所在屏（`maximized_position_hint` 落屏提示 +
+   `set_position` 前置，`f70ee74`；**先动后最大的闪烁、DPI 混排落屏判定
+   真机观察**）；⑤多屏 DPI 混排 → 物理像素口径还原精度（真机观察）。
+2. **导出（L113）**：①另存为对话框选已有文件 → 原生覆盖确认弹「覆盖确认」
+   （`export_overwrite_confirm_is_framework_owned` 契约锁定框架层文案/流程）；
+   ②选「否」→ 原文件不动、无临时残留（`confirm_declined_keeps_existing_
+   file_untouched` 单测）；③选「是」→ 覆盖成功；④取消对话框 → 同「已取消」
+   口径（前端 `exportSymbolToFile` null 分支）。
+3. **通知与托盘（L114）**：①布防后行情触发 → 系统通知弹出（**真机：实际
+   弹出/权限授权流**）；②点击通知 → 主窗唤起（XDG 路径已接，**真机：
+   X11 事件处理无日志可对，需人工观察**）；③托盘菜单状态机：布防/触发/
+   停用三态文案与置灰（`tray_menu_model` 单测覆盖模型，**真机：菜单渲染
+   与点击**）；④托盘图标不随主题换图（单图标资产，已登记待资产）。
+4. **快捷键与右键菜单（L117）**：①⌘R/Ctrl+R 全局触发（**真机：系统级注
+   册、与系统快捷键冲突时降级告警**）；②右键菜单渲染与置灰态（**真机：
+   深浅色观感、多屏落点、Esc 收起时序**）；③注意：React 产物前端消费面
+   未迁移（§5 L117 行拍板），真机走查时快捷键/菜单**无 UI 落点属预期**
+   （命令保留注册，空操作不影响其它路径）。
+5. **主题（L115）**：系统深浅色实时切换 → 壳层 `data-theme` 跟随（配置
+   theme=system 口径；**真机：native 装饰由 conf System 跟随，两边一致性
+   取决于 WM**）。
+6. **离线与同步（L116）**：①断网同步 → 降级读缓存并注明（`offline_sync_
+   is_a_no_op_report_not_an_error` 单测覆盖降级口径）；②联网同步 → 指纹增
+   量应用（`sync_from` 单测覆盖）；③离线行情读取 → 缓存优先（`quotes_from`
+   单测覆盖）。

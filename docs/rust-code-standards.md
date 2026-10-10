@@ -142,6 +142,12 @@ CI（.github/workflows/ci.yml）：`lint` 作业 = §11 前两命令；
   （bincode/fxhash/instant/paste/proc-macro-error/rustls-pemfile×2/yaml-rust
   失维护；glib/lexical-core/rand unsound——多为传递依赖，直接消费面不可达）；
   余项随专项消化，单条有 semver 兼容修复版时随批消化；
+  **收口归类（2026-10-10，逐条核 Solution+用法面）**：可升级 0；误报 2
+  （object_store：RawArchiver 走 access-key 口径无 WebIdentityToken 路径；
+  rsa：JWT 全 HS256 无 RSA 私钥运算）；记录风险 3（h2 需 axum 0.6→0.7 +
+  tonic 0.10→0.12；webpki×3 默认部署无 TLS 条件性暴露，启用 TLS 需重评，
+  需 sqlx 0.7→0.8；sqlx 无条件暴露，需 0.7→0.8）。逐条证据见
+  TODO.md §拍板登记 RustSec 条目；
 * data-engine/real-time-feed/storage/collector 尚有历史遗留的结构性
   clippy 债务已于 2026-09-28 一并清零；后续新增代码直接被 `-D warnings` 拦截；
 * fmt 工具链版本漂移风险（§1）：出现首个漂移案例时引入 rust-toolchain.toml。
