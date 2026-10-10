@@ -12,7 +12,8 @@
 //!    尚无版本号/水位协议，指纹一致的记录跳过、不一致才落库；接入真实协议时
 //!    只换 `QuoteRemote` 实现并让 seq 来自服务端水位，[`sync_from`] 语义不变；
 //! 3. 纯 TCP 探测做不了 TLS（https 目标保守判离线，走缓存降级）；演示配置
-//!    `api_url` 默认 `http://localhost:8080`，方括号 IPv6 不支持（`host:port` 口径）；
+//!    `api_url` 默认 `http://localhost:8080`；方括号 IPv6 字面量受支持
+//!    （`[::1]:8080` 形态，连接前剥括号），畸形括号判离线；
 //! 4. 离线读缓存缺失的标的不报错也不编造——列入 `missing` 如实上报（宁缺毋滥）；
 //! 5. 同步方向是「远端 → 本地」只读行情；本地告警/配置无对应远端契约，不上传。
 
@@ -103,11 +104,26 @@ impl QuoteRemote for SyntheticRemote {
 
 /// 解析 `http://host[:port]` 目标（探测用）。https 与未知 scheme 返回 `None`
 /// （纯 TCP 无 TLS 能力，保守判离线）；路径/查询串剥离，端口缺省 80。
+/// 方括号 IPv6 字面量（RFC 3986 `[addr]` / `[addr]:port`）受支持——地址段
+/// 自带冒号，端口只能按 `]:` 切，连接前剥掉方括号（`ToSocketAddrs` 不收
+/// 带括号字面量）；畸形括号（无闭合/空地址/尾随垃圾）一律 `None`。
 fn parse_http_target(api_base: &str) -> Option<(String, u16)> {
     let rest = api_base.trim().strip_prefix("http://")?;
     let authority = rest.split(['/', '?', '#']).next()?;
     if authority.is_empty() {
         return None;
+    }
+    if let Some(in_brackets) = authority.strip_prefix('[') {
+        let (addr, tail) = in_brackets.split_once(']')?;
+        if addr.is_empty() {
+            return None;
+        }
+        let port = match tail.strip_prefix(':') {
+            Some(p) => p.parse().ok()?,
+            None if tail.is_empty() => 80,
+            None => return None,
+        };
+        return Some((addr.to_string(), port));
     }
     match authority.rsplit_once(':') {
         Some((host, port)) => Some((host.to_string(), port.parse().ok()?)),
@@ -452,6 +468,49 @@ mod tests {
         );
         assert_eq!(parse_http_target("ftp://x"), None);
         assert_eq!(parse_http_target("http://"), None);
+    }
+
+    #[test]
+    fn parse_http_target_accepts_bracketed_ipv6_literals() {
+        assert_eq!(
+            parse_http_target("http://[::1]:8080/health"),
+            Some(("::1".to_string(), 8080)),
+            "括号剥离后进 ToSocketAddrs"
+        );
+        assert_eq!(
+            parse_http_target("http://[2001:db8::1]"),
+            Some(("2001:db8::1".to_string(), 80)),
+            "缺省端口 80"
+        );
+        // 畸形括号一律 None（判离线）
+        assert_eq!(parse_http_target("http://[::1"), None, "无闭合");
+        assert_eq!(parse_http_target("http://[]:80"), None, "空地址");
+        assert_eq!(parse_http_target("http://[::1]junk"), None, "尾随垃圾");
+        assert_eq!(parse_http_target("http://[::1]:x"), None, "端口非数字");
+    }
+
+    #[tokio::test]
+    async fn probe_health_reaches_bracketed_ipv6_loopback() {
+        // 真实连接闭环：[::1] 字面量解析后能连上本机回环
+        let listener = match std::net::TcpListener::bind("[::1]:0") {
+            Ok(l) => l,
+            Err(_) => return, // 环境无 IPv6 回环时跳过断言（判离线是旧行为）
+        };
+        let addr = listener.local_addr().expect("端口");
+        std::thread::spawn(move || {
+            if let Ok((socket, _)) = listener.accept() {
+                let mut socket = socket;
+                use std::io::{Read, Write};
+                let mut buf = [0u8; 512];
+                let _ = socket.read(&mut buf);
+                let _ = socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+            }
+        });
+        let url = format!("http://[::1]:{}", addr.port());
+        assert!(
+            probe_health(&url, Duration::from_millis(300)).await,
+            "方括号 IPv6 探测应命中"
+        );
     }
 
     #[tokio::test]
