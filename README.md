@@ -38,7 +38,7 @@ Chinese architecture write-up: `docs/architecture.md`.
    - Web UI is a quote/analysis dashboard; monitoring dashboards live in Grafana.
 
 5. **Deployment & Networking**  
-   - Rust binaries built statically and run via docker-compose or systemd (`scripts/deploy-ubuntu.sh`).  
+   - Rust binaries built statically and run via docker-compose or systemd (`scripts/deploy-ubuntu.sh`; quick guide: `README_DEPLOYMENT.md`).  
    - Internal network hosts the entire pipeline; publishing only the API gateway through Cloudflare Tunnel is a planned option.  
    - CI/CD via GitHub Actions (lint/test/wasm/build/e2e/security + release pipelines).
 

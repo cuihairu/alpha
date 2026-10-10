@@ -38,7 +38,7 @@
    - Web UI 为行情/分析看板；监控看板在 Grafana。
 
 5. **部署与网络**  
-   - Rust 二进制静态构建，经 docker-compose 或 systemd 运行（`scripts/deploy-ubuntu.sh`）。  
+   - Rust 二进制静态构建，经 docker-compose 或 systemd 运行（`scripts/deploy-ubuntu.sh`；快速指南：`README_DEPLOYMENT.md`）。  
    - 内网承载整条管线；仅经 Cloudflare Tunnel 发布 API 网关为规划选项。  
    - CI/CD 走 GitHub Actions（lint/test/wasm/build/e2e/security + release 流水线）。
 

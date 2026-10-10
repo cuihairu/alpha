@@ -25,7 +25,7 @@ const config = {
         // path='.' 时 contentDir=siteDir，否则 node_modules 里的 README 会被当成文档。
         docs: {
           path: '.',
-          exclude: ['node_modules/**', 'build/**', '.docusaurus/**', 'src/**', 'static/**'],
+          exclude: ['node_modules/**', 'build/**', '.docusaurus/**', 'src/**', 'static/**', 'README.md'],
           sidebarPath: require.resolve('./sidebars.js'),
           editUrl: 'https://github.com/cuihairu/alpha/tree/main/docs/',
         },
