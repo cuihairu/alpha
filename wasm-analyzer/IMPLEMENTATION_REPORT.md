@@ -381,9 +381,7 @@ wasm-pack test --firefox -- --test performance_tests
    - 使用 Rust SIMD 指令加速指标计算
    - 预期性能提升: 2-4x
 
-2. **更多技术指标**
-   - KDJ, ADX（CCI/ATR 已上线，见 `lib.rs` calculateCCI/calculateATR）
-   - 形态识别算法
+2. ~~**更多技术指标**~~（已交付：`calculateKDJ`/`calculateADX`、`identifyElliottWaves` 形态识别；`calculateCCI`/`calculateATR` 先行上线）
 
 3. ~~策略回测引擎~~（已交付：`backtestSmaCross`/`backtestSmaCrossPtr`）
 

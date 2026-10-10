@@ -210,7 +210,7 @@ wasm-analyzer/
 
 ### 未来增强:
 - [ ] SIMD 向量化优化 (rustc target-feature=+simd128)
-- [ ] 更多技术指标 (KDJ, ADX)——CCI/ATR 已上线
+- [x] 更多技术指标 (KDJ, ADX)——已交付（`calculateKDJ`/`calculateADX`，数值手算单测随 `packages/core` advanced.rs）
 - [x] 策略回测引擎（backtestSmaCross/backtestSmaCrossPtr 已交付）
 - [ ] WebGPU 加速
 
