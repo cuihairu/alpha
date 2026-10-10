@@ -179,7 +179,7 @@ Collector = Data Source Runtime
 |---|---|---|---|
 | P0（立即，docs-only 可先行） | 定位声明落 README/PROJECT_SUMMARY；本文入文档站 | 文档收敛 | ✅ 已落（6968e57 + 后续对账批） |
 | P1（下一开发轮） | envelope v2 字段 + protocols 迁移 + process_time；Instrument 契约 + /instruments | 数据模型 | ✅ 已落（0af6fe0、024a63d） |
-| P2 | 数据质量系统（完整性/连续性/异常/重复/Source Divergence）+ sequence 断档告警 | 可靠性 | 进行中——sequence 断档已落（9254efe）；重复/完整性观测面已落（重复命中、规范化失败、DLQ 隔离三计数，2026-10）；异常检测已落（单跳价格超阈 `PriceOutlierMonitor`，2026-10）；Source Divergence 已落（同刻多源比对 SourceDivergenceMonitor，单源期间休眠，2026-10）——五维齐 |
+| P2 | 数据质量系统（完整性/连续性/异常/重复/Source Divergence）+ sequence 断档告警 | 可靠性 | ✅ 已落（五维齐，2026-10）：sequence 断档（9254efe）；重复/完整性观测面（重复命中、规范化失败、DLQ 隔离三计数）；异常检测（单跳价格超阈 `PriceOutlierMonitor`，`alpha_dataquality_price_outliers_total` 指标接入消费路径）；Source Divergence（同刻多源比对 SourceDivergenceMonitor，单源期间休眠） |
 | P3 | 三级 API 分层；Research Dataset + Experiment 登记表；MCP 慢启动 | 能力面 | 未开始（拍板 2026-10-10 复核：维持登记——能力面最低优先级，P0–P2 数据/可靠性优先；无新消费方证据前不开工） |
 | P4 | UI 回归 API consumer 定位（不设独立路线图） | 收敛 | 未开始 |
 
