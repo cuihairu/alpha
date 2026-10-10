@@ -161,6 +161,107 @@ impl AdvancedIndicators {
         atr_values
     }
 
+    /// 计算平均趋向指数 (ADX, Wilder 平滑)
+    ///
+    /// 口径（Wilder 原著 / StockCharts / Investopedia 一致）：
+    /// - TR = max(H−L, |H−C_prev|, |L−C_prev|)；+DM/−DM 取当日单向位移
+    ///   （需严格大于反向位移且为正，否则 0）
+    /// - TR/±DM 经 Wilder 平滑：首值 = 前 `period` 个样本之和，
+    ///   其后 `prev − prev/period + current`（当根全权重）
+    /// - ±DI = 100 × 平滑±DM / 平滑TR（平滑 TR 为 0 时双 0）；
+    ///   DX = 100 × |+DI−−DI| / (+DI+−DI)（和为 0 时 0）
+    /// - ADX = DX 的 Wilder 移动平均：首值 = 前 `period` 个 DX 的均值，
+    ///   其后 `(prev×(period−1) + DX)/period`（RMA 递推，凸组合恒 ∈ [0,100]）
+    ///
+    /// 下标对齐输入：DX 自第 `period` 根 bar 起有定义，ADX 自第
+    /// `2×period−1` 根 bar 起有定义，之前一律 0。样本不足两根或周期
+    /// 小于 1 → 全 0（与 [`calculate_atr`] 同一兜底口径）。
+    pub fn calculate_adx(
+        &self,
+        highs: &[f64],
+        lows: &[f64],
+        closes: &[f64],
+        period: usize,
+    ) -> Vec<f64> {
+        if highs.len() < 2 || period < 1 {
+            return vec![0.0; highs.len()];
+        }
+
+        let n = highs.len();
+        let mut adx = vec![0.0; n];
+
+        // TR / +DM / -DM（下标对齐输入，首根 bar 无定义占位 0）
+        let mut tr = vec![0.0; n];
+        let mut plus_dm = vec![0.0; n];
+        let mut minus_dm = vec![0.0; n];
+        for i in 1..n {
+            let high_low = highs[i] - lows[i];
+            let high_close_prev = (highs[i] - closes[i - 1]).abs();
+            let low_close_prev = (lows[i] - closes[i - 1]).abs();
+            tr[i] = high_low.max(high_close_prev).max(low_close_prev);
+
+            let up_move = highs[i] - highs[i - 1];
+            let down_move = lows[i - 1] - lows[i];
+            plus_dm[i] = if up_move > down_move && up_move > 0.0 {
+                up_move
+            } else {
+                0.0
+            };
+            minus_dm[i] = if down_move > up_move && down_move > 0.0 {
+                down_move
+            } else {
+                0.0
+            };
+        }
+
+        // Wilder 平滑 + DX：平滑值自第 period 根 bar 起（首值 = 前 period 个样本和）
+        let period_f = period as f64;
+        let mut smooth_tr = 0.0;
+        let mut smooth_plus = 0.0;
+        let mut smooth_minus = 0.0;
+        let mut dx: Vec<f64> = Vec::new();
+        for i in period..n {
+            if i == period {
+                smooth_tr = tr[1..=period].iter().sum();
+                smooth_plus = plus_dm[1..=period].iter().sum();
+                smooth_minus = minus_dm[1..=period].iter().sum();
+            } else {
+                smooth_tr = smooth_tr - smooth_tr / period_f + tr[i];
+                smooth_plus = smooth_plus - smooth_plus / period_f + plus_dm[i];
+                smooth_minus = smooth_minus - smooth_minus / period_f + minus_dm[i];
+            }
+            let (di_plus, di_minus) = if smooth_tr > 0.0 {
+                (
+                    100.0 * smooth_plus / smooth_tr,
+                    100.0 * smooth_minus / smooth_tr,
+                )
+            } else {
+                (0.0, 0.0)
+            };
+            let di_sum = di_plus + di_minus;
+            let dx_value = if di_sum > 0.0 {
+                100.0 * (di_plus - di_minus).abs() / di_sum
+            } else {
+                0.0
+            };
+            dx.push(dx_value);
+        }
+
+        // ADX = DX 的 Wilder 移动平均（首值 = 前 period 个 DX 均值，其后 RMA 递推）；
+        // dx[0] 对齐输入下标 period → 首个 ADX 落在 2×period−1
+        if dx.len() >= period {
+            let mut prev = dx[..period].iter().sum::<f64>() / period_f;
+            let first_adx_index = 2 * period - 1;
+            adx[first_adx_index] = prev;
+            for (offset, &dx_value) in dx[period..].iter().enumerate() {
+                prev = (prev * (period_f - 1.0) + dx_value) / period_f;
+                adx[first_adx_index + 1 + offset] = prev;
+            }
+        }
+
+        adx
+    }
+
     /// 计算动量指标 (Momentum)
     pub fn calculate_momentum(&self, prices: &[f64], period: usize) -> Vec<f64> {
         let mut momentum = vec![0.0; prices.len()];
@@ -420,6 +521,99 @@ mod tests {
         let atr = indicators.calculate_atr(&highs, &lows, &closes, 14);
         assert!(!atr.is_empty());
         assert!(atr[0] == 0.0); // 第一天的 ATR 为 0
+    }
+
+    /// 随机指标（KDJ 语义）手算对账：k_period=3 / d_period=2。
+    /// %K[i] = 100·(C−LL)/(HH−LL)（窗口内最高/最低），%D = %K 的 2 期 SMA。
+    /// 手算：K = [0, 0, 75, 200/3, 80, 20, 50/3]，
+    /// D = [0, 0, 75/2, 425/6, 220/3, 50, 55/3]（逐项分数精确值）。
+    #[test]
+    fn test_stochastic_oscillator_hand_priced() {
+        let indicators = AdvancedIndicators::new();
+        let highs = vec![10.0, 11.0, 12.0, 11.5, 12.5, 11.0, 10.5];
+        let lows = vec![8.0, 9.0, 10.0, 10.5, 11.5, 10.0, 9.5];
+        let closes = vec![9.0, 10.0, 11.0, 11.0, 12.0, 10.5, 10.0];
+
+        let (k, d) = indicators.calculate_stochastic(&highs, &lows, &closes, 3, 2);
+
+        let expected_k = [0.0, 0.0, 75.0, 200.0 / 3.0, 80.0, 20.0, 50.0 / 3.0];
+        let expected_d = [
+            0.0,
+            0.0,
+            75.0 / 2.0,
+            425.0 / 6.0,
+            220.0 / 3.0,
+            50.0,
+            55.0 / 3.0,
+        ];
+        assert_eq!(k.len(), expected_k.len());
+        assert_eq!(d.len(), expected_d.len());
+        for (got, want) in k.iter().zip(expected_k.iter()) {
+            assert!(
+                (got - want).abs() < 1e-9,
+                "k 手算不符: got {got}, want {want}"
+            );
+        }
+        for (got, want) in d.iter().zip(expected_d.iter()) {
+            assert!(
+                (got - want).abs() < 1e-9,
+                "d 手算不符: got {got}, want {want}"
+            );
+        }
+    }
+
+    /// ADX 手算对账（period=3，9 根 bar）。TR/+DM/−DM、Wilder 平滑、
+    /// ±DI/DX 逐项手算后取精确分数：
+    /// TR=[0,2,2,1,1.5,1.5,1,1.5,1]，+DM=[0,1,1,0,1,0,0,1,0.5]，
+    /// −DM=[0,0,0,0,0,1.5,0.5,0,0]；DX[3..8]=[100,100,20/11,2500/137,2800/109,9340/223]；
+    /// ADX 自第 2×period−1=5 根起：[5..8]=[740/11, 230260/4521, 62855480/1478367,
+    /// 41841491860/989027523]。
+    #[test]
+    fn test_adx_hand_priced_wilder_smoothing() {
+        let indicators = AdvancedIndicators::new();
+        let highs = vec![10.0, 11.0, 12.0, 11.5, 12.5, 11.0, 10.5, 11.5, 12.0];
+        let lows = vec![8.0, 9.0, 10.0, 10.5, 11.5, 10.0, 9.5, 10.5, 11.0];
+        let closes = vec![9.0, 10.0, 11.0, 11.0, 12.0, 10.5, 10.0, 11.0, 11.5];
+
+        let adx = indicators.calculate_adx(&highs, &lows, &closes, 3);
+
+        assert_eq!(adx.len(), highs.len());
+        // 暖机期（第 5 根之前）ADX 为 0
+        for (i, &v) in adx[..5].iter().enumerate() {
+            assert_eq!(v, 0.0, "bar {i} 应处暖机期");
+        }
+        let expected = [
+            740.0 / 11.0,
+            230260.0 / 4521.0,
+            62855480.0 / 1478367.0,
+            41841491860.0 / 989027523.0,
+        ];
+        for (got, want) in adx[5..].iter().zip(expected.iter()) {
+            assert!(
+                (got - want).abs() < 1e-9,
+                "adx 手算不符: got {got}, want {want}"
+            );
+        }
+        // DX 恒 ∈ [0,100] 且 RMA 为凸组合 → ADX 有界
+        for &v in &adx[5..] {
+            assert!((0.0..=100.0).contains(&v));
+        }
+    }
+
+    /// 无趋势市场（价格走平）ADX 恒 0；样本不足（bar 数 < 2×period）全 0
+    #[test]
+    fn test_adx_flat_and_insufficient_inputs_stay_zero() {
+        let indicators = AdvancedIndicators::new();
+        let flat = [10.0; 12];
+        let adx_flat = indicators.calculate_adx(&flat, &flat, &flat, 3);
+        assert!(adx_flat.iter().all(|&v| v == 0.0), "走平市场 ADX 应恒 0");
+
+        // 单根 bar / 零周期：与 calculate_atr 同一兜底口径
+        assert_eq!(
+            indicators.calculate_adx(&[10.0], &[8.0], &[9.0], 3).len(),
+            1
+        );
+        assert_eq!(indicators.calculate_adx(&flat, &flat, &flat, 0)[0], 0.0);
     }
 
     /// 手算推动浪 + A-B-C 修正：枢轴 L(10),H(14),L(11.5),H(18),

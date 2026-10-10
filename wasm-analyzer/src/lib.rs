@@ -194,6 +194,35 @@ impl WasmAnalyzer {
         serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
     }
 
+    /// 计算 KDJ 指标（随机指标 KDJ 语义，即 Stochastic Oscillator 的 %K/%D）
+    /// %K = 100·(C−LL)/(HH−LL)（k_period 窗口），%D = %K 的 d_period 期 SMA。
+    /// 双序列输出：单个 `js_sys::Float64Array` 装不下 %K/%D 两条线，故沿用同文件
+    /// [`WasmAnalyzer::calculate_stochastic`] 的对象形态 `{k, d}`（键为 serde
+    /// 默认 snake_case，与 calculateAllIndicators 输出键风格一致）。
+    #[wasm_bindgen(js_name = calculateKDJ)]
+    pub fn calculate_kdj(
+        &self,
+        highs_js: &js_sys::Float64Array,
+        lows_js: &js_sys::Float64Array,
+        closes_js: &js_sys::Float64Array,
+        k_period: usize,
+        d_period: usize,
+    ) -> JsValue {
+        let highs: Vec<f64> = highs_js.to_vec();
+        let lows: Vec<f64> = lows_js.to_vec();
+        let closes: Vec<f64> = closes_js.to_vec();
+        let (k_values, d_values) = self
+            .advanced
+            .calculate_stochastic(&highs, &lows, &closes, k_period, d_period);
+
+        let result = serde_json::json!({
+            "k": k_values,
+            "d": d_values
+        });
+
+        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    }
+
     /// 计算威廉指标 (Williams %R)
     #[wasm_bindgen(js_name = calculateWilliamsR)]
     pub fn calculate_williams_r(
@@ -245,6 +274,23 @@ impl WasmAnalyzer {
         let closes: Vec<f64> = closes_js.to_vec();
         let atr = self.advanced.calculate_atr(&highs, &lows, &closes, period);
         js_sys::Float64Array::from(&atr[..])
+    }
+
+    /// 计算平均趋向指数 (ADX, Wilder 平滑)
+    /// 单序列输出，形态与 calculateCCI/calculateATR 一致（`js_sys::Float64Array`）。
+    #[wasm_bindgen(js_name = calculateADX)]
+    pub fn calculate_adx(
+        &self,
+        highs_js: &js_sys::Float64Array,
+        lows_js: &js_sys::Float64Array,
+        closes_js: &js_sys::Float64Array,
+        period: usize,
+    ) -> js_sys::Float64Array {
+        let highs: Vec<f64> = highs_js.to_vec();
+        let lows: Vec<f64> = lows_js.to_vec();
+        let closes: Vec<f64> = closes_js.to_vec();
+        let adx = self.advanced.calculate_adx(&highs, &lows, &closes, period);
+        js_sys::Float64Array::from(&adx[..])
     }
 
     /// 计算动量指标 (Momentum)
