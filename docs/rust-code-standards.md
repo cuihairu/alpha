@@ -74,7 +74,7 @@
 * 平台分支统一 `cfg(target_arch = "wasm32")` / `cfg(target_os = ...)`；
 * feature 默认值取「服务端全功能」：`default = ["grpc"]` 使服务端零改动，
   wasm 侧显式 `--no-default-features` 取契约层；
-* 门禁：`scripts/check-cross-platform.sh`（wasm32 编译 + L0 黑名单扫描）。
+* 门禁：`scripts/check-cross-platform.sh`（wasm32 编译 + L0 黑名单扫描 + wasm 单测真跑）。
 
 ## 8. 测试
 
@@ -112,7 +112,7 @@ scripts/check-lint.sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --exclude alpha-desktop -- -D warnings
 
-# 跨平台门禁（wasm32 编译 + L0 依赖黑名单）
+# 跨平台门禁（wasm32 编译 + L0 依赖黑名单 + wasm 单测 node 真跑）
 scripts/check-cross-platform.sh
 
 # 全量测试（Redis 门控测试需本机 Redis；无则自跳过）
