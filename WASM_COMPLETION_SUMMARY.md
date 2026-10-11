@@ -148,7 +148,7 @@ wasm-analyzer/
 │   └── performance_tests.rs # 性能基准测试 ✅
 ├── Cargo.toml              # 依赖配置 ✅
 ├── IMPLEMENTATION_REPORT.md # 完整实现报告 ✅
-└── pkg/                    # 构建产物 (待构建)
+└── pkg/                    # 构建产物（wasm-pack 生成，gitignore 不入库）
 ```
 
 ---
@@ -165,9 +165,10 @@ wasm-analyzer/
 ## 测试状态
 
 - ✅ 代码编译通过: `cargo check`
-- ⚠️ 单元测试: 待运行 (`cargo test`)
-- ⚠️ WASM 测试: 待运行 (`wasm-pack test`)
-- ⚠️ 性能基准: 待运行
+- ✅ 单元测试: `cargo test --workspace --all-targets --exclude alpha-desktop`（CI 门禁持续跑）
+- ✅ WASM 测试: `wasm-pack test --node`（7 用例；CI 跨平台门禁第 [5/5] 步真跑，
+  曾因一行编译错误整体失活，2026-10-11 起进门禁）
+- ⚠️ 性能基准: `tests/performance_tests.rs` 为浏览器专属，node 后端跳过，待 headless 浏览器跑
 
 ---
 
@@ -245,8 +246,8 @@ wasm-analyzer/
 
 ### 代码状态:
 - ✅ 核心功能已实现，cargo check 通过
-- ⚠️ 完整测试套件当时未运行（现状：CI wasm 作业持续验证）
-- ⚠️ WASM 模块当时未实际构建（现状：pkg 已构建）
+- ⚠️ 完整测试套件当时未运行（现状：CI 持续跑 cargo test 全仓 + wasm-pack test --node）
+- ⚠️ WASM 模块当时未实际构建（现状：pkg 已构建，gitignore 不入库）
 
 ### 性能特性:
 - 零拷贝数据处理（Arrow 批次直读）
