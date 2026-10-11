@@ -13,6 +13,9 @@
 #      rest/websocket/grpc 结构体）编译通过；proto/gRPC 传输为 grpc feature 门控的
 #      服务端专属能力，不在 wasm 契约层内。
 #
+#   5. alpha-wasm-analyzer 的 wasm_bindgen_test 在 node 下真执行
+#      （wasm 测试目标曾因一行编译错误整体失活：门禁必须真跑，不能只编译）。
+#
 # 用法：scripts/check-cross-platform.sh   （非交互）
 
 set -euo pipefail
@@ -32,19 +35,19 @@ if ! rustc --print target-list 2>/dev/null | grep -q "^$TARGET$"; then
 fi
 
 # 1) alpha-core wasm32 编译
-echo "--- [1/4] alpha-core @ $TARGET (--features wasm)"
+echo "--- [1/5] alpha-core @ $TARGET (--features wasm)"
 cargo check --target "$TARGET" -p alpha-core --features wasm \
     || fail "alpha-core 在 $TARGET 下编译失败（检查是否引入了非 wasm 兼容依赖）"
 ok "alpha-core wasm32 编译通过"
 
 # 2) alpha-wasm-analyzer wasm32 构建
-echo "--- [2/4] alpha-wasm-analyzer @ $TARGET"
+echo "--- [2/5] alpha-wasm-analyzer @ $TARGET"
 cargo build --target "$TARGET" -p alpha-wasm-analyzer \
     || fail "alpha-wasm-analyzer 在 $TARGET 下构建失败（等价于 cargo wasm-build）"
 ok "alpha-wasm-analyzer wasm32 构建通过"
 
 # 3) packages/core 默认依赖黑名单扫描
-echo "--- [3/4] packages/core 依赖黑名单扫描"
+echo "--- [3/5] packages/core 依赖黑名单扫描"
 FORBIDDEN='^(tokio|reqwest|sqlx|redis|tonic|native-tls|rustls|notify|directories|dirs)$'
 VIOLATIONS=$(sed -n '/^\[dependencies\]/,/^\[/p' packages/core/Cargo.toml \
     | grep -oE '^[a-zA-Z0-9_-]+' | grep -E "$FORBIDDEN" || true)
@@ -54,9 +57,15 @@ fi
 ok "packages/core 默认依赖不含平台独占库"
 
 # 4) alpha-protocols wasm32 纯契约层（--no-default-features，grpc/proto 已 feature 门控）
-echo "--- [4/4] alpha-protocols @ $TARGET (--no-default-features 纯 serde 契约)"
+echo "--- [4/5] alpha-protocols @ $TARGET (--no-default-features 纯 serde 契约)"
 cargo check --target "$TARGET" -p alpha-protocols --no-default-features --features alpha-core/wasm \
     || fail "alpha-protocols 契约层在 $TARGET 下编译失败"
 ok "alpha-protocols wasm32 契约层编译通过"
+
+# 5) alpha-wasm-analyzer wasm 单测真跑（node 后端；CI runner 自带 node）
+echo "--- [5/5] alpha-wasm-analyzer wasm_bindgen_test @ node"
+(cd wasm-analyzer && wasm-pack test --node) \
+    || fail "alpha-wasm-analyzer wasm 测试失败（wasm_bindgen_test 真执行）"
+ok "alpha-wasm-analyzer wasm 测试通过"
 
 echo "=== 跨平台兼容性检查全部通过 ==="
