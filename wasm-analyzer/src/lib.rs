@@ -2,6 +2,9 @@
 //!
 //! 在浏览器中运行的高性能数据分析引擎
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+
 use alpha_core::{
     analytics::AnalysisEngine,
     indicators::{advanced::AdvancedIndicators, TechnicalIndicators},
@@ -26,6 +29,17 @@ pub use worker::{
     handle_task, init_worker_panic_hook, plan_chunks, BatchComputer, ParallelScheduler,
     PoolStrategy, WorkerPool, WorkerResult, WorkerTask,
 };
+
+/// json! 构造的对象导出为真 JS object（而非 ES2015 Map）。
+/// serde-wasm-bindgen 默认把 map 序列化为 Map，JS 侧 `stats.lru_len`
+/// 属性访问全部 undefined；serde_json::Value::Object 走 map 通道，
+/// 必须显式 serialize_maps_as_objects 与结构体导出口径对齐。
+/// 该 crate 未导出 `to_value_with`，故直接 `value.serialize(&Serializer)`。
+pub(crate) fn json_to_js<T: serde::Serialize>(
+    value: &T,
+) -> Result<JsValue, serde_wasm_bindgen::Error> {
+    value.serialize(&serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true))
+}
 
 // 在浏览器控制台中显示 panic 信息
 #[wasm_bindgen(start)]
@@ -140,7 +154,7 @@ impl WasmAnalyzer {
             "lower": lower
         });
 
-        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&result).unwrap_or(JsValue::NULL)
     }
 
     /// 计算 MACD
@@ -163,7 +177,7 @@ impl WasmAnalyzer {
             "histogram": histogram
         });
 
-        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&result).unwrap_or(JsValue::NULL)
     }
 
     // ===== 高级指标 (AdvancedIndicators) =====
@@ -191,7 +205,7 @@ impl WasmAnalyzer {
             "d": d_values
         });
 
-        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&result).unwrap_or(JsValue::NULL)
     }
 
     /// 计算 KDJ 指标（随机指标 KDJ 语义，即 Stochastic Oscillator 的 %K/%D）
@@ -220,7 +234,7 @@ impl WasmAnalyzer {
             "d": d_values
         });
 
-        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&result).unwrap_or(JsValue::NULL)
     }
 
     /// 计算威廉指标 (Williams %R)
@@ -361,7 +375,7 @@ impl WasmAnalyzer {
             })).collect::<Vec<_>>()
         });
 
-        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&result).unwrap_or(JsValue::NULL)
     }
 
     /// 批量计算多个指标
@@ -405,7 +419,7 @@ impl WasmAnalyzer {
             }
         });
 
-        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&result).unwrap_or(JsValue::NULL)
     }
 
     /// SMA 双均线交叉回测（便捷接口：内部 `to_vec()` 一次 memcpy 拷入）。
@@ -471,7 +485,7 @@ impl WasmAnalyzer {
             }
         });
 
-        serde_wasm_bindgen::to_value(&metrics).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&metrics).unwrap_or(JsValue::NULL)
     }
 
     /// 强制垃圾回收（如果支持）
@@ -506,6 +520,10 @@ pub fn alloc_price_buffer(len: usize) -> Result<JsValue, JsValue> {
     }
     let buf = SharedF64Buffer::alloc(len);
     let ptr = buf.as_ptr() as u32;
+    // dlmalloc 可能复用刚释放的地址：解除释放登记，本块生命周期重新生效
+    FREED_PTRS.with(|set| {
+        set.borrow_mut().remove(&ptr);
+    });
     // SAFETY: ptr 来自刚分配且随即 forget 的 Vec<f64>（8 字节对齐、地址恒定），
     // 此调用仅建视图、不分配；视图失效条件（后续 grow）已在文档契约声明
     let view = unsafe { js_sys::Float64Array::view_mut_raw(buf.as_ptr() as *mut f64, len) };
@@ -526,14 +544,29 @@ pub fn alloc_price_buffer(len: usize) -> Result<JsValue, JsValue> {
     Ok(handle.into())
 }
 
-/// 释放 `allocPriceBuffer` 分配的缓冲区。同一 `(ptr, len)` 只能调用一次。
+thread_local! {
+    /// 已释放缓冲区地址登记（freePriceBuffer 双 free 前置检查）。
+    /// dlmalloc 对已释放块再 free 会把自由链表指针读成块头，
+    /// validate_size assert 直接崩（堆破坏），必须在 API 层拦截。
+    static FREED_PTRS: RefCell<HashSet<u32>> = RefCell::new(HashSet::new());
+}
+
+/// 释放 `allocPriceBuffer` 分配的缓冲区。同一 `(ptr, len)` 只能调用一次：
+/// 双 free 返回错误而非破坏堆。地址被新分配复用后登记自动解除；
+/// 复用后旧句柄的语义由调用方负责（同一地址同一时刻只存活一个缓冲区）。
 #[wasm_bindgen(js_name = freePriceBuffer)]
 pub fn free_price_buffer(ptr: u32, len: usize) -> Result<(), JsValue> {
     if ptr == 0 || len == 0 {
         return Err(JsValue::from_str("freePriceBuffer: 非法 (ptr, len)"));
     }
-    // SAFETY: (ptr, len) 契约来自 allocPriceBuffer 且未释放过；
-    // wasm 无法校验外来指针，双 free/伪造指针 = UB，由调用方保证
+    // 双 free 前置检查（insert 返回 false = 地址已登记）
+    if !FREED_PTRS.with(|set| set.borrow_mut().insert(ptr)) {
+        return Err(JsValue::from_str(
+            "freePriceBuffer: 该 ptr 已释放过（双 free 拒绝）",
+        ));
+    }
+    // SAFETY: (ptr, len) 契约来自 allocPriceBuffer 且未释放过（上方登记拦截）；
+    // 伪造指针 wasm 无法校验 = UB，仍由调用方保证
     drop(unsafe { SharedF64Buffer::from_raw(ptr as *mut f64, len) });
     Ok(())
 }

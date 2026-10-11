@@ -89,8 +89,9 @@ impl StreamProcessor {
             "processed_count": self.processed_count,
         });
 
-        serde_wasm_bindgen::to_value(&result)
-            .map_err(|e| JsValue::from_str(&format!("结果序列化错误: {}", e)))
+        // json! 对象需 serialize_maps_as_objects，否则序列化为 ES2015 Map、
+        // JS 侧 result.field 属性访问全部 undefined
+        crate::json_to_js(&result).map_err(|e| JsValue::from_str(&format!("结果序列化错误: {}", e)))
     }
 
     /// 获取当前缓冲区大小
@@ -135,7 +136,7 @@ impl StreamProcessor {
             "range": max - min,
         });
 
-        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&result).unwrap_or(JsValue::NULL)
     }
 
     /// 计算窗口内的成交量统计
@@ -155,7 +156,7 @@ impl StreamProcessor {
             "count": volumes.len(),
         });
 
-        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&result).unwrap_or(JsValue::NULL)
     }
 }
 
@@ -244,7 +245,7 @@ impl BatchStreamProcessor {
         }
 
         if datasets.is_empty() {
-            return Ok(serde_wasm_bindgen::to_value(&serde_json::json!({"results": {}})).unwrap());
+            return Ok(crate::json_to_js(&serde_json::json!({"results": {}})).unwrap());
         }
 
         // 并行计算 SMA/EMA/RSI（复用 alpha_core::parallel，native 走 Rayon，wasm32 顺序）
@@ -264,7 +265,7 @@ impl BatchStreamProcessor {
             results_map.insert(symbol.clone(), obj);
         }
 
-        serde_wasm_bindgen::to_value(&serde_json::json!({ "results": results_map }))
+        crate::json_to_js(&serde_json::json!({ "results": results_map }))
             .map_err(|e| JsValue::from_str(&format!("结果序列化错误: {}", e)))
     }
 }
@@ -350,7 +351,7 @@ impl ParallelStreamProcessor {
         }
 
         if datasets.is_empty() {
-            return Ok(serde_wasm_bindgen::to_value(&serde_json::json!({"results": {}})).unwrap());
+            return Ok(crate::json_to_js(&serde_json::json!({"results": {}})).unwrap());
         }
 
         // 并行计算（native Rayon / wasm32 顺序，语义等价）
@@ -370,7 +371,7 @@ impl ParallelStreamProcessor {
             results_map.insert(symbol.clone(), obj);
         }
 
-        serde_wasm_bindgen::to_value(&serde_json::json!({ "results": results_map }))
+        crate::json_to_js(&serde_json::json!({ "results": results_map }))
             .map_err(|e| JsValue::from_str(&format!("结果序列化错误: {}", e)))
     }
 
@@ -389,7 +390,7 @@ impl ParallelStreamProcessor {
         }
 
         if datasets.is_empty() {
-            return Ok(serde_wasm_bindgen::to_value(&serde_json::json!({"results": {}})).unwrap());
+            return Ok(crate::json_to_js(&serde_json::json!({"results": {}})).unwrap());
         }
 
         let start = crate::worker::now_ms();
@@ -416,8 +417,7 @@ impl ParallelStreamProcessor {
             "elapsed_ms": elapsed,
         });
 
-        serde_wasm_bindgen::to_value(&report)
-            .map_err(|e| JsValue::from_str(&format!("结果序列化错误: {}", e)))
+        crate::json_to_js(&report).map_err(|e| JsValue::from_str(&format!("结果序列化错误: {}", e)))
     }
 
     /// 获取标的数量
@@ -619,5 +619,35 @@ mod tests {
         processor.clear_all();
         assert_eq!(processor.get_symbol_count(), 0);
         assert!(processor.get_symbol_list().length() == 0);
+    }
+
+    /// JS 边界（wasm32 node 真跑）：导出统计须为真 object、字段为 JS number。
+    /// serde-wasm-bindgen 默认把 map 序列化为 ES2015 Map，`Reflect::get`
+    /// 恒得 undefined——此处守门 Map 化回退
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn stream_stats_export_object_fields_readable() {
+        let mut processor = StreamProcessor::new(3);
+        for (i, price) in [100.0, 102.0, 99.0].iter().enumerate() {
+            let data = MarketData::new("600519".to_string(), *price, (1000 + i) as u64);
+            let data_js = serde_wasm_bindgen::to_value(&data).unwrap();
+            processor.push_data(&data_js).unwrap();
+        }
+
+        let stats = processor.compute_indicators().expect("指标导出应成功");
+        for key in [
+            "sma_20",
+            "ema_12",
+            "rsi_14",
+            "buffer_size",
+            "processed_count",
+        ] {
+            let value = js_sys::Reflect::get(&stats, &wasm_bindgen::JsValue::from_str(key))
+                .unwrap_or_default();
+            assert!(
+                value.as_f64().is_some(),
+                "{key} 应为 JS number（Map 化导出下 Reflect::get 得 undefined）"
+            );
+        }
     }
 }

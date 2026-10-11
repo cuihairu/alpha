@@ -56,7 +56,7 @@ impl IndexedDBStorage {
             "message": "请在 JavaScript 中使用 IndexedDB API 进行初始化"
         });
 
-        serde_wasm_bindgen::to_value(&info).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&info).unwrap_or(JsValue::NULL)
     }
 
     /// 获取数据库名称
@@ -80,7 +80,7 @@ impl IndexedDBStorage {
             "stores": ["market_data", "indicators"],
         });
 
-        serde_wasm_bindgen::to_value(&stats).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&stats).unwrap_or(JsValue::NULL)
     }
 }
 
@@ -215,7 +215,7 @@ impl HybridStorage {
             "evictions": self.lru.evictions(),
         });
 
-        serde_wasm_bindgen::to_value(&stats).unwrap_or(JsValue::NULL)
+        crate::json_to_js(&stats).unwrap_or(JsValue::NULL)
     }
 }
 
@@ -301,7 +301,9 @@ mod tests {
         let storage = HybridStorage::new(2);
         storage.put_prices("600519", &js_sys::Float64Array::from(&[1.0, 2.0, 3.0][..]));
         let got = storage.get_prices("600519");
-        let arr = js_sys::Float64Array::from(js_sys::Object::from(got));
+        // get_prices 命中直接返回 Float64Array（miss 返回 NULL，见下条断言），
+        // Float64Array 只有 From<JsValue>（无 From<Object>）
+        let arr = js_sys::Float64Array::from(got);
         assert_eq!(arr.length(), 3, "命中返回序列长度");
         assert!(storage.get_prices("MISS").is_null(), "miss 返回 NULL");
 

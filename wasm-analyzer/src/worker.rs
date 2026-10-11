@@ -286,7 +286,7 @@ impl WorkerPool {
         let task_id = self.generate_task_id();
         self.dispatched.set(self.dispatched.get() + 1);
         // 载荷形状固定为 { task_id, task }，与 Worker 侧 handle_task 对齐
-        serde_wasm_bindgen::to_value(&serde_json::json!({ "task_id": task_id, "task": task }))
+        crate::json_to_js(&serde_json::json!({ "task_id": task_id, "task": task }))
             .map_err(|e| JsValue::from_str(&format!("任务序列化失败: {e}")))?;
         Ok(task_id)
     }
@@ -552,8 +552,7 @@ impl BatchComputer {
             }
         });
 
-        serde_wasm_bindgen::to_value(&result)
-            .map_err(|e| JsValue::from_str(&format!("序列化错误: {}", e)))
+        crate::json_to_js(&result).map_err(|e| JsValue::from_str(&format!("序列化错误: {}", e)))
     }
 
     /// 获取块大小
