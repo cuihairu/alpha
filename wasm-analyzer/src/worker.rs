@@ -278,16 +278,15 @@ impl WorkerPool {
         self.dispatched.get()
     }
 
-    /// 派发任务：返回 task_id（`Worker` 策略下由 JS 侧 postMessage 消费）
+    /// 派发任务：返回 task_id（`Worker` 策略下由 JS 侧 postMessage 消费；
+    /// 载荷 { task_id, task } 由 JS 侧组装，与 Worker 侧 handle_task 对齐）
     #[wasm_bindgen(js_name = dispatchTask)]
     pub fn dispatch_task(&self, task_js: &JsValue) -> Result<String, JsValue> {
-        let task: WorkerTask = serde_wasm_bindgen::from_value(task_js.clone())
+        // 反序列化仅作入参契约校验（畸形任务直接报错给 JS）
+        let _: WorkerTask = serde_wasm_bindgen::from_value(task_js.clone())
             .map_err(|e| JsValue::from_str(&format!("任务反序列化失败: {e}")))?;
         let task_id = self.generate_task_id();
         self.dispatched.set(self.dispatched.get() + 1);
-        // 载荷形状固定为 { task_id, task }，与 Worker 侧 handle_task 对齐
-        crate::json_to_js(&serde_json::json!({ "task_id": task_id, "task": task }))
-            .map_err(|e| JsValue::from_str(&format!("任务序列化失败: {e}")))?;
         Ok(task_id)
     }
 
