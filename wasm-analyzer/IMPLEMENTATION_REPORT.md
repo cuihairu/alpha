@@ -360,16 +360,16 @@ cd wasm-analyzer
 cargo test
 ```
 
-### 运行 WASM 测试
+### 运行 WASM 测试（node 后端，CI 跨平台门禁第 [5/5] 步同款）
+```bash
+cd wasm-analyzer
+wasm-pack test --node
+```
+
+浏览器专属套件（`tests/performance_tests.rs`）仍需 headless 浏览器：
 ```bash
 cd wasm-analyzer
 wasm-pack test --headless --firefox
-wasm-pack test --headless --chrome
-```
-
-### 运行性能基准测试
-```bash
-cd wasm-analyzer
 wasm-pack test --firefox -- --test performance_tests
 ```
 
@@ -386,7 +386,8 @@ wasm-pack test --firefox -- --test performance_tests
 3. ~~策略回测引擎~~（已交付：`backtestSmaCross`/`backtestSmaCrossPtr`）
 
 4. **更智能的缓存策略**
-   - LRU 缓存
+   - ~~LRU 缓存~~（已交付：`HybridStorage` 内嵌 `alpha_core::hybrid_cache::LruCache`，
+     统计含 hits/misses/evictions）
    - 预测性数据预加载
 
 5. **WebGPU 支持**
