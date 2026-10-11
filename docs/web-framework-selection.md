@@ -50,7 +50,8 @@ Yew/Leptos 是从零自行开发。
   ~300KB+）落备选。TODO 原文「D3.js」按此定论解释落实。
 - **wasm 引擎消费**：维持 `wasm-analyzer` → `web/pkg/`（wasm-pack, target web）
   现模式，React 侧经动态 import 探针接缝（`web/app/src/App.tsx`），**不**把
-  UI 构建卷进 Rust workspace 门禁（`check-cross-platform.sh` 四步语义不变）。
+  UI 构建卷进 Rust workspace 门禁（`check-cross-platform.sh` 五步语义不变，
+  第 5 步为 wasm 单测 node 真跑，2026-10-11 起）。
 - **指标口径纪律**：前端不另立一套指标语义。骨架示例的纯 TS `sma` 逐项对齐
   `packages/core/src/indicators.rs` 的输出契约（等长 / 前导 `0.0` 占位 /
   样本不足全 `0.0` / 4 位小数取整，见 §4），并由 vitest 以 Rust 侧同名单测的
