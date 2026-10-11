@@ -166,7 +166,7 @@ wasm-analyzer/
 
 - ✅ 代码编译通过: `cargo check`
 - ✅ 单元测试: `cargo test --workspace --all-targets --exclude alpha-desktop`（CI 门禁持续跑）
-- ✅ WASM 测试: `wasm-pack test --node`（7 用例；CI 跨平台门禁第 [5/5] 步真跑，
+- ✅ WASM 测试: `wasm-pack test --node`（8 用例；CI 跨平台门禁第 [5/5] 步真跑，
   曾因一行编译错误整体失活，2026-10-11 起进门禁）
 - ⚠️ 性能基准: `tests/performance_tests.rs` 为浏览器专属，node 后端跳过，待 headless 浏览器跑
 
