@@ -106,6 +106,8 @@ grpc 零改动；wasm 侧取 `--no-default-features` 契约层，wasm32 编译�
 3. `packages/core` 默认依赖黑名单扫描（tokio/reqwest/sqlx/redis/tonic/native-tls/
    rustls/notify/directories/dirs）——命中即失败，新增平台能力先放 L1 或加 feature 门控；
 4. alpha-protocols wasm32 `--no-default-features` 契约层编译门禁（脚本第 4 步，硬失败）。
+5. alpha-wasm-analyzer `wasm_bindgen_test` 真跑（node 后端，脚本第 5 步，2026-10-11 起
+   进门禁——此前 CI 只编译不执行，测试代码一行编译错误即全体 wasm 用例静默失活）。
 
 编码规范（评审口径，配合脚本执行）：
 
@@ -121,5 +123,5 @@ grpc 零改动；wasm 侧取 `--no-default-features` 契约层，wasm32 编译�
 | Cargo workspace 多目标构建配置 | 本设计 | ✅ 已落地：`.cargo/config.toml` alias（wasm-check/wasm-build）+ 检查脚本纳入 wasm-analyzer wasm32 构建；CI 矩阵随「CI/CD」节推进 |
 | 跨平台共享核心库（core/protocols/storage） | §5 | ✅ 已落地：core wasm-clean（wasm feature）；protocols grpc feature 门控后 wasm32 契约层编译通过；storage 按设计属 L1 服务端专属（移动端经 REST/WS 访问 services，不直连 storage） |
 | 平台适配层抽象接口 | §4 草案 | ✅ trait + InMemory 参考实现已落地（`platform.rs`，f6b44cd/9e46658）；桌面侧 KeyValueStore 真实实现已接（`desktop/src/kv.rs`，2026-09-30）；通知/导出由接线层平台胶水直供（无跨端消费者不包 trait，登记形态）；移动端留待接线 |
-| 统一 Rust 代码规范与兼容性检查 | 本设计 §6 | ✅ 已落地：`check-lint.sh`（fmt+clippy）即 CI `lint` 作业同款门禁；`check-cross-platform.sh` 四步入 CI `wasm` 作业 |
+| 统一 Rust 代码规范与兼容性检查 | 本设计 §6 | ✅ 已落地：`check-lint.sh`（fmt+clippy）即 CI `lint` 作业同款门禁；`check-cross-platform.sh` 五步入 CI `wasm` 作业（第 5 步 wasm 单测真跑） |
 | Web UI 框架选型与集成（L427） | 本设计 §3 L2 | ✅ 已落地：docs/web-framework-selection.md 定论 **React 18 + TS + Vite**（Yew/Leptos 不选作主框架），`web/app/` 骨架 + `scripts/check-web.sh` 接入 CI `wasm` 作业；旧演示页零回退；Desktop/Mobile 接入边界登记于该文档 §6 |
