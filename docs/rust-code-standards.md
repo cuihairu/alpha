@@ -39,7 +39,9 @@
 
 * 模块声明按字母序排列于 `lib.rs`；**新增文件必须挂载**——历史上出现过
   `core/src/trading.rs`、collector 六模块等从未挂载、从未编译的孤儿文件
-  （内含潜伏语法错误数年未暴露，已于 2026-09-28 清理）。
+  （内含潜伏语法错误数年未暴露，已于 2026-09-28 清理；2026-10-11 全仓
+  挂载审计补清 `storage/src/disk.rs`——初始架构 commit 引入、从未挂载、
+  `StorageBackend` 签名早已漂移，零引用，`disk_kv.rs` 为其挂载替代）。
 * 类型/函数命名遵循 Rust 官方惯例；测试函数用行为式命名
   （`claim_stale_caps_redelivery_and_routes_poison_to_dlq` 风格）。
 
