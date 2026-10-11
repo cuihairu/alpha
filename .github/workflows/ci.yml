@@ -61,12 +61,27 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    # Redis 供 REDIS_TEST_URL 门控的管线集成测试真实运行（无 Redis 时测试自跳过）
+    # Redis 供 REDIS_TEST_URL 门控的管线集成测试真实运行（无 Redis 时测试自跳过）；
+    # Postgres 供 TIMESCALE_TEST_URL / POSTGRES_TEST_URL 门控的落库集成测试真实
+    # 运行（storage timescale/postgres_kv 往返 + data-engine write-through 镜像
+    # 落库；connect 自建 schema 无需 init 步骤。此二组测试曾在 CI 恒自跳过，
+    # 其间 postgres_kv 的 ensure_schema 多语句 DDL 在真库上必败且无人发现）
     services:
       redis:
         image: redis:7-alpine
         ports:
           - 6379:6379
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -82,6 +97,8 @@ jobs:
       - name: 运行测试
         env:
           REDIS_TEST_URL: redis://127.0.0.1:6379
+          TIMESCALE_TEST_URL: postgres://postgres:postgres@127.0.0.1:15432/postgres
+          POSTGRES_TEST_URL: postgres://postgres:postgres@127.0.0.1:15432/postgres
         run: cargo test --workspace --all-targets --exclude alpha-desktop
 
   desktop:

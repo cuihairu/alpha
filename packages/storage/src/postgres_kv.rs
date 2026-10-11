@@ -51,22 +51,26 @@ impl PostgresKvStorage {
     }
 
     async fn ensure_schema(&self) -> AlphaResult<()> {
+        // sqlx prepared statement 拒绝一条 query 内多条 DDL（"cannot insert
+        // multiple commands into a prepared statement"），必须逐条 execute——
+        // 该限制自本模块写就日起存在，真库一连即败（CI 门控测试恒自跳过未暴露）
         let ddl = format!(
-            r#"
-            CREATE TABLE IF NOT EXISTS {table} (
-                key TEXT PRIMARY KEY,
-                value BYTEA NOT NULL,
-                expires_at TIMESTAMPTZ NULL
-            );
-            CREATE INDEX IF NOT EXISTS {table}_expires_at_idx ON {table}(expires_at);
-            "#,
+            "CREATE TABLE IF NOT EXISTS {table} (key TEXT PRIMARY KEY, value BYTEA NOT NULL, expires_at TIMESTAMPTZ NULL);",
             table = self.table
         );
-
         sqlx::query(&ddl)
             .execute(&self.pool)
             .await
             .map_err(|e| AlphaError::StorageError(format!("Postgres schema init failed: {e}")))?;
+
+        let index_ddl = format!(
+            "CREATE INDEX IF NOT EXISTS {table}_expires_at_idx ON {table}(expires_at);",
+            table = self.table
+        );
+        sqlx::query(&index_ddl)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AlphaError::StorageError(format!("Postgres index init failed: {e}")))?;
         Ok(())
     }
 

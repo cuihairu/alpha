@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 单元测试 | 各 crate `src/**/tests`（`#[cfg(test)]`，纯函数/手算锚） | `cargo test --workspace --all-targets --exclude alpha-desktop` | 常规测试门禁 + CI `test` 作业 |
 | 属性/模糊测试 | `packages/core/tests/proptest_invariants.rs`（L493，9 性质） | 随 `cargo test -p alpha-core`（256 案例/性质） | 同上（默认启用） |
-| 集成/契约测试 | `packages/core/tests/`、`packages/storage/tests/redis_streams.rs`（REDIS_TEST_URL 门控）、`services/data-engine/tests/`、`services/real-time-feed/tests/`、`desktop/tests/`（配置/接线契约）、`mobile/tests/android_shell_contract.rs`、`wasm-analyzer/tests/` | 各 crate `cargo test`（集成）+ 专项门禁 | 常规门禁 + `scripts/check-desktop.sh` |
+| 集成/契约测试 | `packages/core/tests/`、`packages/storage/tests/redis_streams.rs`（REDIS_TEST_URL 门控）、`packages/storage/src/timescale.rs`/`postgres_kv.rs` 与 `services/data-engine` write-through（TIMESCALE/POSTGRES_TEST_URL 门控，CI `test` 作业由 Postgres service 真跑）、`services/data-engine/tests/`、`services/real-time-feed/tests/`、`desktop/tests/`（配置/接线契约）、`mobile/tests/android_shell_contract.rs`、`wasm-analyzer/tests/` | 各 crate `cargo test`（集成）+ 专项门禁 | 常规门禁 + `scripts/check-desktop.sh` |
 | 端到端 | `scripts/check-e2e.sh`（L469 四服务链路 + L491 WS 消息级深化 + 数据面注入收敛） | 真实进程 + Redis，六段断言 | CI `e2e` 作业（ubuntu/macOS 矩阵） |
 | 性能基准 | `packages/core/benches/indicators_bench.rs`（L492，criterion 8 项） | `cargo bench` | `scripts/check-perf.sh` 基线比对（L495） |
 | 内存安全 | Miri 解释执行（L496） | `scripts/check-miri.sh`（alpha-core，种子 0..5） | CI `miri` 作业 |

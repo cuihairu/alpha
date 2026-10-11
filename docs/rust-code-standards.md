@@ -117,8 +117,10 @@ cargo clippy --workspace --all-targets --exclude alpha-desktop -- -D warnings
 # 跨平台门禁（wasm32 编译 + L0 依赖黑名单 + wasm 单测 node 真跑）
 scripts/check-cross-platform.sh
 
-# 全量测试（Redis 门控测试需本机 Redis；无则自跳过）
+# 全量测试（Redis / Postgres 门控测试需本机对应服务；无则自跳过）
 REDIS_TEST_URL=redis://127.0.0.1:6379 \
+TIMESCALE_TEST_URL=postgres://postgres:postgres@127.0.0.1:15432/postgres \
+POSTGRES_TEST_URL=postgres://postgres:postgres@127.0.0.1:15432/postgres \
   cargo test --workspace --all-targets --exclude alpha-desktop
 
 # 端到端跨服务冒烟（构建四服务 + 真实进程链路断言；需本地 Redis）
@@ -126,7 +128,10 @@ scripts/check-e2e.sh
 ```
 
 CI（.github/workflows/ci.yml）：`lint` 作业 = §11 前两命令；
-`test` 作业 = 作业内 Redis service + `protobuf-compiler` 安装后跑全量测试；
+`test` 作业 = 作业内 Redis + Postgres service（后者供 TIMESCALE_TEST_URL /
+POSTGRES_TEST_URL 门控的落库集成测试真实运行，2026-10-11 起——此前该组测试
+在 CI 恒自跳过，其间 postgres_kv 的 ensure_schema 多语句 DDL 真库必败未暴露）
++ `protobuf-compiler` 安装后跑全量测试；
 `wasm` 作业 = `scripts/check-cross-platform.sh` + wasm-pack 构建；
 `build` 作业 = 五目标多平台并行构建（fail-fast=false 互不遮蔽，作业内注释即设计说明）；
 `e2e` 作业 = Redis 启动 + `scripts/check-e2e.sh`（Linux/macOS 矩阵；Windows 运行期
