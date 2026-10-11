@@ -946,4 +946,33 @@ mod tests {
             "bar1 入场 20 持有到 50 = 2.5x 应 +150%"
         );
     }
+
+    /// KDJ/ADX 导出 JS 边界形态守卫：KDJ 须为真 object（k/d 为 JS 数组），
+    /// ADX 须为 Float64Array 且热身前置零。json! 走 map 通道会序列化成
+    /// ES2015 Map，JS 侧 `report.k` 属性访问得 undefined（同 storage/streaming
+    /// 守门口径，见 json_to_js）
+    #[wasm_bindgen_test]
+    fn test_kdj_adx_export_shapes() {
+        let analyzer = WasmAnalyzer::new(None);
+        let highs = js_sys::Float64Array::from(&[10.0, 11.0, 12.0, 13.0, 14.0, 15.0][..]);
+        let lows = js_sys::Float64Array::from(&[8.0, 9.0, 10.0, 11.0, 12.0, 13.0][..]);
+        let closes = js_sys::Float64Array::from(&[9.0, 10.0, 11.0, 12.0, 13.0, 14.0][..]);
+
+        let kdj = analyzer.calculate_kdj(&highs, &lows, &closes, 3, 3);
+        assert!(!kdj.is_null(), "KDJ 导出不应为 NULL");
+        let k = js_sys::Reflect::get(&kdj, &JsValue::from_str("k")).expect("KDJ 应含 k");
+        let d = js_sys::Reflect::get(&kdj, &JsValue::from_str("d")).expect("KDJ 应含 d");
+        assert!(
+            js_sys::Array::is_array(&k) && js_sys::Array::is_array(&d),
+            "k/d 应为 JS 数组（Map 化导出下 Reflect::get 得 undefined）"
+        );
+        assert_eq!(js_sys::Array::from(&k).length(), 6, "k 长度应等于输入序列");
+        assert_eq!(js_sys::Array::from(&d).length(), 6, "d 长度应等于输入序列");
+
+        let adx = analyzer.calculate_adx(&highs, &lows, &closes, 3);
+        assert_eq!(adx.length(), 6, "ADX 长度应等于输入序列");
+        assert_eq!(adx.get_index(0), 0.0, "ADX 热身前置零");
+        assert_eq!(adx.get_index(3), 0.0, "index 3 < 2*period-1=5 应为零");
+        assert!(adx.get_index(5) > 0.0, "ADX 末 bar（首个热身后值）应为正值");
+    }
 }
