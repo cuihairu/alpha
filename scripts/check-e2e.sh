@@ -13,6 +13,11 @@
 #
 # 依赖：Redis（data-engine/real-time-feed 启动即连，E2E_REDIS_URL 可覆写）、
 #       cargo（构建四服务二进制）。非交互；退出码 0 通过 / 1 失败。
+#
+# 端口冲突（本机别的项目占了 18080-18083 时）用 env 整体挪走，各服务与网关
+# 探测口径一致：
+#   E2E_DATA_ENGINE_PORT=18091 E2E_REALTIME_PORT=18092 \
+#     E2E_REDIS_URL=redis://127.0.0.1:18079 scripts/check-e2e.sh
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -21,7 +26,8 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 GW_PORT="${E2E_GATEWAY_PORT:-18080}"
 DE_PORT="${E2E_DATA_ENGINE_PORT:-18081}"
 GRPC_PORT="${E2E_GRPC_PORT:-15051}"
-# real-time-feed 绑定 8082：HEAD 版代码硬编码（可覆写 env 随其 L46x 批次落库后自动生效）
+# real-time-feed 绑定端口：服务侧经 ALPHA_REALTIME_FEED_BIND 覆写（下方启动时
+# 传入），不设则默认 8082——网关探测与健康检查共用 RT_PORT，必须一致
 RT_PORT="${E2E_REALTIME_PORT:-8082}"
 COL_PORT="${E2E_COLLECTOR_PORT:-18083}"
 REDIS_URL="${E2E_REDIS_URL:-redis://127.0.0.1:6379}"
@@ -84,6 +90,7 @@ ALPHA__STORAGE__PERSISTENCE_ENABLED=false \
 REDIS_URL="$REDIS_URL" "$BIN/alpha-data-engine" >"$LOG_DIR/data-engine.log" 2>&1 &
 PIDS+=($!)
 
+ALPHA_REALTIME_FEED_BIND="127.0.0.1:$RT_PORT" \
 REDIS_URL="$REDIS_URL" "$BIN/alpha-real-time-feed" >"$LOG_DIR/real-time-feed.log" 2>&1 &
 PIDS+=($!)
 
