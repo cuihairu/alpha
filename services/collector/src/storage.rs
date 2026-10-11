@@ -470,14 +470,4 @@ mod tests {
         assert_eq!(config.postgres.host, "localhost");
         assert_eq!(config.redis.url, "redis://localhost:6379");
     }
-
-    #[ignore] // 需要实际数据库连接
-    #[tokio::test]
-    async fn test_storage_layer_creation() {
-        let config = StorageConfig::default();
-        let layer = StorageLayer::new(config).await;
-
-        // 这会失败，因为默认配置可能没有实际的数据库
-        assert!(layer.is_ok() || layer.is_err());
-    }
 }
