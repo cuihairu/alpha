@@ -43,7 +43,7 @@
 | 本地用户数据 | 保留至用户清除/卸载（面板一键清除已提供） | 数据主体自主控制 |
 | 访问日志/指标 | 随日志轮转与 Prometheus 存储配置（滚动覆盖，无归档） | 运维必需，不进归档 |
 | Redis Streams/PEL | 消费即 ack；DLQ 按队列语义滚动（L451） | 短暂过程数据 |
-| Timescale/ClickHouse 行情 | 配置驱动（persistence 三态；public 数据） | 业务数据非个人数据 |
+| Timescale/ClickHouse 行情 | 配置驱动（persistence 布尔开关；public 数据） | 业务数据非个人数据 |
 
 ## 4. 跨平台边界
 

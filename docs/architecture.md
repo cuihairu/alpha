@@ -65,7 +65,7 @@ Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB
   gRPC，gRPC 由 data-engine（tonic，`:50051`）直接提供。
 - **鉴权**：JWT（HS256 自签 / OIDC）+ RBAC（viewer/operator/admin），配额限频走
   RedisRateLimiter；data-engine 另有 X-Api-Key 门。均默认关闭。
-- **实时推送**：WebSocket 订阅 topic（如 `quotes.{symbol}`），内部使用发布/订阅。
+- **实时推送**：WebSocket 按频道订阅（`real_time_quotes`/`market_depth`/`technical_indicators`/`news_feed`/`announcements`），符号在订阅消息内声明，内部使用发布/订阅。
 - **查询层**：内存时序 + 可选 Timescale 镜像；ClickHouse 只读用于导出，不参与查询。
 
 ### 6. 监控与运维
@@ -93,7 +93,7 @@ Crawler (Rust/多语言模板) -> Redis Streams -> Rust Processor -> TimescaleDB
 - **其他**：Grafana/Prometheus/Loki、GitHub Actions。
 
 ## 部署策略
-- 单机 PoC：Docker Compose（15 服务：应用 5 + TimescaleDB/ClickHouse/Redis +
+- 单机 PoC：Docker Compose（14 服务：应用 5 + TimescaleDB/ClickHouse/Redis +
   Prometheus/Grafana/Loki/promtail/Alertmanager/alert-webhook + web-origin）。
 - 生产：多节点（采集节点、处理节点、存储集群）为规划口径；systemd 单机为当前唯一
   生产路径（`scripts/deploy-ubuntu.sh`），K8s 不立项；Cloudflare Tunnel 部署在 API

@@ -69,5 +69,5 @@ scripts/build-images.sh --platforms linux/amd64,linux/arm64 \
 - **Cargo.lock 未入库**：Dockerfile 内 `cargo build` 每次解析最新兼容依赖，构建不可完全复现
   （当前 `.dockerignore` 不排除本地 lockfile，本地构建尚可沾光）。锁文件入库策略归质量保证节统筹；
 - **依赖层缓存**：`COPY . .` 后源码任意变更即整编（cargo-chef 分层可解，构建耗时优化归后续）；
-- **CI 镜像构建接线**（buildx push 进 L470 发布流水线，PR 阶段只验单平台 build 不入门禁）；
+- **CI 镜像构建接线**（buildx push 进 L470 发布流水线；PR 阶段镜像验证尚未接线，只验单平台 build）；
 - **镜像扫描/SBOM/签名** 随 L470 供应链环节统筹；本机验证入口 = `scripts/build-images.sh --only <服务>`。

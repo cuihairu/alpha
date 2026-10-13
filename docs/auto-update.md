@@ -27,7 +27,7 @@ conf 并被契约测试锁定、feed 生成器就绪）+ 各平台更新策略�
    secret——缺该 secret 时作业跳过产 feed 并打印提示（`:384`）。
 3. **签名链路**（翻真步骤）：`tauri signer generate` 产出 minisign
    密钥对——**公钥**入 conf `pubkey`，**私钥**进 CI secret（绝不入库）；
-   打包作业对每个安装包产出 `.<ext>.signature`，feed 的 `signature`
+   打包作业对每个安装包产出 `.sig`，feed 的 `signature`
    字段取自该文件内容。
 
 **增量更新现实**：Tauri v1 的更新是整包替换（下载新安装包→校验

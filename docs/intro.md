@@ -6,7 +6,7 @@ sidebar_position: 1
 
 Alpha Finance 是 A 股低延迟行情数据与分析平台：一套 Rust 核心（指标、
 形态、回测、风控），多端消费——Web 实时看板、桌面应用（Tauri 窗口装同一
-web/dist 静态页，另带原生导出/通知/托盘）、Android（alpha-mobile UniFFI 骨架）。
+web/app/dist 的 React 产物（web/dist 为线上静态页源），另带原生导出/通知/托盘）、Android（alpha-mobile UniFFI 骨架）。
 
 ## 你能用它做什么
 

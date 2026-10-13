@@ -119,7 +119,7 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 - 改掉 ClickHouse 默认口令 `admin/admin123`：口令写死在两处——
   `docker-compose.yml` `CLICKHOUSE_PASSWORD` 与
   `config/clickhouse-users.xml`，改完 `docker compose up -d --force-recreate
-  clickhouse` 重建，再同步 `scripts/deploy-ubuntu.sh:169` 的 init 口令；
+  clickhouse` 重建，再同步 `scripts/deploy-ubuntu.sh:153` 的 init 口令；
 - TLS 终止放 nginx：证书配进 `/etc/nginx/sites-available/alpha`（脚本已
   站点化），8123/9081 等非网关端口继续不对外放行；
 - 鉴权默认全关（见 `docs/auth.md`），对外暴露前至少开网关 JWT 与

@@ -69,8 +69,7 @@ accessControl 绑生物识别（对应门密钥）、`UIApplication.shared.isIdl
 
 ## 7. 与相邻项
 
-- **L337 推送/告警**：门锁定期间通知仍可见（系统层），应用内告警面板
-  随门隐藏；
+- **L337 推送/告警**：门锁定期间通知仍可见（系统层），应用内告警面板未实现（随门隐藏语义登记）；
 - **L390 离线存储**：`OfflineStore` 的 SharedPreferences 实现接入生产时，
   以 `EncryptedKeyValueStore(SharedPreferencesKeyValueStore(ctx),
   MobileKeys.dataKey())` 包装落盘（本项提供封装与密钥位，接线随设置页

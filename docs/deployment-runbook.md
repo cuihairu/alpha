@@ -3,7 +3,7 @@
 本文只描述两条已落库、可照抄执行的部署路径：
 
 - 裸机路径：`scripts/deploy-ubuntu.sh`，产 systemd 三单元 + nginx 站点 + ufw 规则，装在 `/opt/alpha`。
-- 容器路径：仓库根 `docker-compose.yml`，15 个服务一键起（应用 5 个 + 基础设施 + 可观测栈）。
+- 容器路径：仓库根 `docker-compose.yml`，14 个服务一键起（应用 5 个 + 基础设施 + 可观测栈）。
 
 两条路径都不引入本文未列出的组件。Kafka、NATS、Kubernetes、Go 服务不在本仓栈内，
 architecture-review §2.4 已裁定队列升级（Kafka/NATS）不立项；编排以 compose 为界。
@@ -25,7 +25,7 @@ architecture-review §2.4 已裁定队列升级（Kafka/NATS）不立项；编�
 
 数据流：collector 发布 `quotes.raw` → data-engine 消费、标准化、写 `quotes.normalized`
 （毒消息进 `quotes.dlq`）→ real-time-feed 消费 normalized 推给 WebSocket 客户端。
-api-gateway 是唯一对外 REST/WS 入口；collector 的任务管理面（`/tasks`）只在内网暴露。
+api-gateway 是唯一对外 REST/WS 入口；collector 的任务管理面（`/tasks`）compose 默认发布 8083 到宿主机，需自行限制内网。
 
 裸机路径下端口挪到 9080-9082 是为了让 nginx 独占 80 端口；容器路径不改端口。
 两个服务（data-engine、real-time-feed）没有 CLI 参数解析，绑址只能走 env，
@@ -67,11 +67,11 @@ sudo ./scripts/deploy-ubuntu.sh
 2. apt 装依赖，装 rustup、Node 18、pm2、docker-compose v2；
 3. `cargo build --release` 编五个服务，`./build-wasm.sh` 编 WASM，
    `web/` 下 `npm install && npm run build` 出 `dist/`；
-4. `docker-compose up -d clickhouse` 只起 ClickHouse，跑 `scripts/clickhouse-init.sh`；
+4. `docker-compose up -d clickhouse` 只起 ClickHouse；schema 由镜像 initdb 挂载自动初始化（`docker-entrypoint-initdb.d/01-schema.sql`），无需手工跑 `scripts/clickhouse-init.sh`；
 5. 写 systemd 三单元：`alpha-api-gateway`（`--bind 0.0.0.0:9080`）、
    `alpha-data-engine`（`ALPHA__SERVER__ADDR=0.0.0.0:9082`）、
    `alpha-real-time-feed`（`ALPHA_REALTIME_FEED_BIND=0.0.0.0:9081`）；
-   Redis 连接各服务按 `REDIS_URL` 默认值 `redis://localhost:6379` 自取；
+   Redis 连接各服务按 `REDIS_URL` 配置注入；裸机路径需自行提供 Redis 服务（deploy 脚本未启动 redis，缺失则 data-engine/real-time-feed 启动失败）；
 6. nginx 已装则写 `/etc/nginx/sites-available/alpha`（静态站 + `/api/` → 9080 +
    `/ws/` → 9081；未装则跳过，Web 端口 80 无人服务，需自行 `apt install -y nginx` 后重配）；
 7. ufw 放行 22/80/443/9080/9081/9082 并启用；
@@ -113,7 +113,7 @@ docs/data-lake-parquet.md）；`lake.maintenance_interval_secs>0` 才启动湖
 
 **api-gateway**：clap CLI（`--bind`、`--auth-mode off|jwt`、`--auth-secret`、
 `--auth-jwks-url`/`--auth-jwks-refresh-secs`（OIDC 键表，oct 键联调形态）、
-`--rate-*` 等），同名 env 兜底（`ALPHA_GATEWAY_*`）。鉴权细节见 docs/auth.md
+`--rate-*` 等），同名 env 优先（覆写 CLI 默认，`ALPHA_GATEWAY_*`）。鉴权细节见 docs/auth.md
 （jwt 模式下 `/ws` 升级亦需持票：`Authorization: Bearer` 头或 `?token=` 查询参数，
 客户端连 `ws://host/ws?token=<jwt>` 即可）。
 
@@ -184,7 +184,7 @@ alerting-and-diagnosis §5）。
 | 行情/查询 REST | api-gateway `/v1/*` → data-engine（`/query`、`/stocks/:symbol/history`、`/instruments` 等） | docs/market-data-api.md |
 | WebSocket | api-gateway `/ws` → real-time-feed `/ws`（版本化 Full/Delta 帧） | docs/realtime-sync-protocol.md |
 | 任务管理 | collector `GET/POST /tasks`、`GET /tasks/:id`、`DELETE /tasks/:id`（204 幂等；运行中 409）、`POST /tasks/:id/cancel`（清 schedule 不再调度；运行中任务本次跑完后停）、`POST /tasks/:id/execute`（重试语义亦由它承担——对 Failed/Cancelled 任务重跑即 retry）、`GET /stats`、`GET /events`(SSE) | 内网暴露，勿上公网 |
-| 源健康 | collector `GET /sources/health`（L504：任务表 ∪ 执行台账，三态 unknown/healthy/degraded/down + 连败计数/最近成功失败/错误文本）；gauge `alpha_collector_source_health{task}`（0/1/2/3），告警 CollectorSourceDegraded（≥2 持续 5m）/ Down（≥3 持续 10m） | 健康由执行结果推导，非模板声明 |
+| 源健康 | collector `GET /sources/health`（L504：任务表 ∪ 执行台账，三态 + unknown（共 4 值）unknown/healthy/degraded/down + 连败计数/最近成功失败/错误文本）；gauge `alpha_collector_source_health{task}`（0/1/2/3），告警 CollectorSourceDegraded（≥2 持续 5m）/ Down（≥3 持续 10m） | 健康由执行结果推导，非模板声明 |
 | 鉴权 | api-gateway `POST /auth/token`（jwt 模式） | docs/auth.md |
 | 健康/指标 | 四服务 `/health`、`/metrics` | 本文 §5 |
 
@@ -208,7 +208,7 @@ docker logs alpha-data-engine --tail 100
 docker exec alpha-redis redis-cli XLEN quotes.dlq
 
 # 积压的 pending（认领 sweeper 每 30s 扫一轮）
-docker exec alpha-redis redis-cli XPENDING quotes.raw data-engine
+docker exec alpha-redis redis-cli XPENDING quotes.raw data-engine-normalizer
 
 # ClickHouse
 curl http://localhost:8123/ping

@@ -17,7 +17,7 @@ sidebar_position: 3
 | OS | 产物 |
 |---|---|
 | Linux | `.AppImage` / `.deb` |
-| macOS | `.app` / `.dmg`（公证走 CI secret） |
+| macOS | `.app` / `.dmg`（公证为登记设计，CI 尚未接线） |
 | Windows | `.exe`（nsis）/ `.msi` |
 
 桌面复用同一 Web 前端，功能与 Web 完全一致（含本手册用户指南全部条目）。

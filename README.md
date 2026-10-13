@@ -44,7 +44,7 @@ Chinese architecture write-up: `docs/architecture.md`.
 
 6. **Observability & Ops**  
    - Prometheus scrapes the four services' `/metrics` endpoints.  
-   - Grafana dashboard (`config/grafana/`) covers ingestion latency, queue lag, API latency; Loki collects container logs.  
+   - Grafana dashboard (`config/grafana/`) covers service up, scrape latency and a Loki log view; Loki collects container logs.  
    - Alertmanager + `alert-webhook` notify DingTalk/WeChat Work/Slack/PagerDuty on alert rules (`config/alpha-alerts.yml`, 11 rules).
 
 ## Technology Decisions
@@ -55,8 +55,8 @@ Chinese architecture write-up: `docs/architecture.md`.
 - **Schema Definition**: serde JSON (Envelope v2, additive evolution) for queue/REST; Protobuf only for the gRPC surface.
 
 ## Roadmap
-1. Define Protobuf schemas and topic contracts.
+1. ✅ Define Protobuf schemas and topic contracts — gRPC surface uses `packages/protocols/proto/data_engine.proto`; queue/REST contracts are serde JSON (Envelope v2) per Technology Decisions.
 2. Keep the Redis Streams pipeline minimal and reliable before introducing heavier MQ infrastructure.
 3. ✅ Build the crawler framework (scheduling + UA/fingerprint rotation) — done via collector task templates (YAML/JSON source definitions) + cron dispatcher + request-level retries with jittered backoff.
-4. Establish observability stack and tunnel configuration.
+4. Establish observability stack and tunnel configuration. Observability stack is in place (Prometheus/Alertmanager/Grafana/Loki provisioning, 11 alert rules, diagnosis engine); tunnel configuration remains registered-only (no cloudflared/frp deployment).
 5. Expand dataset coverage (Shanghai/Shenzhen main boards, Hong Kong extension, alternative data).

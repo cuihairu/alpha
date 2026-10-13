@@ -49,7 +49,7 @@ Yew/Leptos 是从零自行开发。
   「集成高性能图表库」目标不符，不直接引入；ECharts 对行情主图过重（gzip
   ~300KB+）落备选。TODO 原文「D3.js」按此定论解释落实。
 - **wasm 引擎消费**：维持 `wasm-analyzer` → `web/pkg/`（wasm-pack, target web）
-  现模式，React 侧经动态 import 探针接缝（`web/app/src/App.tsx`），**不**把
+  现模式，React 侧经动态 import 探针接缝（`web/app/src/components/WasmProbe.tsx`），**不**把
   UI 构建卷进 Rust workspace 门禁（`check-cross-platform.sh` 五步语义不变，
   第 5 步为 wasm 单测 node 真跑，2026-10-11 起）。
 - **指标口径纪律**：前端不另立一套指标语义。骨架示例的纯 TS `sma` 逐项对齐
@@ -91,9 +91,10 @@ web/app/                    Vite + React 18 + TypeScript（独立工程，不动
 新脚本 `scripts/check-web.sh`，接入 CI `wasm` 作业（ubuntu-latest 自带 node）：
 
 1. **旧演示页在场守门**（行为不回退：六文件在场 + `node --check` 语法冒烟）
-2. `npm ci`（lockfile 锁定）
-3. `tsc --noEmit` 类型检查 + `vitest run` 单测
-4. `vite build` 产物构建
+2. 工程结构在场断言（依赖/脚本/viewport/主题）
+3. `npm ci`（lockfile 锁定）
+4. `tsc --noEmit` 类型检查 + `vitest run` 单测
+5. `vite build` 产物构建
 
 与既有四道 Rust 门禁并存：`check-lint.sh` / 全仓测试 / `check-cross-platform.sh`
 / `check-desktop.sh` 语义均不变（本单 Rust 零改动，复跑实证 0 失败）。
@@ -125,7 +126,7 @@ CI 侧观察（登记，非阻塞）：`web/app` 引入 npm 依赖后，GitHub �
   `../web/app/dist`、beforeBuild/DevCommand → `cd web/app`、devPath →
   `http://localhost:5173`（vite strictPort 钉死）；兜底壳
   （web/dist/index.html + desktop-shell.js）退休删除；契约测试对账桥接/面板
-  （wiring_contract 16 例 + tauri_config 11 例）；check-desktop.sh [4b] 兜底壳
+  （wiring_contract 17 例 + tauri_config 11 例）；check-desktop.sh [4b] 兜底壳
   断言 → 桥接断言；CI Desktop (macOS) 与 Desktop Framework 作业加 Node +
   web/app 测试构建（generate_context! 编译期嵌入 distDir 产物）。L117 快捷键/
   右键菜单的前端消费面未迁移（demo 面无产品场景，命令保留注册）。

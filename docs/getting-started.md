@@ -9,8 +9,8 @@ sidebar_position: 2
 | 用途 | 需要 |
 |---|---|
 | 只看 Web 看板 | 现代浏览器（Chrome/Edge/Firefox 近两版），无他 |
-| 本地全栈运行 | Rust stable、Node 24、Redis（`scripts/check-e2e.sh` 会起真实进程 + Redis） |
-| Android 构建 | Android SDK（`ANDROID_HOME`）+ NDK 27.3（`scripts/gen-bindings.sh` 默认版本，双 ABI 绑定见 `docs/android-release.md`） |
+| 本地全栈运行 | Rust stable、Node 24、Redis（`scripts/check-e2e.sh` 起真实进程，Redis 需自备） |
+| Android 构建 | Android SDK（`ANDROID_HOME`）+ NDK 27.3（`mobile/android/gen-bindings.sh` 默认版本，双 ABI 绑定见 `docs/android-release.md`） |
 | 文档站预览 | Node 18+（`docs/` 内 `pnpm install && pnpm start`；CI 用 pnpm + Node 24，见 `.github/workflows/docs.yml`） |
 
 ## 60 秒看到实时看板

@@ -18,7 +18,7 @@
 
 - vitest 单测：`web/app/src/lib/*.test.ts`（纯函数：指标口径/liveFeed 协议
   解析/工作区归约器/PWA 策略），node 环境，`npx vitest run`；
-- `npx tsc -b` 类型面 + `vite build` 构建门禁（`scripts/check-web.sh`）；
+- `npx tsc --noEmit` 类型面 + `vite build` 构建门禁（`scripts/check-web.sh`）；
 - Android JVM：`:app:testPlayDebugUnitTest`（54 用例，纯逻辑不触框架类）。
 
 ## 3. WS 消息级契约（L491 补深，L469 缺口补上）

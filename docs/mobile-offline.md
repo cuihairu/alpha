@@ -84,7 +84,7 @@ Quotes  行情快照（代码/价格/成交量/买卖一档/open；serde 即 Mar
 ## 5. 壳层执行面（Kotlin，融入 AlphaBridge/Gestures 既有架构）
 
 - **`KeyValueStore` 接口 + 双实现**：`InMemoryKeyValueStore`（JVM 单测）+
-  `SharedPreferencesKeyValueStore`（真机实现位，骨架不实例化——Context 依赖归
+  `SharedPreferencesKeyValueStore`（已实例化：widget/主题/隐私设置路径——Context 依赖归
   设置页 TODO）；语义对齐 alpha-core `platform::KeyValueStore`：后写覆盖、删除幂等。
 - **`OfflineStore`**：`saveSnapshot`（`enabled=false` 的载荷拒收——红线在壳层
   第二道防线）/`loadSnapshot`/`clear`；快照整体序列化为单 kv 条目（沿桌面 L116

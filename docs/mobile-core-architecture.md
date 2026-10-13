@@ -149,7 +149,7 @@ Android 实际管线（`mobile/android/gen-bindings.sh`，两步都不需要 car
 
 ```
 mobile/src/lib.rs     crate 文档 + uniffi::setup_scaffolding! + 重导出
-mobile/src/state.rs   MobileCore / MobileError / FFI 导出（+ 单测 ~11 例）
+mobile/src/state.rs   MobileCore / MobileError / FFI 导出（+ 单测 20 例）
 mobile/src/market.rs  确定性演示行情（+ 单测 ~5 例）
 ```
 

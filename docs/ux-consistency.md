@@ -18,7 +18,7 @@
 | 数字格式 | 价格原值、`pct.toFixed(2)`、`volume.toLocaleString()`、缺值 `—` | 桌面同源 React（千分位/两位小数与 Web 完全一致——壳层「无千分位」分歧随切换消除） | `Locale.ROOT` `"%.2f"` / `"%+.2f%%"` / `"--"`（防本地化小数点漂移） | Decimal 两位（设计文档 §2） | ✅ 两位小数 + 缺值占位符同形（桌面与 Web 同组件，壳层登记项随切换消除） |
 | 主题三态 | system/light/dark，缺省跟随系统（`ThemeToggle.tsx` + `matchMedia` 监听） | tauri v1 `theme` 仅 Light/Dark 无 system 档——窗口 chrome 留空走 OS，前端三态照常（`docs/theme-adaptation.md`） | `ThemePreference` SYSTEM/LIGHT/DARK，缺省 SYSTEM（`Theme.kt`，L511） | L119 交付面不动，跟随系统（设计文档登记） | ✅ 缺省口径统一：跟随系统 |
 | 行情过期语义 | feed 重试 2 次不可达 → 确定性模拟盘降级（L499） | 无过期语义（命令面 Rust 合成行情常新；React 端 LiveQuoteBoard 断线停更降级与 Web 同源） | 120s `STALE_AFTER_MS` 灰显（`WidgetContent.from`） | staleDate 120s（设计文档 §3） | ⚠️ Android/iOS 同 120s；web 为降级、桌面命令面无过期——形态分歧登记 |
-| 跳变反馈 | 整行 key 重挂载重放 0.8s flash 动画（`flash-up-kf/down-kf`） | 桌面同源 React（同 0.8s flash——壳层静态色注记随切换消除） | widget 无动画（RemoteViews 能力上限，方向色即反馈） | 灵动岛更新节流 60s（设计文档 §3） | ⚠️ 能力上限/部署面导致的形态分歧，语义（方向色）一致，登记不强求 |
+| 跳变反馈 | 价格单元格 key 重挂载重放 0.8s flash 动画（`flash-up-kf/down-kf`） | 桌面同源 React（同 0.8s flash——壳层静态色注记随切换消除） | widget 无动画（RemoteViews 能力上限，方向色即反馈） | 灵动岛更新节流 60s（设计文档 §3） | ⚠️ 能力上限/部署面导致的形态分歧，语义（方向色）一致，登记不强求 |
 
 ## 2. 交互模式
 

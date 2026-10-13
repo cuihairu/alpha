@@ -20,7 +20,7 @@ Tauri 写死为直接依赖，整个包在 Linux CI 上无法编译——本仓�
 
 接线层的职责只有三件：解析平台路径/句柄 → 委派框架层 → 映射错误给前端。
 所有业务判断都在框架层，因此 macOS 作业覆盖的是极薄的胶水代码，而逻辑正确性
-由 192 个可在 Linux 上跑的框架层单测 + 11 个配置契约测试 + 17 个接线薄度契约测试
+由 207 个可在 Linux 上跑的框架层单测 + 11 个配置契约测试 + 17 个接线薄度契约测试
 保证（详见 §4.1；2026-10 对账实数，见 §6）。
 
 ```
@@ -177,7 +177,7 @@ PKG_CONFIG_PATH="$PWD/scripts/desktop-fake-pc" \
 和 `PKG_CONFIG_LIBDIR`（后者默认是系统 `.pc` 目录），所以目录里缺的包会被本机装着的
 真件悄悄兜住——最初的 8 个 `.pc` 在本机（装了 GTK3）怎么都绿，推到 CI 的
 `ubuntu-latest` 就红在 `The system library gobject-2.0 required by crate glib-sys was
-not found`。指到空目录后 `.pc` 集合必须**自包含**（现 18 个，含
+not found`。指到空目录后 `.pc` 集合必须**自包含**（现 17 个，含
 `gobject-2.0`/`gio-2.0`/`gmodule-2.0`/`gdk-3.0`/`atk`/`pango`/`cairo-gobject`/
 `gdk-x11-3.0`/`x11`），`Requires` 也要照抄真实依赖关系，于是任何 Linux 机器结果
 一致。反向验证过：删掉 `gobject-2.0.pc` 并 `cargo clean -p glib-sys -p gobject-sys
@@ -508,7 +508,7 @@ check_alerts ──▶ notify::check_request（框架层判定/入队/停用落�
               ≠ 或本地无 → 落库 applied     拉取失败 → failed（本地保留）
 ```
 
-框架层断言（`desktop/src/offline.rs`，19 例，Linux 门禁可跑）：
+框架层断言（`desktop/src/offline.rs`，21 例，Linux 门禁可跑）：
 
 * `content_seq` 确定性指纹（价格位模式+成交量 FNV-1a）：同内容同指纹、
   价格/成交量任一变化指纹必变——增量的比较基准；
@@ -611,7 +611,7 @@ macOS/Windows/Linux 上 ⌘R/Ctrl+R 实际触发与系统快捷键冲突时的�
 
 ## 11. 真机走查清单（验收打磨）
 
-CI 覆盖边界：Linux 门禁跑框架层纯逻辑（205 lib + 11 配置 + 17 接线契约），
+CI 覆盖边界：Linux 门禁跑框架层纯逻辑（207 lib + 11 配置 + 17 接线契约），
 CI Desktop (macOS) 编译+链接接线层；**平台注册、真实事件、WM 行为、原生
 对话框/通知/托盘**只能真机人工观察。以下按功能面逐条走查，每条注明现有
 自动化覆盖（框架层断言/契约）与真机需观察点：

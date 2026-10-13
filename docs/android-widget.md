@@ -34,7 +34,7 @@ MainActivity onCreate 读 extra → `MarketScreen(initialSymbol)` → 自动
 ## 4. 渲染与配色
 
 单行卡（约 2×1 格，minWidth 180dp）：标的（加粗，超长省略）/价格/涨跌
-/平盘占位四列，红涨绿跌（`#C0392B`/`#27AE60`，与三端一致）经
+标的/价格/涨跌三列（平盘占位复用涨跌列），红涨绿跌（`#C0392B`/`#27AE60`，与三端一致）经
 `setTextColor` 按方向动态上色；无数据时显示「Alpha 行情 --」。骨架期
 浅色底（widget 深色适配归主题项后续）。
 

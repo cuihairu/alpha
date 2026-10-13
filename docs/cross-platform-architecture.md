@@ -57,7 +57,7 @@
 // packages/core/platform.rs（已落地：trait + InMemory 参考实现，f6b44cd/9e46658；
 // 桌面侧 KeyValueStore 真实实现已接——desktop/src/kv.rs `FileKeyValueStore`
 // impl 本 trait（kv 穿越防护/二进制大值等契约测试随 alpha-desktop 门禁）；
-// 通知/文件导出由桌面接线层平台胶水直供（notify.rs/export.rs），尚无跨端
+// 通知/文件导出为框架层纯逻辑（notify.rs/export.rs，Linux 门禁可测），平台调用在 platform.rs/gui.rs，尚无跨端
 // 业务消费者故未包 trait（登记形态）；移动端留待接线）
 pub trait KeyValueStore {            // 桌面: 文件/SQLite；Web: IndexedDB(wasm 侧)；
     async fn get(&self, key: &str) -> Option<Vec<u8>>;   // 服务端: Redis
@@ -122,6 +122,6 @@ grpc 零改动；wasm 侧取 `--no-default-features` 契约层，wasm32 编译�
 |---|---|---|
 | Cargo workspace 多目标构建配置 | 本设计 | ✅ 已落地：`.cargo/config.toml` alias（wasm-check/wasm-build）+ 检查脚本纳入 wasm-analyzer wasm32 构建；CI 矩阵随「CI/CD」节推进 |
 | 跨平台共享核心库（core/protocols/storage） | §5 | ✅ 已落地：core wasm-clean（wasm feature）；protocols grpc feature 门控后 wasm32 契约层编译通过；storage 按设计属 L1 服务端专属（移动端经 REST/WS 访问 services，不直连 storage） |
-| 平台适配层抽象接口 | §4 草案 | ✅ trait + InMemory 参考实现已落地（`platform.rs`，f6b44cd/9e46658）；桌面侧 KeyValueStore 真实实现已接（`desktop/src/kv.rs`，2026-09-30）；通知/导出由接线层平台胶水直供（无跨端消费者不包 trait，登记形态）；移动端留待接线 |
+| 平台适配层抽象接口 | §4 草案 | ✅ trait + InMemory 参考实现已落地（`platform.rs`，f6b44cd/9e46658）；桌面侧 KeyValueStore 真实实现已接（`desktop/src/kv.rs`，2026-09-30）；通知/导出为框架层纯逻辑（notify.rs/export.rs，Linux 门禁可测），平台调用在 platform.rs/gui.rs（无跨端消费者不包 trait，登记形态）；移动端留待接线 |
 | 统一 Rust 代码规范与兼容性检查 | 本设计 §6 | ✅ 已落地：`check-lint.sh`（fmt+clippy）即 CI `lint` 作业同款门禁；`check-cross-platform.sh` 五步入 CI `wasm` 作业（第 5 步 wasm 单测真跑） |
 | Web UI 框架选型与集成（L427） | 本设计 §3 L2 | ✅ 已落地：docs/web-framework-selection.md 定论 **React 18 + TS + Vite**（Yew/Leptos 不选作主框架），`web/app/` 骨架 + `scripts/check-web.sh` 接入 CI `wasm` 作业；旧演示页零回退；Desktop/Mobile 接入边界登记于该文档 §6 |

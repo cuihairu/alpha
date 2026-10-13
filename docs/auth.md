@@ -98,7 +98,7 @@ real-time-feed 连接：
   高于所授最高角色（生产由 IdP 的用户目录替代此口令）。
 - `path` 维度预留：当前 /api 下无写危险端点，方法级已满足最小权限；
   逐端点矩阵（如 /query 限 analyst）待出现第一个危险写端点时再立。
-- 指标 `auth_total{mode="forbidden"}` 与 allowed/denied 同源，
+- 指标 `alpha_gateway_auth_total{mode="forbidden"}` 与 allowed/denied 同源，
   可直接告警“403 突增 = 越权探测”。
 
 ## 6. 非交互假设

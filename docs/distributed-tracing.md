@@ -34,9 +34,9 @@ WS 为长连接会话（会话级关联用连接日志），trace-id 单请求�
 `Proxying` 行）；其余服务转发请求头中的 `X-Trace-Id` 由上游 handler
 自行 `tracing::info!(trace_id = ...)` 记录（按需逐步补齐，不阻塞链路串联）。
 
-流内同号（0af6fe0 起）：Envelope v2 携带 `trace_id`，data-engine normalize
-把上游 trace 写进 normalized envelope——行情流与 HTTP 面同一 trace 可在
-Loki 关联，trace 不止到网关为止。
+流内 trace（0af6fe0 起）：Envelope v2 携带 `trace_id`，data-engine normalize
+把上游 trace 写进 normalized envelope——机制已具备；采集侧打点待接线
+（登记项：collector 生产面未调 `with_trace_id`，流内 trace 恒 None）。
 
 ## 3. 登记边界：Jaeger OTLP span 导出（本单不实现）
 

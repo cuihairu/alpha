@@ -25,7 +25,7 @@
 
 | # | 外部评审论断 | 核查结果 | 证据 |
 |---|---|---|---|
-| 1 | 存储抽象过多 | ✅ 坐实 | `packages/storage` 17 个模块：4 种 KV（memory/disk_kv/redis_kv/postgres_kv）+ 2 种时序（timeseries/timescale）+ clickhouse/cloud/dal/cache/… |
+| 1 | 存储抽象过多 | ✅ 坐实 | `packages/storage` 19 个模块：4 种 KV（memory/disk_kv/redis_kv/postgres_kv）+ 2 种时序（timeseries/timescale）+ clickhouse/cloud/dal/cache/lake/dataset_registry/encryption/… |
 | 2 | Event Envelope 应升级 | ✅ 部分 | `StreamEnvelope` 已有 `id/stream/version/event_type/source/symbol/ingest_ts/payload_hash/payload`；缺 `trace_id`、`sequence`、`source_event_id`（✅ 已修复，commit 0af6fe0：v2 六字段加性迁移） |
 | 3 | Instrument 统一模型缺失 | ✅ 坐实 | 全仓无 Instrument 实体（仅 timescale.rs 出现标识字符串）；A股多形态符号风险真实存在（✅ 已修复，commit 024a63d：`protocols/src/instrument.rs` + `/instruments` 端点） |
 | 4 | 时间三模型（event/ingest/process） | ✅ 缺 process_time | envelope 只有 `ingest_ts` + payload 内嵌行情 `timestamp`；normalized 层无处理时间戳（✅ 已修复，commit 0af6fe0） |
@@ -42,7 +42,7 @@
 
 **问题**：`memory.rs / disk_kv.rs / redis_kv.rs / postgres_kv.rs` 四套 KV 并存各自导出，`timeseries.rs / timescale.rs` 两套时序抽象并存，`dal.rs` + 各 Storage 自带头。抽象面比产品需要多。
 
-**证据**：`packages/storage/src/lib.rs` 17 个模块、pub use 现为 17 条且仍全量 `pub use x::*` 重新导出〔现注：白名单化已执行（2026-10）——公共导出只留消费面，disk_kv 降 crate 内私有、postgres_kv 单点豁免 `PostgresKvStorage`（api-gateway 账户持久层既有消费），见 §4.1〕——消费者（data-engine/collector）实际只用到 redis_streams / cache / timescale / clickhouse / cloud / columnar / partition。
+**证据**：`packages/storage/src/lib.rs` 19 个模块、pub use 现为 18 条且仍全量 `pub use x::*` 重新导出〔现注：白名单化已执行（2026-10）——公共导出只留消费面，disk_kv 降 crate 内私有、postgres_kv 单点豁免 `PostgresKvStorage`（api-gateway 账户持久层既有消费），见 §4.1〕——消费者（data-engine/collector）实际只用到 redis_streams / cache / timescale / clickhouse / cloud / columnar / partition。
 
 **建议（收敛、不删除）**：
 1. 确立**三个权威后端**：ClickHouse（主数据仓）、Redis（缓存/流/限流/锁）、MinIO/S3（原始归档 + parquet 数据集）。Timescale 保留为可选后端（性能/回退），不再进入新功能默认路径。
@@ -149,11 +149,11 @@ Timescale 保留为可选 TimescaleDB 后端（data-engine persistence 已是三
 
 ### 4.1 存储层收敛动作（立即可做，纯导出面）
 
-〔现注：已执行（2026-10）——`pub use` 白名单化落 `packages/storage/src/lib.rs`：保留 cache/clickhouse/cloud/columnar/dal/dataset_registry/diagnosis/encryption/memory/partition/prefetch/rate_limit/redis_kv/redis_streams/timescale/timeseries；disk_kv 降 crate 内私有（仓内零外部消费），postgres_kv 降私有但单点豁免 `PostgresKvStorage`（api-gateway 账户持久层），legacy 语义登记于模块列表头注。〕
+〔现注：已执行（2026-10）——`pub use` 白名单化落 `packages/storage/src/lib.rs`：保留 cache/clickhouse/cloud/columnar/dal/dataset_registry/diagnosis/encryption/lake/memory/partition/prefetch/rate_limit/redis_kv/redis_streams/timescale/timeseries；disk_kv 降 crate 内私有（仓内零外部消费），postgres_kv 降私有但单点豁免 `PostgresKvStorage`（api-gateway 账户持久层），legacy 语义登记于模块列表头注。〕
 
 ```text
 packages/storage/src/lib.rs
-  - pub use 白名单化（保留：cache/clickhouse/cloud/columnar/dal/encryption/
+  - pub use 白名单化（保留：cache/clickhouse/cloud/columnar/dal/encryption/lake/
     memory(查询面)/partition/prefetch/rate_limit/redis_kv(仅限流键)/redis_streams/
     timescale(可选)/timeseries/... 主要面）
   - disk_kv/postgres_kv 标注 legacy，不进白名单

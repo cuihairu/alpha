@@ -142,7 +142,7 @@ POSTGRES_TEST_URL 门控的落库集成测试真实运行，2026-10-11 起——
 ## 12. 已知债务（按立项顺序消化）
 
 * 依赖升级专项：dependabot open 告警已收敛至个位数（a7e3e54 清掉 braces high；
-  2026-10-10 盘点 braces 已不在依赖图与 audit 列表，CVE-2026-93687 条目消除）；
+  2026-10-10 盘点：braces 仍在 docs 前端依赖图（pnpm patch 缓解，b94ee98），cargo audit 报告条目消除）；
   **拍板（2026-10-10）**：维持报告型不阻塞——`cargo audit` 现状 7 漏洞
   （h2 RUSTSEC-2026-0258、object_store RUSTSEC-2024-0358、rsa RUSTSEC-2023-0071、
   rustls-webpki RUSTSEC-2026-0098/0099/0104、sqlx RUSTSEC-2024-0363）+ 11 警告行

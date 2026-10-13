@@ -13,8 +13,8 @@
 | services/collector | 中 | `SimpleCollector`：任务 CRUD + SSE + 多语言脚本执行；`/streams/quotes/publish` 用 Rust `EastmoneySource` 抓行情并写 `quotes.raw`；大量**未挂载的死模块**（见 §4） |
 | services/data-engine | 中高 | Axum REST + DataFusion `/query` + ClickHouse Parquet 导出 + gRPC；内置 Redis Streams normalizer（`quotes.raw`→`quotes.normalized`） |
 | services/real-time-feed | 中 | 消费 `quotes.normalized`（回退 `quotes.raw`）→ WebSocket 广播；无效消息进 `quotes.dlq`；Redis 不可用回退模拟数据 |
-| services/api-gateway | 低 | **纯 stub**：health 返回硬编码健康状态，proxy 返回 mock，无真实转发/鉴权 |
-| wasm-analyzer + web | 中 | WASM 引擎 + 前端自洽（demo 数据 + Canvas），**未接任何后端 API/WS** |
+| services/api-gateway | 低 | **纯 stub**：health 返回硬编码健康状态，proxy 返回 mock，无真实转发/鉴权〔现注：已落真实反代 + JWT/OIDC 鉴权 + RBAC + Redis 限流 + 探测式 health（2026-09-28 起），本行为 2026-09-27 快照〕 |
+| wasm-analyzer + web | 中 | WASM 引擎 + 前端自洽（demo 数据 + Canvas），可配置直连 data-engine REST + real-time-feed WS（web/app.js restBase/wsUrl），缺省仍走演示数据 |
 | desktop (Tauri) | 低 | 骨架；本机编译需 libsoup-2.4 等系统库（CI 在 macOS 单独跑，Linux 本地需 `--exclude alpha-desktop`） |
 | 部署（docker-compose/CI） | 中低 | compose 服务齐全但环境变量/端口多处错位（见 §3.3） |
 
@@ -27,9 +27,9 @@ collector /streams/quotes/publish ──┴→ quotes.raw → data-engine(normal
 ```
 
 - **可跑通的部分**：collector 用 Rust `EastmoneySource` 抓 Eastmoney 行情（payload 含 `symbol/price/volume/change/change_percent/bid1/ask1/open/high/low`）→ data-engine normalizer 消费（要求 `symbol/price/volume`）→ 写内存时序 + 转发 `quotes.normalized` + ack。
-- **断点 1（bug）**：`real-time-feed` 的 `envelope_to_realtime` 把 `change`/`change_percent` 当必填；而 data-engine 转发的 normalized payload 是 `MarketData` 序列化（**没有** change/change_percent）→ **所有 normalized 行情都被打进 `quotes.dlq`，WebSocket 端拿不到任何来自管线的行情**。这正是「管线看似通、实际断」的核心点。
+- **断点 1（bug）**：`real-time-feed` 的 `envelope_to_realtime` 把 `change`/`change_percent` 当必填；而 data-engine 转发的 normalized payload 是 `MarketData` 序列化（**没有** change/change_percent）→ **所有 normalized 行情都被打进 `quotes.dlq`，WebSocket 端拿不到任何来自管线的行情**。这正是「管线看似通、实际断」的核心点。〔现注：2026-09-27 已修——real-time-feed 缺字段降级 0 不再整条 DLQ；data-engine normalized payload 保留原始字段；§5 行动项第 1 项已完成〕
 - **断点 2（丢失语义）**：data-engine 转发时只保留 `MarketData` 字段，collector 原始 payload 的 `name/pre_close/amount/source/change*` 全部丢失，normalized stream 无法回溯审计。
-- **断点 3（不落地）**：data-engine `storage.persistence_enabled`/`timescale_url` 配置项存在但**从未被使用**——`AppState` 永远用内存 `TimeSeriesStorage`；TimescaleDB/ClickHouse 只在导出/演示层出现，处理结果不落库。
+- **断点 3（不落地）**：data-engine `storage.persistence_enabled`/`timescale_url` 配置项存在但**从未被使用**——`AppState` 永远用内存 `TimeSeriesStorage`；TimescaleDB/ClickHouse 只在导出/演示层出现，处理结果不落库。〔现注：2026-09-28 已修——persistence 按配置装配（三态降级），镜像落库失败入补写缓冲；§5 行动项第 7 项已完成〕
 - **旁路**：`crawlers/python/eastmoney_quote.py` 只被 collector 的通用任务执行器（`/tasks/:id/execute`）调用且**结果不进 stream**；真正进管线的只有 Rust 直采路径。
 
 ## 3. 测试与部署现状
@@ -86,4 +86,4 @@ collector /streams/quotes/publish ──┴→ quotes.raw → data-engine(normal
 ## 6. 风险提示
 - `patches/arrow-arith` 本地补丁 + datafusion 35/arrow 50 的版本耦合较脆，升级需整体验证。
 - normalizer 每条消息 `refresh_query_tables()` 全量重建 MemTable，行情放大后是 O(N²) 热点（记入 P2 优化项）。
-- api-gateway health 返回假健康状态，会对运维掩盖真实故障——P3 落地前建议先改为聚合真实 /health。
+- api-gateway health 返回假健康状态，会对运维掩盖真实故障——P3 落地前建议先改为聚合真实 /health。〔现注：已修——health 改为真实并发探测三上游（2026-09-28）〕

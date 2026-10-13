@@ -44,7 +44,7 @@
 
 6. **可观测性与运维**  
    - Prometheus 抓取四个服务的 `/metrics` 端点。  
-   - Grafana 看板（`config/grafana/`）覆盖采集时延、队列积压、API 时延；Loki 收集容器日志。  
+   - Grafana 看板（`config/grafana/`）覆盖服务存活、抓取时延与 Loki 日志面；Loki 收集容器日志。  
    - Alertmanager + `alert-webhook` 按告警规则（`config/alpha-alerts.yml`，11 条）通知钉钉/企业微信/Slack/PagerDuty。
 
 ## 技术决策
@@ -55,8 +55,8 @@
 - **Schema 定义**：队列/REST 用 serde JSON（Envelope v2，加性演进）；Protobuf 仅用于 gRPC 面。
 
 ## 路线图
-1. 定义 Protobuf schema 与主题契约。
+1. ✅ 定义 Protobuf schema 与主题契约——gRPC 面走 `packages/protocols/proto/data_engine.proto`；队列/REST 契约为 serde JSON（Envelope v2），见 Technology Decisions。
 2. 在引入更重的消息中间件之前，保持 Redis Streams 管线精简可靠。
 3. ✅ 建设采集框架（调度 + UA/指纹轮换）——经 collector 任务模板（YAML/JSON 数据源定义）+ cron 派发器 + 带抖动退避的请求级重试实现。
-4. 建立可观测性栈与隧道配置。
+4. 建立可观测性栈与隧道配置。可观测性栈已就位（Prometheus/Alertmanager/Grafana/Loki provisioning、11 条告警规则、诊断引擎）；隧道配置仅登记未部署（无 cloudflared/frp 实配）。
 5. 扩充数据集覆盖（沪深两市、港股延伸、另类数据）。

@@ -5,14 +5,14 @@
 
 上游依托：packages/storage（ClickHouse `market_data` 七列事实 schema）、
 services/data-engine（DataFusion 35 `MemTable` 热查询 + `/clickhouse/export.parquet`
-HTTP 即时导出）、desktop/web 侧 DuckDB `read_parquet()` 既有消费习惯。
+HTTP 即时导出）、旧演示页 web/index.html 已有 `read_parquet()` UI 入口（web/duckdb-ui.mjs）；React 应用（web/app）消费待接入。
 
 ## 1. 目标与现状差距（实测）
 
 | 现状 | 差距 |
 |---|---|
 | Parquet 仅按请求即时生成（HTTP 导出，内存中转） | 无持久湖层：分析侧每次重算都要回源 ClickHouse 全量拉取 |
-| DataFusion 只注册 `MemTable`（单批内存表） | 无 ListingTable：不能按分区裁剪、不能扫描湖上历史 |
+| DataFusion 只注册 `MemTable`（单批内存表） | 无 ListingTable：不能按分区裁剪、不能扫描湖上历史〔现注：2026-10-09 ListingTable 已落（见 §9/§6 表），本行为快照〕 |
 | ClickHouse/TimescaleDB 承担全部存储 | 冷数据与热查询混布：保留策略受查询层成本绑架 |
 
 目标：引入 **Parquet 湖层**作为分析侧持久批量层——写一次、多引擎读
@@ -56,14 +56,14 @@ collector ──写──► ClickHouse/TimescaleDB（热层，N 天，点查/�
 | 字段 | Arrow/Parquet 类型 | 说明 |
 |---|---|---|
 | `timestamp` | Timestamp(ms, UTC) | 与 ClickHouse `timestamp` 对齐 |
-| `symbol` | Dictionary(Int32, Utf8) | 六位代码；字典编码 |
+| `symbol` | Utf8 | 六位代码；物理列由 arrow-rs 默认字典编码 |
 | `open_price/high_price/low_price/close_price` | Float64 | 列名与 storage 层现 SQL 完全一致 |
 | `volume` | Float64 | 列名对齐；类型按 §4 演进规则由现 UInt64 放宽为 Float64（手数口径注于表属性） |
 | （Bronze 附加）`_raw` / `_ingested_at` | Utf8 / Timestamp(ms) | 原始报文与入库时间 |
 
 - **演进规则**：列只增不删、类型只放宽不收窄；破坏性变更 → 新表名版本
   （`market_data_v2`），旧表冻结只读——不做原位迁移。
-- 表属性（key-value metadata）记 `schema_version` / `trade_calendar` 溯源。
+- 表属性（key-value metadata）记 `schema_version` / `trade_calendar` 溯源〔现注：未落——lake.rs 无 key-value metadata 写入，待补〕。
 
 ## 5. 写路径（幂等 + 原子）
 
@@ -150,7 +150,7 @@ SQL 直扫历史层、可与热层 MemTable `UNION`；目录未建（尚无落�
    适配随发布节，路径规范两态一致（`trade_date=` hive 式目录）。
 2. 单写者假设：collector 落湖与 export 落湖不同时启用（骨架期先 export 侧）。
 3. 首表 = `silver/market_data`（七列对齐 §4）；realtime_quotes 等表随落地项。
-4. 本单零代码：§6 接缝、§7 manifest、§5 compaction 均登记不实现。
+4. §6 接缝 / §7 manifest / §5 compaction 均已落（见 §9/§10.5），无登记面。
 5. 写路径骨架已落（2026-10-09，`packages/storage/src/lake.rs`）：§3 布局 / §4
    schema / §5 原子写落地；export 端点写透 + `from_lake` 读旁路、§6
    ListingTable 注册（`lake_market_data`）、§5 compaction 执行侧 +
