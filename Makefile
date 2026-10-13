@@ -63,6 +63,16 @@ build-mobile:
 	@echo "✅ 移动应用构建完成"
 
 # 运行所有测试（与 CI test 作业与本地门禁同口径：排除 alpha-desktop）
+# ================= 本地测试口径 (local testing scope) =================
+# CI 与本地开发按改动面三路分流——改一行文档不该全量编译：
+#   1) 文档改动（*.md、docs/**、图片）→ 不编译。主 CI workflow 的 paths-ignore
+#      已跳过这些路径；本地无需全量跑。
+#   2) 代码改动 → 只跑改动子集：
+#      - `cargo test -p <改动 crate>`
+#   3) 全量（make test）→ 仅以下情形触发：
+#      Cargo.toml / Cargo.lock / package.json / pnpm-lock.yaml、.github/**、Docker/Compose 配置、发布前。
+# ==========================================================================
+
 test:
 	@echo "🧪 运行所有测试..."
 	cargo test --workspace --all-targets --exclude alpha-desktop
