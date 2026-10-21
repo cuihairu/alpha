@@ -2,6 +2,8 @@
 
 # alpha
 
+[![Status](https://img.shields.io/badge/status-in%20development-orange)](https://github.com/cuihairu/alpha/releases)
+
 Internal A-share (China) market data platform focused on low-latency ingestion, cleaning, and distribution of freely available public data. Positioning: **self-hosted financial data & quant research foundation** (ingestion → normalization → storage → query → real-time distribution → indicators/analytics → backtesting); scope boundaries in `docs/architecture-review.md`. The current implementation is Rust-first, with a staged queue strategy that starts from Redis Streams and can evolve to NATS JetStream or Kafka as scale increases.  
 Chinese architecture write-up: `docs/architecture.md`.
 
