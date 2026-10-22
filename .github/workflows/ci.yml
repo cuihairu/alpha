@@ -30,7 +30,7 @@ jobs:
     name: Version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       # 版本一致性门禁（TODO L472，与本地 scripts/check-version.sh 一致）
       - name: 版本一致性
@@ -42,7 +42,7 @@ jobs:
     name: Compliance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 平台合规检查
         run: scripts/check-compliance.sh
@@ -51,10 +51,10 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           components: clippy, rustfmt
 
@@ -63,7 +63,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
 
       # Rust 代码规范门禁（docs/rust-code-standards.md §11，与本地 scripts/check-lint.sh 一致）
       - name: 格式化检查
@@ -97,16 +97,16 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
 
       - name: 安装 protobuf-compiler
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
 
       - name: 运行测试
         env:
@@ -119,20 +119,20 @@ jobs:
     name: Desktop (macOS)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
 
       # gui 特性：Tauri 接线层（命令 + generate_context!）唯一能在无额外系统依赖的
       # runner 上编译的作业（macOS WKWebView 内置；Linux 需 WebKitGTK/libSoup）。
       # generate_context! 在编译期嵌入 distDir 产物——先构建 web/app（web-framework
       # §6 拍板 A：frontendDist 指向 web/app/dist）
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: 构建 web/app
@@ -151,20 +151,20 @@ jobs:
     # 与 Desktop (macOS) 互补——Linux runner 无 GUI 依赖，靠 gui 特性门控把框架层
     # 拉进常规流水线（scripts/check-desktop.sh，与本地一致）。
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           components: clippy, rustfmt
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
 
       # 桥接单测（vitest）+ 产物构建先行：check-desktop.sh 的 distDir 断言与
       # 桥接源码断言都以此为输入（web-framework §6 拍板 A）
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: web/app 测试与构建
@@ -181,15 +181,15 @@ jobs:
     name: WebAssembly 构建
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           targets: wasm32-unknown-unknown
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
 
       - name: 安装 wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
@@ -234,21 +234,21 @@ jobs:
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           targets: ${{ matrix.target }}
 
       - name: 安装 protobuf-compiler
         # tonic-build proto 代码生成需系统 protoc；跨平台 action 统一装并写 PATH
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           key: ${{ matrix.target }}
 
@@ -268,10 +268,10 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
 
       - name: 安装 protobuf-compiler（Linux）
         if: runner.os == 'Linux'
@@ -282,7 +282,7 @@ jobs:
         run: brew install protobuf
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
 
       # e2e 依赖 Redis（data-engine/real-time-feed 启动即连）
       - name: 启动 Redis（Linux，docker）
@@ -303,10 +303,10 @@ jobs:
     # 避免长期红灯淹没 lint/test 的真信号（docs/rust-code-standards.md §11）
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 cargo-audit
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.87.30
         with:
           tool: cargo-audit
 

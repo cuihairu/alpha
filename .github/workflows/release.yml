@@ -42,7 +42,7 @@ jobs:
     name: 版本门禁（L472 对账）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 五处版本同值 + SW 缓存名对账
         run: scripts/check-version.sh
@@ -72,10 +72,10 @@ jobs:
     env:
       ALPHA_S3_BUCKET: ${{ secrets.ALPHA_S3_BUCKET }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust（wasm-pack 构建 analyzer 用）
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           targets: wasm32-unknown-unknown
 
@@ -85,10 +85,10 @@ jobs:
           version: "latest"
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
 
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -116,7 +116,7 @@ jobs:
           fi
 
       - name: 上传 web-dist 产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: web-dist
           path: web/dist/
@@ -132,10 +132,10 @@ jobs:
         os: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           targets: wasm32-unknown-unknown
 
@@ -160,12 +160,12 @@ jobs:
             libssl-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           key: ${{ matrix.os }}-desktop
 
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -196,7 +196,7 @@ jobs:
           echo "✅ AppImage 结构可解包、AppRun 在场"
 
       - name: 上传安装包 + updater 素材
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: desktop-${{ matrix.os }}
           path: |
@@ -213,18 +213,18 @@ jobs:
       # 门控用：密钥齐则注入签名环境；缺则按脚本默认出 unsigned（冒烟语义）
       ALPHA_ANDROID_KEYSTORE_B64: ${{ secrets.ALPHA_ANDROID_KEYSTORE_B64 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           key: android
 
       - name: 安装 JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6.1.0
         with:
           distribution: temurin
           java-version: "17"
@@ -255,7 +255,7 @@ jobs:
         run: scripts/android-release.sh
 
       - name: 上传 AAB/APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: android-outputs
           path: mobile/android/app/build/outputs/**
@@ -268,15 +268,15 @@ jobs:
     env:
       HAS_APPLE: ${{ secrets.ALPHA_APPLE_API_KEY_ID != '' && 'true' || 'false' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 安装 Rust（bindings 交叉编译）
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           targets: aarch64-apple-ios
 
       - name: 缓存 Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           key: ios
 
@@ -306,7 +306,7 @@ jobs:
     env:
       ALPHA_REGISTRY: ${{ secrets.ALPHA_REGISTRY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 解析版本 tag
         env:
@@ -317,11 +317,11 @@ jobs:
 
       - name: QEMU + buildx
         if: env.ALPHA_REGISTRY != ''
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4.4.0
 
       - name: 注册 buildx builder
         if: env.ALPHA_REGISTRY != ''
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4.4.1
 
       - name: 多架构构建并推送（linux/amd64 + arm64）
         if: env.ALPHA_REGISTRY != ''
@@ -341,7 +341,7 @@ jobs:
     env:
       ALPHA_RELEASE_BASE_URL: ${{ secrets.ALPHA_RELEASE_BASE_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: 解析版本与发布说明
         env:
@@ -366,7 +366,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: 下载桌面产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: desktop-*
           path: artifacts
@@ -409,7 +409,7 @@ jobs:
           cat dist/latest.json
 
       - name: 上传 latest.json
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: latest-json
           path: dist/latest.json

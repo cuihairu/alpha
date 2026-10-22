@@ -31,15 +31,15 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: 设置 Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: 设置 pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v6.1.0
         with:
           # 钉版本与本地一致（可复现；latest 已是 12.x：不读 package.json 的
           # pnpm 字段触发 LOCKFILE_CONFIG_MISMATCH，且默认 24h minimumReleaseAge
@@ -52,7 +52,7 @@ jobs:
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: 设置 pnpm 缓存
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -75,7 +75,7 @@ jobs:
         run: pnpm run build
 
       - name: 上传构建产物
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5.0.0
         with:
           path: ./docs/build
 
@@ -91,4 +91,4 @@ jobs:
     steps:
       - name: 部署到 GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5.0.1
