@@ -17,7 +17,7 @@ env:
 jobs:
   perf-regression:
     name: Perf regression (criterion)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7.0.1
 

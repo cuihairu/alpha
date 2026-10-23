@@ -26,7 +26,7 @@ env:
 jobs:
   coverage:
     name: Coverage (llvm-cov)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7.0.1
 

@@ -40,7 +40,7 @@ jobs:
   # 否则 docker tag 与 updater feed 会把 0.1.0 的产物标成 0.2.0。
   version-gate:
     name: 版本门禁（L472 对账）
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -68,7 +68,7 @@ jobs:
   # ---------- Web：wasm + 静态产物 + CDN 可选发布 ----------
   web:
     name: Web（dist 构建 + CDN 可选发布）
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     env:
       ALPHA_S3_BUCKET: ${{ secrets.ALPHA_S3_BUCKET }}
     steps:
@@ -208,7 +208,7 @@ jobs:
   # ---------- Android：双 ABI + 渠道矩阵（keystore secrets 门控签名）----------
   android:
     name: Android（AAB/APK 渠道产物）
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     env:
       # 门控用：密钥齐则注入签名环境；缺则按脚本默认出 unsigned（冒烟语义）
       ALPHA_ANDROID_KEYSTORE_B64: ${{ secrets.ALPHA_ANDROID_KEYSTORE_B64 }}
@@ -264,7 +264,7 @@ jobs:
   # ---------- iOS：bindings 冒烟恒跑；签名发布链 secrets 门控 ----------
   ios:
     name: iOS（bindings 冒烟 + 签名发布门控）
-    runs-on: macos-latest
+    runs-on: ${{ vars.CI_RUNNER || 'macos-latest' }}
     env:
       HAS_APPLE: ${{ secrets.ALPHA_APPLE_API_KEY_ID != '' && 'true' || 'false' }}
     steps:
@@ -301,7 +301,7 @@ jobs:
   # ---------- Docker：五服务镜像多架构推送（registry secret 门控）----------
   docker:
     name: 服务镜像多架构推送（门控）
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     needs: version-gate
     env:
       ALPHA_REGISTRY: ${{ secrets.ALPHA_REGISTRY }}
@@ -337,7 +337,7 @@ jobs:
   updater-feed:
     name: updater latest.json 拼装
     needs: [version-gate, desktop]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     env:
       ALPHA_RELEASE_BASE_URL: ${{ secrets.ALPHA_RELEASE_BASE_URL }}
     steps:

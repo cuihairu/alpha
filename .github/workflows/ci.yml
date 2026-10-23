@@ -28,7 +28,7 @@ env:
 jobs:
   version:
     name: Version
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -40,7 +40,7 @@ jobs:
   # Android 清单 / Tauri allowlist 双向对账 + CSP 非空（runner 自带 python3）
   compliance:
     name: Compliance
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -49,7 +49,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -74,7 +74,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Redis 供 REDIS_TEST_URL 门控的管线集成测试真实运行（无 Redis 时测试自跳过）；
     # Postgres 供 TIMESCALE_TEST_URL / POSTGRES_TEST_URL 门控的落库集成测试真实
     # 运行（storage timescale/postgres_kv 往返 + data-engine write-through 镜像
@@ -117,7 +117,7 @@ jobs:
 
   desktop:
     name: Desktop (macOS)
-    runs-on: macos-latest
+    runs-on: ${{ vars.CI_RUNNER || 'macos-latest' }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -146,7 +146,7 @@ jobs:
 
   desktop-framework:
     name: Desktop Framework
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # 框架层（desktop lib，零 Tauri 依赖）：配置自洽性 + clippy + 单测。
     # 与 Desktop (macOS) 互补——Linux runner 无 GUI 依赖，靠 gui 特性门控把框架层
     # 拉进常规流水线（scripts/check-desktop.sh，与本地一致）。
@@ -179,7 +179,7 @@ jobs:
 
   wasm:
     name: WebAssembly 构建
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -298,7 +298,7 @@ jobs:
 
   security:
     name: 安全审计（报告型，不阻塞）
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # 现存依赖漏洞属升级债（另行立项消化）；作业保持可见但不阻塞合并，
     # 避免长期红灯淹没 lint/test 的真信号（docs/rust-code-standards.md §11）
     continue-on-error: true
