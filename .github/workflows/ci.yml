@@ -301,7 +301,6 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # 现存依赖漏洞属升级债（另行立项消化）；作业保持可见但不阻塞合并，
     # 避免长期红灯淹没 lint/test 的真信号（docs/rust-code-standards.md §11）
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -311,4 +310,5 @@ jobs:
           tool: cargo-audit
 
       - name: 运行安全审计
+        continue-on-error: true
         run: cargo audit
