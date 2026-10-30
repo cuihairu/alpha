@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1280" viewBox="0 0 1200 1280" role="img" aria-labelledby="title desc" xml:lang="en">
+<title id="title">alpha · Data Platform Architecture</title>
+<desc id="desc">Self-hosted A-share market data platform. Data flows top-down: public sources are ingested by the collector layer (services/collector: template tasks + cron + UA rotation + jittered backoff; crawlers/python reference scripts; proxy pool not wired) into the message queue. The queue defaults to Redis Streams (quotes.raw / quotes.normalized / quotes.dlq) and can evolve to NATS JetStream or Kafka. Processing services (data-engine: validation/schema mapping/enrichment/indicators, also serving gRPC :50051; real-time-feed; alert-webhook) consume and write to storage (TimescaleDB/PostgreSQL, ClickHouse Parquet export, Redis cache/dedup/rate-limit, S3/MinIO raw archival off by default). Delivery exposes REST /api/v1/*, WebSocket /ws and health/metrics via api-gateway; the Web UI is a quote/analysis dashboard. Bottom: observability with Prometheus /metrics, Grafana, Loki, Alertmanager + alert-webhook to DingTalk/WeCom/Slack/PagerDuty. Dashed lines are evolution/planned paths, solid lines are data flow.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="context-stroke"/></marker></defs>
+<style>text{font-family:Arial,'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#172b4d}.title{font-size:30px;font-weight:700}.name{font-size:22px;font-weight:700}.body{font-size:17px;fill:#435570}.small{font-size:15px;fill:#52647b}.label{font-size:15px;fill:#435570;paint-order:stroke;stroke:#f8fafc;stroke-width:5px;stroke-linejoin:round}.edge{fill:none;stroke-linejoin:round}.control{stroke-dasharray:7 5}</style>
+<rect width="1200" height="1280" rx="20" fill="#f8fafc"/>
+<text x="40" y="48" class="title" text-anchor="start">alpha · Data Platform Architecture</text>
+<text x="40" y="80" class="body" text-anchor="start">Self-hosted financial data &amp; quant research foundation · ingest → normalize → store → query → real-time → indicators → backtest</text>
+
+<path d="M600 200 V240" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="source-collect" data-from="sources" data-to="collectors" d="M600 200 V240" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)"/>
+<path d="M600 380 V420" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="collect-mq" data-from="collectors" data-to="mq" d="M600 380 V420" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M600 540 V580" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="mq-process" data-from="mq" data-to="processing" d="M600 540 V580" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M600 720 V760" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="process-store" data-from="processing" data-to="storage" d="M600 720 V760" class="edge" style="stroke:#7c3aed;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M600 900 V940" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="store-api" data-from="storage" data-to="delivery" d="M600 900 V940" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M300 1055 V1100 H240" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="api-obs" data-from="delivery" data-to="observability" d="M300 1055 V1100 H240" class="edge control" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)"/>
+<path d="M900 1055 V1100 H960" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="proc-obs" data-from="delivery" data-to="observability" d="M900 1055 V1100 H960" class="edge control" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)"/>
+
+<g id="sources" data-node="sources"><rect x="60" y="110" width="1080" height="90" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="80" y="144" class="name" text-anchor="start">Public data sources</text>
+<text x="80" y="175" class="body" text-anchor="start">A-share quotes · announcements · financials · news · per-source request pacing</text>
+</g>
+
+<g id="collectors" data-node="collectors">
+<rect x="60" y="240" width="340" height="140" rx="14" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="80" y="274" class="name" text-anchor="start">services/collector</text>
+<text x="80" y="305" class="body" text-anchor="start">Rust default collector</text>
+<text x="80" y="332" class="body" text-anchor="start">YAML/JSON task templates</text>
+<text x="80" y="359" class="body" text-anchor="start">cron · UA rotation · jittered backoff</text>
+<rect x="430" y="240" width="340" height="140" rx="14" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="450" y="274" class="name" text-anchor="start">crawlers/python</text>
+<text x="450" y="305" class="body" text-anchor="start">reference scripts (eastmoney quotes)</text>
+<text x="450" y="332" class="body" text-anchor="start">multi-language runner</text>
+<text x="450" y="359" class="body" text-anchor="start">Python / Node / Go / Rust / Shell</text>
+<rect x="800" y="240" width="340" height="140" rx="14" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="820" y="274" class="name" text-anchor="start">proxy pool</text>
+<text x="820" y="305" class="body" text-anchor="start">library-level composition surface</text>
+<text x="820" y="332" class="body" text-anchor="start">not wired into production path</text>
+</g>
+
+<g id="mq" data-node="mq"><rect x="60" y="420" width="1080" height="120" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="80" y="454" class="name" text-anchor="start">Message queue (Redis Streams default)</text>
+<text x="80" y="485" class="body" text-anchor="start">quotes.raw · quotes.normalized · quotes.dlq · decouples collectors from consumers</text>
+<text x="80" y="512" class="body" text-anchor="start">Evolution: NATS JetStream (multi-consumer persistence/replay) → Kafka (high throughput, once data domains/audit justify)</text>
+</g>
+
+<g id="processing" data-node="processing">
+<rect x="60" y="580" width="340" height="140" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="80" y="614" class="name" text-anchor="start">services/data-engine</text>
+<text x="80" y="645" class="body" text-anchor="start">validation · schema mapping · enrichment</text>
+<text x="80" y="672" class="body" text-anchor="start">price normalization · on-query indicators</text>
+<text x="80" y="699" class="body" text-anchor="start">gRPC :50051 served directly</text>
+<rect x="430" y="580" width="340" height="140" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="450" y="614" class="name" text-anchor="start">services/real-time-feed</text>
+<text x="450" y="645" class="body" text-anchor="start">real-time distribution</text>
+<text x="450" y="672" class="body" text-anchor="start">WebSocket push</text>
+<rect x="800" y="580" width="340" height="140" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="820" y="614" class="name" text-anchor="start">services/alert-webhook</text>
+<text x="820" y="645" class="body" text-anchor="start">alert notification</text>
+<text x="820" y="672" class="body" text-anchor="start">DingTalk / WeCom / Slack / PagerDuty</text>
+</g>
+
+<g id="storage" data-node="storage">
+<rect x="60" y="760" width="255" height="140" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="80" y="794" class="name" text-anchor="start">TimescaleDB</text>
+<text x="80" y="825" class="body" text-anchor="start">/ PostgreSQL</text>
+<text x="80" y="852" class="body" text-anchor="start">tick · daily bars (optional mirror)</text>
+<text x="80" y="879" class="body" text-anchor="start">off by default</text>
+<rect x="330" y="760" width="255" height="140" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="350" y="794" class="name" text-anchor="start">ClickHouse</text>
+<text x="350" y="825" class="body" text-anchor="start">Parquet export / archival</text>
+<text x="350" y="852" class="body" text-anchor="start">no write path yet</text>
+<rect x="600" y="760" width="255" height="140" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="620" y="794" class="name" text-anchor="start">Redis</text>
+<text x="620" y="825" class="body" text-anchor="start">hot caches · dedup locks</text>
+<text x="620" y="852" class="body" text-anchor="start">rate-limit tokens</text>
+<rect x="870" y="760" width="270" height="140" rx="14" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="890" y="794" class="name" text-anchor="start">S3 / MinIO</text>
+<text x="890" y="825" class="body" text-anchor="start">raw-response archival</text>
+<text x="890" y="852" class="body" text-anchor="start">RawArchiver · off by default</text>
+</g>
+
+<g id="delivery" data-node="delivery">
+<rect x="60" y="940" width="520" height="115" rx="14" fill="#faf5ff" stroke="#d8b4fe" stroke-width="1.5"/>
+<text x="80" y="974" class="name" text-anchor="start">services/api-gateway</text>
+<text x="80" y="1005" class="body" text-anchor="start">REST /api/v1/* · WebSocket /ws · health/metrics</text>
+<text x="80" y="1032" class="body" text-anchor="start">JWT (HS256/OIDC) + RBAC · Redis rate limiting</text>
+<rect x="620" y="940" width="520" height="115" rx="14" fill="#faf5ff" stroke="#d8b4fe" stroke-width="1.5"/>
+<text x="640" y="974" class="name" text-anchor="start">Web UI (quote/analysis dashboard)</text>
+<text x="640" y="1005" class="body" text-anchor="start">query · indicators · visualization</text>
+<text x="640" y="1032" class="body" text-anchor="start">gRPC served by data-engine :50051</text>
+</g>
+
+<g id="observability" data-node="observability"><rect x="60" y="1100" width="1080" height="90" rx="14" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1.5"/>
+<text x="80" y="1134" class="name" text-anchor="start">Observability / Ops</text>
+<text x="80" y="1165" class="body" text-anchor="start">Prometheus /metrics · Grafana dashboards · Loki container logs · Alertmanager + alert-webhook (11 rules)</text>
+</g>
+
+<text x="620" y="228" class="label" text-anchor="middle">paced ingestion</text>
+<text x="620" y="408" class="label" text-anchor="middle">enqueue</text>
+<text x="620" y="568" class="label" text-anchor="middle">consume</text>
+<text x="620" y="748" class="label" text-anchor="middle">write</text>
+<text x="620" y="928" class="label" text-anchor="middle">query / deliver</text>
+<text x="250" y="1080" class="label" text-anchor="middle">metrics →</text>
+<text x="950" y="1080" class="label" text-anchor="middle">alert notify →</text>
+<text x="40" y="1215" class="small" text-anchor="start">Deployment: static Rust binaries · docker-compose / systemd · full pipeline on internal network · Cloudflare Tunnel for API gateway (planned, not configured)</text>
+<text x="40" y="1240" class="small" text-anchor="start">Dashed: evolution / planned paths (proxy pool, S3 archival off, NATS/Kafka, tunnel) · Solid: implemented data flow · based on code facts</text>
+<text x="40" y="1265" class="small" text-anchor="start">Queue contracts: serde JSON Envelope v2 (queue/REST) · Protobuf only on the gRPC surface (packages/protocols/proto/data_engine.proto)</text>
+</svg>

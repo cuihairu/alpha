@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1280" viewBox="0 0 1200 1280" role="img" aria-labelledby="title desc" xml:lang="zh-CN">
+<title id="title">alpha · 数据平台架构</title>
+<desc id="desc">自托管 A 股行情数据平台。数据流自上而下：公开数据源经采集层（services/collector 模板任务 + cron + UA 轮换 + 退避重试；crawlers/python 参考脚本；proxy pool 未接线）写入消息队列；队列以 Redis Streams 为默认（quotes.raw / quotes.normalized / quotes.dlq），可演进到 NATS JetStream 或 Kafka。处理服务（data-engine 校验/映射/富化/指标并直供 gRPC :50051，real-time-feed，alert-webhook）消费并写入存储（TimescaleDB/PostgreSQL、ClickHouse Parquet 导出、Redis 缓存/去重/限流、S3/MinIO 原始归档默认关）。交付层经 api-gateway 暴露 REST /api/v1/*、WebSocket /ws 与健康/指标，Web UI 为行情分析仪表盘。底部可观测：Prometheus /metrics、Grafana、Loki、Alertmanager + alert-webhook 通知钉钉/企微/Slack/PagerDuty。虚线为演进或计划路径，实线为数据流。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="context-stroke"/></marker></defs>
+<style>text{font-family:Arial,'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#172b4d}.title{font-size:30px;font-weight:700}.name{font-size:22px;font-weight:700}.body{font-size:17px;fill:#435570}.small{font-size:15px;fill:#52647b}.label{font-size:15px;fill:#435570;paint-order:stroke;stroke:#f8fafc;stroke-width:5px;stroke-linejoin:round}.edge{fill:none;stroke-linejoin:round}.control{stroke-dasharray:7 5}</style>
+<rect width="1200" height="1280" rx="20" fill="#f8fafc"/>
+<text x="40" y="48" class="title" text-anchor="start">alpha · 数据平台架构</text>
+<text x="40" y="80" class="body" text-anchor="start">自托管金融数据与量化研究底座 · 采集 → 归一化 → 存储 → 查询 → 实时分发 → 指标 → 回测</text>
+
+<path d="M600 200 V240" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="source-collect" data-from="sources" data-to="collectors" d="M600 200 V240" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)"/>
+<path d="M600 380 V420" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="collect-mq" data-from="collectors" data-to="mq" d="M600 380 V420" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M600 540 V580" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="mq-process" data-from="mq" data-to="processing" d="M600 540 V580" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M600 720 V760" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="process-store" data-from="processing" data-to="storage" d="M600 720 V760" class="edge" style="stroke:#7c3aed;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M600 900 V940" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="store-api" data-from="storage" data-to="delivery" d="M600 900 V940" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M300 1055 V1100 H240" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="api-obs" data-from="delivery" data-to="observability" d="M300 1055 V1100 H240" class="edge control" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)"/>
+<path d="M900 1055 V1100 H960" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="proc-obs" data-from="delivery" data-to="observability" d="M900 1055 V1100 H960" class="edge control" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)"/>
+
+<g id="sources" data-node="sources"><rect x="60" y="110" width="1080" height="90" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="80" y="144" class="name" text-anchor="start">公开数据源</text>
+<text x="80" y="175" class="body" text-anchor="start">A 股行情 · 公告 · 财报 · 新闻 · 每源独立限速（per-source request pacing）</text>
+</g>
+
+<g id="collectors" data-node="collectors">
+<rect x="60" y="240" width="340" height="140" rx="14" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="80" y="274" class="name" text-anchor="start">services/collector</text>
+<text x="80" y="305" class="body" text-anchor="start">Rust 默认采集器</text>
+<text x="80" y="332" class="body" text-anchor="start">YAML/JSON 任务模板</text>
+<text x="80" y="359" class="body" text-anchor="start">cron · UA 轮换 · 抖动退避重试</text>
+<rect x="430" y="240" width="340" height="140" rx="14" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="450" y="274" class="name" text-anchor="start">crawlers/python</text>
+<text x="450" y="305" class="body" text-anchor="start">参考脚本（东财行情拉取）</text>
+<text x="450" y="332" class="body" text-anchor="start">多语言执行</text>
+<text x="450" y="359" class="body" text-anchor="start">Python / Node / Go / Rust / Shell</text>
+<rect x="800" y="240" width="340" height="140" rx="14" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="820" y="274" class="name" text-anchor="start">proxy pool</text>
+<text x="820" y="305" class="body" text-anchor="start">库级组合面</text>
+<text x="820" y="332" class="body" text-anchor="start">未接入生产路径（延后）</text>
+</g>
+
+<g id="mq" data-node="mq"><rect x="60" y="420" width="1080" height="120" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="80" y="454" class="name" text-anchor="start">消息队列（默认 Redis Streams）</text>
+<text x="80" y="485" class="body" text-anchor="start">quotes.raw · quotes.normalized · quotes.dlq · 采集与消费解耦</text>
+<text x="80" y="512" class="body" text-anchor="start">演进路径：NATS JetStream（多消费者持久化/回放）→ Kafka（高吞吐，数据域与审计需求后）</text>
+</g>
+
+<g id="processing" data-node="processing">
+<rect x="60" y="580" width="340" height="140" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="80" y="614" class="name" text-anchor="start">services/data-engine</text>
+<text x="80" y="645" class="body" text-anchor="start">校验 · schema 映射 · 富化</text>
+<text x="80" y="672" class="body" text-anchor="start">价格归一化 · 查询指标</text>
+<text x="80" y="699" class="body" text-anchor="start">gRPC :50051 直供</text>
+<rect x="430" y="580" width="340" height="140" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="450" y="614" class="name" text-anchor="start">services/real-time-feed</text>
+<text x="450" y="645" class="body" text-anchor="start">实时分发</text>
+<text x="450" y="672" class="body" text-anchor="start">WebSocket 推送</text>
+<rect x="800" y="580" width="340" height="140" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="820" y="614" class="name" text-anchor="start">services/alert-webhook</text>
+<text x="820" y="645" class="body" text-anchor="start">告警通知</text>
+<text x="820" y="672" class="body" text-anchor="start">钉钉 / 企微 / Slack / PagerDuty</text>
+</g>
+
+<g id="storage" data-node="storage">
+<rect x="60" y="760" width="255" height="140" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="80" y="794" class="name" text-anchor="start">TimescaleDB</text>
+<text x="80" y="825" class="body" text-anchor="start">/ PostgreSQL</text>
+<text x="80" y="852" class="body" text-anchor="start">tick · 日线（可选镜像）</text>
+<text x="80" y="879" class="body" text-anchor="start">默认关</text>
+<rect x="330" y="760" width="255" height="140" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="350" y="794" class="name" text-anchor="start">ClickHouse</text>
+<text x="350" y="825" class="body" text-anchor="start">Parquet 导出/归档</text>
+<text x="350" y="852" class="body" text-anchor="start">暂无写入路径</text>
+<rect x="600" y="760" width="255" height="140" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="620" y="794" class="name" text-anchor="start">Redis</text>
+<text x="620" y="825" class="body" text-anchor="start">热缓存 · 去重锁</text>
+<text x="620" y="852" class="body" text-anchor="start">限流令牌</text>
+<rect x="870" y="760" width="270" height="140" rx="14" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="890" y="794" class="name" text-anchor="start">S3 / MinIO</text>
+<text x="890" y="825" class="body" text-anchor="start">原始响应归档</text>
+<text x="890" y="852" class="body" text-anchor="start">RawArchiver · 默认关</text>
+</g>
+
+<g id="delivery" data-node="delivery">
+<rect x="60" y="940" width="520" height="115" rx="14" fill="#faf5ff" stroke="#d8b4fe" stroke-width="1.5"/>
+<text x="80" y="974" class="name" text-anchor="start">services/api-gateway</text>
+<text x="80" y="1005" class="body" text-anchor="start">REST /api/v1/* · WebSocket /ws · 健康/指标</text>
+<text x="80" y="1032" class="body" text-anchor="start">JWT (HS256/OIDC) + RBAC · Redis 限流</text>
+<rect x="620" y="940" width="520" height="115" rx="14" fill="#faf5ff" stroke="#d8b4fe" stroke-width="1.5"/>
+<text x="640" y="974" class="name" text-anchor="start">Web UI（行情分析仪表盘）</text>
+<text x="640" y="1005" class="body" text-anchor="start">查询 · 指标 · 可视化</text>
+<text x="640" y="1032" class="body" text-anchor="start">gRPC 经 data-engine 直供 :50051</text>
+</g>
+
+<g id="observability" data-node="observability"><rect x="60" y="1100" width="1080" height="90" rx="14" fill="#fdf2f8" stroke="#f9a8d4" stroke-width="1.5"/>
+<text x="80" y="1134" class="name" text-anchor="start">可观测 / 运维</text>
+<text x="80" y="1165" class="body" text-anchor="start">Prometheus /metrics · Grafana 仪表盘 · Loki 容器日志 · Alertmanager + alert-webhook（11 条规则）</text>
+</g>
+
+<text x="620" y="228" class="label" text-anchor="middle">按源限速采集</text>
+<text x="620" y="408" class="label" text-anchor="middle">入队</text>
+<text x="620" y="568" class="label" text-anchor="middle">消费</text>
+<text x="620" y="748" class="label" text-anchor="middle">写入</text>
+<text x="620" y="928" class="label" text-anchor="middle">查询 / 交付</text>
+<text x="250" y="1080" class="label" text-anchor="middle">指标采集 →</text>
+<text x="950" y="1080" class="label" text-anchor="middle">告警通知 →</text>
+<text x="40" y="1215" class="small" text-anchor="start">部署：Rust 静态二进制 · docker-compose / systemd · 内网承载全链路 · Cloudflare Tunnel 发布 API 网关（计划未配置）</text>
+<text x="40" y="1240" class="small" text-anchor="start">虚线：演进 / 计划路径（proxy pool、S3 归档默认关、NATS/Kafka、隧道）· 实线：已实现数据流 · 以代码事实为准</text>
+<text x="40" y="1265" class="small" text-anchor="start">队列契约：serde JSON Envelope v2（queue/REST）· Protobuf 仅 gRPC 面（packages/protocols/proto/data_engine.proto）</text>
+</svg>

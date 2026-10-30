@@ -6,6 +6,10 @@
 <a href="https://github.com/cuihairu/alpha/releases"><img alt="Status" src="https://img.shields.io/badge/status-in%20development-orange"></a>
 </p>
 
+<p align="center">
+<img src="docs/public/images/architecture-zh.svg" alt="alpha 数据平台架构" width="90%">
+</p>
+
 内部 A 股市场数据平台，专注于低延迟采集、清洗与分发可自由获取的公开数据。定位：**自托管金融数据与量化研究底座**（采集 → 标准化 → 存储 → 查询 → 实时分发 → 指标/分析 → 回测）；范围边界见 `docs/architecture-review.md`。当前实现以 Rust 为主，队列采用分阶段策略：从 Redis Streams 起步，可随规模增长演进到 NATS JetStream 或 Kafka。  
 中文架构方案说明见 `docs/architecture.md`。
 
