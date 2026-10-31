@@ -54,7 +54,6 @@ export function LiveQuoteBoard({
       <p>
         <span className={`live-pill live-pill-${source}`}>{tr(`feed.${source}`)}</span>
         {seq !== null && <span className="live-seq">{trf('feed.seq', { seq })}</span>}
-        <span className="live-hint">{tr('feed.hint')}</span>
         <button type="button" onClick={onExport} style={{ marginLeft: 12 }}>
           {tr('feed.export')}
         </button>
