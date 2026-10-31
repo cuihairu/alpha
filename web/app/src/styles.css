@@ -22,7 +22,8 @@
   color-scheme: dark;
   --fg: #d8e0e8;
   --fg-muted: #8a99a8;
-  --accent: #3d9be9;
+  /* 深色档 accent 微降明度：白字由 2.97:1 提到 4.81:1（同色相，非换品牌色） */
+  --accent: #2577b3;
   --border: #2c3540;
   --bg: #14181d;
   --bg-soft: #1d232a;
