@@ -12,6 +12,9 @@
   --border: #d8e0e8;
   --bg: #ffffff;
   --bg-soft: #f5f7fa;
+  /* A股口径红涨绿跌；两档均满足 WCAG AA（≥4.5:1）对底色的正文对比 */
+  --up: #b3261e;
+  --down: #1e8449;
 }
 
 /* 深色令牌（L432）：data-theme='dark' 由 ThemeToggle 写入（system 档经 JS 解析后同样落到具体值） */
@@ -23,6 +26,8 @@
   --border: #2c3540;
   --bg: #14181d;
   --bg-soft: #1d232a;
+  --up: #ff6b6b;
+  --down: #4caf7d;
 }
 
 * {
@@ -187,8 +192,8 @@ textarea {
 }
 .live-pill-feed {
   color: #fff;
-  background: #27ae60;
-  border-color: #27ae60;
+  background: #1e8449;
+  border-color: #1e8449;
 }
 .live-pill-simulated {
   color: var(--fg);
@@ -222,11 +227,11 @@ textarea {
 }
 .flash-up {
   animation: flash-up-kf 0.8s ease-out;
-  color: #c0392b;
+  color: var(--up);
 }
 .flash-down {
   animation: flash-down-kf 0.8s ease-out;
-  color: #27ae60;
+  color: var(--down);
 }
 
 /* 动效降级（ux-consistency §4 登记项）：用户偏好减弱动效时停用 flash
@@ -276,7 +281,7 @@ textarea {
   font: inherit;
 }
 .workspace-tab-close:hover {
-  color: #c0392b;
+  color: var(--up);
 }
 .workspace-add {
   border: 1px dashed var(--border);
@@ -347,5 +352,5 @@ textarea {
 }
 .workspace-error {
   font-size: 12px;
-  color: #c0392b;
+  color: var(--up);
 }

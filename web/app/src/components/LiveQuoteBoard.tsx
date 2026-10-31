@@ -86,7 +86,7 @@ export function LiveQuoteBoard({
                 >
                   {Number.isFinite(q.price) ? fmtPrice(q.price) : '—'}
                 </td>
-                <td style={{ color: (pct ?? 0) >= 0 ? '#c0392b' : '#27ae60' }}>
+                <td style={{ color: (pct ?? 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>
                   {pct === null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}`}
                 </td>
                 <td>

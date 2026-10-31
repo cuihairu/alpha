@@ -22,7 +22,7 @@ export function QuoteTable({ quotes }: { quotes: QuoteSample[] }) {
             <td>{q.symbol}</td>
             <td>{q.name}</td>
             <td>{fmtPrice(q.price)}</td>
-            <td style={{ color: q.changePct >= 0 ? '#c0392b' : '#27ae60' }}>
+            <td style={{ color: q.changePct >= 0 ? 'var(--up)' : 'var(--down)' }}>
               {q.changePct >= 0 ? '+' : ''}
               {q.changePct.toFixed(2)}
             </td>
