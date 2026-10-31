@@ -22,7 +22,7 @@ const zh = {
   'app.title': 'Alpha Finance · 数据分析界面',
   'app.intro':
     'TODO L427 选型 + L428 组件化 + L429 图表库 + L430 SQL 工作台 + L431 响应式 + L432 主题系统 + L499 实时看板 + L508 多标签工作区。旧演示页（web/index.html 等）零改动并存。',
-  'app.liveSection': '实时行情（L499：/ws 订阅，不可达降级模拟盘；标的集 = 活动工作区自选）',
+  'app.liveSection': '实时行情（/ws 订阅，不可达降级模拟盘；标的集 = 活动工作区自选）',
   'app.demoSection': '行情演示（内置静态样本）',
   'app.language': '语言',
   // —— 主题 ——
@@ -106,7 +106,7 @@ const zh = {
   'wasm.missingE': ' 后重试。',
   'wasm.retry': '重试',
   // —— 隐私面板 ——
-  'privacy.title': '数据与隐私（L488：本地数据导出 / 清除，无账号体系）',
+  'privacy.title': '数据与隐私（本地数据导出 / 清除，无账号体系）',
   'privacy.descA': '应用用户数据仅存本机（键清单 ',
   'privacy.descB': ' 项：自选工作区、主题偏好、匿名统计开关），服务端不留存个人维度数据。义务映射见 ',
   'privacy.period': '。',
@@ -156,7 +156,7 @@ const en: Record<I18nKey, string> = {
   'app.title': 'Alpha Finance · Analytics',
   'app.intro':
     'TODO L427 selection + L428 components + L429 charts + L430 SQL workbench + L431 responsive + L432 theming + L499 live board + L508 workspace tabs. Legacy demo pages (web/index.html, etc.) coexist untouched.',
-  'app.liveSection': 'Live quotes (L499: /ws subscription, sim fallback when unreachable; symbols = active workspace watchlist)',
+  'app.liveSection': 'Live quotes (/ws subscription, sim fallback when unreachable; symbols = active workspace watchlist)',
   'app.demoSection': 'Quote demo (bundled static sample)',
   'app.language': 'Language',
   'theme.label': 'Theme',
@@ -231,7 +231,7 @@ const en: Record<I18nKey, string> = {
   'wasm.missingD': ' into ',
   'wasm.missingE': ' and retry.',
   'wasm.retry': 'Retry',
-  'privacy.title': 'Data & privacy (L488: local export / erase, no accounts)',
+  'privacy.title': 'Data & privacy (local export / erase, no accounts)',
   'privacy.descA': 'App user data stays on this device (key list, ',
   'privacy.descB': ' entries: workspace watchlist, theme preference, analytics opt-in); the server keeps no personal data. Obligation mapping: ',
   'privacy.period': '.',
