@@ -108,6 +108,12 @@ button:disabled {
   cursor: default;
 }
 
+/* 键盘可达（a11y）：Tab 走查统一焦点环，替代裸浏览器默认 outline */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
