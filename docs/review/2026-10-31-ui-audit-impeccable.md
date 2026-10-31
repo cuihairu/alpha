@@ -15,11 +15,11 @@
 
 ## 问题清单（按严重度）
 
-### 1. [严重 · UX 文案] 用户可见的介绍文案是开发 TODO 备忘
+### 1. [严重 · UX 文案] 用户可见的介绍文案是开发 TODO 备忘 — 待用户
 - **现象**：页面标题下方直接渲染 `TODO L427 选型 + L428 组件化 + L429 图表库 + L430 SQL 工作台 + L431 响应式 + L432 主题系统 + L499 实时看板 + L508 多标签工作区。旧演示页（web/index.html 等）零改动并存。`
 - **截图**：`main-light-desktop.png`（页首）、`main-dark-desktop.png`、`main-en-desktop.png`（英文版同为 TODO 清单）。
 - **定位**：`src/lib/i18n.ts` `app.intro`（zh 23–24 / en 157–158），渲染于 `src/App.tsx:85` `<p>{tr('app.intro')}</p>`。
-- **建议**：需产品提供正式一句话介绍，替换为面向用户的文案（如"自选标的实时行情 + SQL 工作台 + 指标分析"）。本次**未代拟**——避免虚构产品声明；该条列入 TODO 待产品拍板。
+- **建议**：需产品提供正式一句话介绍，替换为面向用户的文案（如"自选标的实时行情 + SQL 工作台 + 指标分析"）。本次**未代拟**——避免虚构产品声明。**待用户**：需产品拍板提供正式文案。
 
 ### 2. [高 · a11y 对比度] 涨跌语义色在两种主题下各有一档不达标 ✅已修
 - **现象**：A 股口径红涨绿跌。原 `#c0392b` 红在暗底 3.28:1（<4.5），原 `#27ae60` 绿在白底 2.87:1（<4.5）。两处均为**正文数据文本**（涨跌 % 单元格），必须 ≥4.5:1。
@@ -45,25 +45,26 @@
 - **定位**：`src/styles.css` `@media (max-width:720px)` `button` 规则；工作区控件在 `src/components/WorkspaceTabs.tsx`。
 - **修复**（commit `334e48e`）：媒体查询内为 `.workspace-tabs button / .workspace-new button / .workspace-chip button / .workspace-rename / .workspace-add` 加 `width:auto; min-height:auto`，全宽规则只留给页面级主操作。验证：`fix-a4-narrow.png` 标签条恢复水平。
 
-### 6. [中 · a11y 对比度] 浅色品牌主按钮白字 4.30:1，轻微低于 AA — 待拍板
+### 6. [中 · a11y 对比度] 浅色品牌主按钮白字 4.30:1，轻微低于 AA — 待用户
 - **现象**：浅色档 `--accent: #2980b9`（品牌主色，亦见 `index.html` theme-color）上白字 4.30:1 < 4.5:1。14px 按钮正文。
 - **定位**：`src/styles.css` `:root` `--accent`、`index.html` `theme-color`、`public/manifest.webmanifest`。
-- **建议**：这是**品牌色 vs 可访问性**的取舍。本次按"不动品牌色"边界**未改**；若要达标，需产品同意把品牌蓝微降明度至 ≥4.5:1（如 `#2674a8`），或按钮文案加粗。**待用户拍板**。
+- **建议**：这是**品牌色 vs 可访问性**的取舍。本次按"不动品牌色"边界**未改**；若要达标，需产品同意把品牌蓝微降明度至 ≥4.5:1（如 `#2674a8`），或按钮文案加粗。**待用户**：需产品拍板品牌色取舍。
 
-### 7. [中 · UX 文案] 区块标题混入开发里程碑编号 — 待定
+### 7. [中 · UX 文案] 区块标题混入开发里程碑编号 ✅已修
 - **现象**："实时行情（L499：/ws 订阅，不可达降级模拟盘；标的集 = 活动工作区自选）""数据与隐私（L488：本地数据导出 / 清除，无账号体系）""行情演示（内置静态样本）"等标题带 `L4xx：` 开发编号。
 - **定位**：`src/lib/i18n.ts` `app.liveSection` / `app.demoSection` 等。
-- **建议**：去掉编号前缀，保留面向用户的语义（"实时行情""行情演示""数据与隐私"）；编号若需留档应移入注释。待定。
+- **修复**（commit `abdd9eb`）：去掉 `L499：`/`L488：` 编号前缀（zh/en 双语），保留面向用户的语义（"实时行情（/ws 订阅…）""数据与隐私（本地数据导出 / 清除…）"）；`app.intro` 的 TODO 备忘属 #1，未动。
 
-### 8. [低 · a11y] 键盘焦点样式依赖浏览器默认 — 待定
+### 8. [低 · a11y] 键盘焦点样式依赖浏览器默认 ✅已修
 - **现象**：`styles.css` 无 `:focus-visible` 规则，Tab 走查依赖 Chromium 默认 outline；自定义按钮（无边框、纯色底）下默认焦点环存在但未系统化。
 - **定位**：`src/styles.css`（全局）。
-- **建议**：显式 `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }`。待定。
+- **修复**（commit `cb661aa`）：新增 `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }`，Tab 走查统一焦点环、键盘可达（a11y 优先项）。
 
-### 9. [低 · UX 文案] 工程师向提示直接面向用户 — 待定
+### 9. [低 · UX 文案] 工程师向提示直接面向用户 ✅已修
 - **现象**："地址覆盖：?feedWs=ws://host:port/ws"（`feed.hint`）、SQL 面板"引擎未启用：先在 web/ 执行 npm run prepare-vendors…"、WASM 探针"产物未拷入 public/pkg…"为开发说明；其中 SQL/WASM 属**降级提示**（可保留），`feed.hint` 的 URL 覆盖参数对普通用户无意义。
 - **定位**：`src/lib/i18n.ts` `feed.hint`、`src/components/SqlWorkbench.tsx`、`src/components/WasmProbe.tsx`。
-- **建议**：`feed.hint` 折叠进开发/调试信息或移除；SQL/WASM 降级提示保留但措辞更用户化。待定。
+- **修复**（commit `b7aad6f`）：移除用户界面上 `feed.hint` 的 URL 覆盖提示（`LiveQuoteBoard.tsx` span + zh/en i18n 键；`?feedWs=` 特性保留，仅不再向普通用户广告）。
+- **说明**：SQL/WASM 降级提示**保留**——它们解释功能为何不可用并给出启用步骤，属有意义的错误恢复信息，非纯开发说明。
 
 ### 10. [低 · 数据可视化] 图表与指标口径
 - **现象**：K 线图（lightweight-charts，红涨绿跌）与指标分析"均值"表渲染正常，序列口径与 `packages/core` 对齐；`prefers-reduced-motion` 下价格闪烁已停用、方向色保留（语义不丢）。无缺陷。
@@ -77,5 +78,6 @@
 | --- | --- |
 | 问题总数 | 10（不含信息项） |
 | 当场修复 | 4（#2 对比度红绿、#3 深色按钮、#4 muted、#5 移动端标签条） |
-| 列入 TODO | 5（#1 介绍文案、#6 品牌蓝拍板、#7 标题编号、#8 焦点样式、#9 提示文案） |
+| 修复波已修 | 3（#7 标题编号 `abdd9eb`、#8 焦点样式 `cb661aa`、#9 提示文案 `b7aad6f`） |
+| 待用户 | 2（#1 介绍文案、#6 品牌蓝拍板） |
 | 数据可视化观察 | 1（#10） |
