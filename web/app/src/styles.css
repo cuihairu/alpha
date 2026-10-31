@@ -164,6 +164,17 @@ textarea {
     min-height: 40px; /* 移动端触控目标加大 */
   }
 
+  /* 行内小控件（工作区标签条/自选 chip/重命名）不拉满：保持内联排列，
+     全宽规则只留给页面级主操作，否则标签条被拆成整行堆叠（布局破碎） */
+  .workspace-tabs button,
+  .workspace-new button,
+  .workspace-chip button,
+  .workspace-rename,
+  .workspace-add {
+    width: auto;
+    min-height: auto;
+  }
+
   label {
     display: block;
     margin: 6px 0;
