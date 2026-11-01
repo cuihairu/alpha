@@ -2,12 +2,7 @@
 
 # alpha
 
-<p align="center">
-<a href="https://github.com/cuihairu/alpha/releases"><img alt="Status" src="https://img.shields.io/badge/status-in%20development-orange"></a>
-</p>
-
-<p align="center">
-<img src="docs/public/images/architecture-en.svg" alt="alpha data platform architecture" width="90%">
+<p align="center">[![Status](https://img.shields.io/badge/status-in%20development-orange)](https://github.com/cuihairu/alpha/releases) <a href="https://cuihairu.github.io/alpha//"><img src="https://img.shields.io/badge/docs-blue" alt="docs"></a>
 </p>
 
 Internal A-share (China) market data platform focused on low-latency ingestion, cleaning, and distribution of freely available public data. Positioning: **self-hosted financial data & quant research foundation** (ingestion → normalization → storage → query → real-time distribution → indicators/analytics → backtesting); scope boundaries in `docs/architecture-review.md`. The current implementation is Rust-first, with a staged queue strategy that starts from Redis Streams and can evolve to NATS JetStream or Kafka as scale increases.  
