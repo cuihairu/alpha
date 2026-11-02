@@ -137,6 +137,10 @@ export function useLiveQuotes(symbols: LiveSymbol[]): LiveQuoteState {
       const onDown = () => {
         clearPing()
         if (disposed) return
+        // onerror 与 onclose 会先后触发；同一连接只重排一次，否则 attempt
+        // 每失败双计（MAX_RECONNECT=2 一次真实失败即耗尽），且第二次
+        // setTimeout 覆盖 retryTimer 令首个重连定时器泄漏并重复 connect()。
+        if (ws === null) return
         ws = null
         scheduleRetry()
       }
