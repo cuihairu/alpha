@@ -190,3 +190,6 @@
 - [x] L117 前端消费面（快捷键/右键菜单）维持不迁移：桌面无行情展示面，触发条件 = 接真实行情落表
 - [x] 外部输入核验：托盘资产、QuoteRemote 真实后端、真机多屏/移动端验收均未到位，维持不开工
 - [x] 路线图对账：architecture-review §5 P2 翻「已落」、cross-platform-architecture §4/§7 翻正、desktop-framework §5 冻结注记（纯文档）
+
+## 审核发现（89db63ca..HEAD 只审不改）
+- [x] 审核发现：本轮 diff 未见问题（89db63ca..HEAD）。该区间仅 1 笔提交 82d09c1（docs：新增 2026-11-01-code-review.md 巡检报告 + 14 张 before/after 截图），纯文档无任何代码/配置改动；报告引用的 5 笔修复（c0ab9bb/c401e34/2d38125/b636a2d/89db63c）及其 3 项回归测试均核实存在，file:line 证据准确，截图均为有效 PNG。无安全/正确性/测试缺口可提。（核实：82d09c1；docs/review/2026-11-01-code-review.md:1-5；回归测试 c0ab9bb/services/collector/src/main_simple.rs:1450、c401e34/services/data-engine/src/main.rs:2754、b636a2d/packages/core/src/indicators.rs:261）
