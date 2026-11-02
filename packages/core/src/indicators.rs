@@ -26,7 +26,9 @@ impl TechnicalIndicators {
 
     /// 计算简单移动平均线 (SMA)
     pub fn calculate_sma(&self, prices: &[f64], period: usize) -> Vec<f64> {
-        if prices.len() < period {
+        // period==0 会令 `sma[period - 1]` 下溢为 usize::MAX 越界 panic——
+        // 与 bollinger 的 `period < 1` 守卫同式，返回全 0（样本不足惯例）。
+        if period == 0 || prices.len() < period {
             return vec![0.0; prices.len()];
         }
 
@@ -252,6 +254,17 @@ mod tests {
         assert_eq!(sma[2], 2.0); // (1+2+3)/3
         assert_eq!(sma[3], 3.0); // (2+3+4)/3
         assert_eq!(sma[4], 4.0); // (3+4+5)/3
+    }
+
+    /// period=0 曾令 `sma[period - 1]` usize 下溢越界 panic（回归：REST 入口可传 0）
+    #[test]
+    fn test_sma_zero_period_does_not_panic() {
+        let indicators = TechnicalIndicators::new();
+        let prices = vec![1.0, 2.0, 3.0];
+        assert_eq!(indicators.calculate_sma(&prices, 0), vec![0.0; 3]);
+        assert!(indicators.calculate_sma(&[], 0).is_empty());
+        // 非 0 period 的正常路径不受守卫影响
+        assert_eq!(indicators.calculate_sma(&prices, 3)[2], 2.0);
     }
 
     #[test]
