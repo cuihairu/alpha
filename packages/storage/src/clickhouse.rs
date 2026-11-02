@@ -121,7 +121,7 @@ impl ClickHouseStorage {
              FROM market_data
              WHERE symbol = '{}'
              AND timestamp BETWEEN '{}' AND '{}'",
-            symbol,
+            symbol.replace('\'', "''"),
             start.format("%Y-%m-%d %H:%M:%S"),
             end.format("%Y-%m-%d %H:%M:%S")
         );
