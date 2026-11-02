@@ -93,8 +93,7 @@ web/app/                    Vite + React 18 + TypeScript（独立工程，不动
 1. **旧演示页在场守门**（行为不回退：六文件在场 + `node --check` 语法冒烟）
 2. 工程结构在场断言（依赖/脚本/viewport/主题）
 3. `npm ci`（lockfile 锁定）
-4. `tsc --noEmit` 类型检查 + `vitest run` 单测
-5. `vite build` 产物构建
+4. `tsc --noEmit` 类型检查 + `vitest run` 单测 + `vite build` 产物构建（脚本 [4/4] 合并执行）
 
 与既有四道 Rust 门禁并存：`check-lint.sh` / 全仓测试 / `check-cross-platform.sh`
 / `check-desktop.sh` 语义均不变（本单 Rust 零改动，复跑实证 0 失败）。

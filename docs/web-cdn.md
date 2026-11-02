@@ -17,7 +17,9 @@
 保护约束：~~`desktop-shell.js` 为 `.gitignore` 入库豁免的桌面壳兜底文件
 （tauri distDir 首启依赖），不参与指纹重命名~~——兜底壳已于 2026-10-10 随
 frontendDist 拍板 A 退休删除（桌面 distDir 改指 `web/app/dist`），`web/dist`
-现仅 Web 部署面资产，无入库豁免文件，指纹重命名无例外集。
+现仅 Web 部署面资产，无入库豁免文件，指纹重命名无例外集
+（`optimize-dist.mjs` 的 `NO_RENAME` 集仅存 `desktop-shell.js` 历史惰性条目，
+当前无资产命中，清理登记后续增量）。
 
 ## 2. 缓存策略（三处同源：优化器清单 / nginx / 部署脚本）
 
@@ -78,5 +80,5 @@ TTL（≤60s）或走源站 no-cache 协商。
    SDK 集成；本机无 aws/rclone，dry-run 语义已实测、真传首次接线时跑；
 2. 源站 nginx 为最小可用面（单 server 块）；TLS 终止在 CDN 边缘，
    源站间走内网；
-3. dist 指纹资产与预压缩体不入库（.gitignore 既有约定，仅三件桌面壳
-   兜底文件豁免入库）。
+3. dist 指纹资产与预压缩体不入库（.gitignore 既有约定，仅 `.gitkeep`
+   占位豁免入库；兜底壳三件已随 2026-10-10 拍板 A 退休删除）。

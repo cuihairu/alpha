@@ -1,6 +1,6 @@
 # 移动端 Rust 核心库架构（JNI + UniFFI）
 
-> TODO.md「移动端应用」节第 1 项「设计移动端 Rust 核心库架构（JNI + UniFFI）」
+> todo.md「移动端应用」节第 1 项「设计移动端 Rust 核心库架构（JNI + UniFFI）」
 > 的落地说明（台账编号沿用 L112–L117 的 dispatch 顺序假设，本文记为 **L118**；
 > 骨架 crate = `mobile/` → `alpha-mobile`）。文末登记非交互假设与真机验收边界。
 
@@ -202,7 +202,7 @@ docs/mobile-offline.md §2——后者含产品红线：离线授权默认关闭
 ## 11. 非交互假设（自行判定，已注明）
 
 1. **台账编号**：本文以 L118 记该项（沿用 L112–L117 逐 dispatch 递增的既有顺序，
-   TODO.md 行号会随注释增长漂移，不作编号依据）。
+   todo.md 行号会随注释增长漂移，不作编号依据）。
 2. **UniFFI 走 proc-macro-only**（`setup_scaffolding!`，不写 UDL）：0.25 手册
    明确支持，且消除双份定义漂移；`uniffi = 0.25` / `jni = 0.21` 沿用 workspace
    既有 pin 不升级（升级会牵动未验证的绑定生成器行为）。

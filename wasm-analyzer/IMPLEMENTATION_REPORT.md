@@ -24,8 +24,8 @@
 **核心特性:**
 - ✅ 基于 Apache Arrow 的列式数据存储
 - ✅ 零拷贝数据访问，显著降低内存开销
-- ✅ `ArrowBatch` 支持高效数据批次处理
-- ✅ `ArrowMemoryPool` 内存池管理，避免频繁分配
+- ✅ `ArrowBatch` 支持高效数据批次处理（Rust 内部构造；JS 侧仅只读消费 exportPrices/exportVolumes，无静态构造入口）
+- ⚠️ `ArrowMemoryPool` 内存池管理（`#[allow(dead_code)]` 预留，未导出 JS，仅原生单测覆盖）
 
 **性能指标:**
 - 数据转换: ~1ms (10000 行)
@@ -36,8 +36,7 @@
 ```javascript
 import { ArrowBatch } from './pkg/alpha_wasm_analyzer.js';
 
-// 从市场数据创建 Arrow 批次
-const batch = ArrowBatch.fromMarketData(marketDataArray);
+// 从市场数据创建 Arrow 批次（Rust 内部路径；JS 侧无 fromMarketData 构造入口）
 
 // 零拷贝导出价格列
 const prices = batch.exportPrices();

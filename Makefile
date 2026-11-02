@@ -19,7 +19,7 @@ help:
 	@echo "  help         - 显示帮助信息"
 	@echo "  build        - 构建所有项目（Rust workspace + WASM；不含桌面壳，见 build-desktop）"
 	@echo "  test         - 运行所有测试（--exclude alpha-desktop，与 CI 同口径）"
-	@echo "  clean        - 清理构建产物（不碰入库的 web/dist 兜底壳）"
+	@echo "  clean        - 清理构建产物（不碰 Web 部署面 web/dist）"
 	@echo "  lint         - cargo fmt --all -- --check"
 	@echo "  format       - cargo fmt --all"
 	@echo "  clippy       - Clippy 静态分析（--exclude alpha-desktop）"
@@ -99,8 +99,8 @@ clippy:
 check: lint clippy test
 	@echo "✅ 完整门禁三关通过"
 
-# 清理构建产物（web/dist 不清：入库的桌面兜底壳 desktop-shell.js/index.html 在其中，
-# 构建覆盖属预期、清掉需 git checkout 恢复）
+# 清理构建产物（web/dist 不清：Web 部署面资产，compose web-origin / CDN 消费；
+# gitignore 约定仅 .gitkeep 豁免入库，构建覆盖属预期）
 clean:
 	@echo "🧹 清理构建文件..."
 	cargo clean --workspace

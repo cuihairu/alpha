@@ -50,8 +50,9 @@ docker compose ps           # HEALTHCHECK 状态（各应用镜像探 /health）
 - `docker-compose.yml` 内 `ALPHA__*` 键遵守「section 双下划线分隔、键名内单下划线」规则
   （config crate `Environment::with_prefix("ALPHA").separator("__")`）。
 
-初始化 ClickHouse schema：`scripts/clickhouse-init.sh`（deploy 脚本自动调用；
-compose 路径下手工跑一次）。
+初始化 ClickHouse schema：compose 路径由镜像 initdb 挂载自动初始化（见下文第 4 步），
+无需手工执行；裸机 deploy 脚本自动调用 `scripts/clickhouse-init.sh`
+（不要手工重复跑，会重复插示例数据）。
 
 ## 3. 裸机路径：deploy-ubuntu.sh
 
@@ -71,7 +72,9 @@ sudo ./scripts/deploy-ubuntu.sh
 5. 写 systemd 三单元：`alpha-api-gateway`（`--bind 0.0.0.0:9080`）、
    `alpha-data-engine`（`ALPHA__SERVER__ADDR=0.0.0.0:9082`）、
    `alpha-real-time-feed`（`ALPHA_REALTIME_FEED_BIND=0.0.0.0:9081`）；
-   Redis 连接各服务按 `REDIS_URL` 配置注入；裸机路径需自行提供 Redis 服务（deploy 脚本未启动 redis，缺失则 data-engine/real-time-feed 启动失败）；
+   Redis 连接各服务走代码默认 `redis://localhost:6379`（systemd 单元未注入
+   `REDIS_URL`，改址需手动加 `Environment=`）；裸机路径需自行提供 Redis 服务
+   （deploy 脚本未启动 redis，缺失则 data-engine/real-time-feed 启动失败）；
 6. nginx 已装则写 `/etc/nginx/sites-available/alpha`（静态站 + `/api/` → 9080 +
    `/ws/` → 9081；未装则跳过，Web 端口 80 无人服务，需自行 `apt install -y nginx` 后重配）；
 7. ufw 放行 22/80/443/9080/9081/9082 并启用；
@@ -113,7 +116,8 @@ docs/data-lake-parquet.md）；`lake.maintenance_interval_secs>0` 才启动湖
 
 **api-gateway**：clap CLI（`--bind`、`--auth-mode off|jwt`、`--auth-secret`、
 `--auth-jwks-url`/`--auth-jwks-refresh-secs`（OIDC 键表，oct 键联调形态）、
-`--rate-*` 等），同名 env 优先（覆写 CLI 默认，`ALPHA_GATEWAY_*`）。鉴权细节见 docs/auth.md
+`--rate-*` 等），除 `--bind` 外的同名字段 env 优先（覆写 CLI 默认，
+`ALPHA_GATEWAY_*`；`--bind` 无同名 env，绑址只能 CLI 传）。鉴权细节见 docs/auth.md
 （jwt 模式下 `/ws` 升级亦需持票：`Authorization: Bearer` 头或 `?token=` 查询参数，
 客户端连 `ws://host/ws?token=<jwt>` 即可）。
 
@@ -181,7 +185,7 @@ alerting-and-diagnosis §5）。
 
 | 面 | 入口 | 文档 |
 |---|---|---|
-| 行情/查询 REST | api-gateway `/v1/*` → data-engine（`/query`、`/stocks/:symbol/history`、`/instruments` 等） | docs/market-data-api.md |
+| 行情/查询 REST | api-gateway `/api/v1/*` → data-engine（`/query`、`/stocks/:symbol/history`、`/instruments` 等） | docs/market-data-api.md |
 | WebSocket | api-gateway `/ws` → real-time-feed `/ws`（版本化 Full/Delta 帧） | docs/realtime-sync-protocol.md |
 | 任务管理 | collector `GET/POST /tasks`、`GET /tasks/:id`、`DELETE /tasks/:id`（204 幂等；运行中 409）、`POST /tasks/:id/cancel`（清 schedule 不再调度；运行中任务本次跑完后停）、`POST /tasks/:id/execute`（重试语义亦由它承担——对 Failed/Cancelled 任务重跑即 retry）、`GET /stats`、`GET /events`(SSE) | 内网暴露，勿上公网 |
 | 源健康 | collector `GET /sources/health`（L504：任务表 ∪ 执行台账，三态 + unknown（共 4 值）unknown/healthy/degraded/down + 连败计数/最近成功失败/错误文本）；gauge `alpha_collector_source_health{task}`（0/1/2/3），告警 CollectorSourceDegraded（≥2 持续 5m）/ Down（≥3 持续 10m） | 健康由执行结果推导，非模板声明 |

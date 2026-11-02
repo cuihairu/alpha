@@ -97,7 +97,7 @@
 
 * 注释与文档用中文，解释「为什么」而非复述代码；公共项必须有 `///`。
 * 架构级决策落在 `docs/`（cross-platform-architecture.md、本文件），
-  TODO.md 记录进度与依据，二者在 commit message 中互相引用。
+  todo.md 记录进度与依据，二者在 commit message 中互相引用。
 
 ## 10. 提交纪律
 
@@ -154,7 +154,7 @@ POSTGRES_TEST_URL 门控的落库集成测试真实运行，2026-10-11 起——
   rsa：JWT 全 HS256 无 RSA 私钥运算）；记录风险 3（h2 需 axum 0.6→0.7 +
   tonic 0.10→0.12；webpki×3 默认部署无 TLS 条件性暴露，启用 TLS 需重评，
   需 sqlx 0.7→0.8；sqlx 无条件暴露，需 0.7→0.8）。逐条证据见
-  TODO.md §拍板登记 RustSec 条目；
+  todo.md §拍板登记 RustSec 条目；
 * data-engine/real-time-feed/storage/collector 尚有历史遗留的结构性
   clippy 债务已于 2026-09-28 一并清零；后续新增代码直接被 `-D warnings` 拦截；
 * fmt 工具链版本漂移风险（§1）：出现首个漂移案例时引入 rust-toolchain.toml。

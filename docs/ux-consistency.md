@@ -8,13 +8,15 @@
 表中 Web 列为 React 工程（`web/app/`）；frontendDist 拍板 A（2026-10-10）落地后
 桌面窗口装**同一 React 产物**，Desktop 列与 Web 列同源（同组件同值）——壳层时代
 的原生页/兜底壳差异不复存在，下表仅存壳层时代注记处已改口径。线上 Web 用户面仍是
-`web/` 根原生页（部署面，与桌面无关）。色板已统一（2026-10 收敛为 `#c0392b` 涨 /
-`#27ae60` 跌）；跳变动效现四端中 web/桌面同源（0.8s flash），移动端受能力上限。
+`web/` 根原生页（部署面，与桌面无关）。色板已统一红涨绿跌：web/桌面 2026-10 起改
+WCAG AA 令牌（浅色 `--up:#b3261e`/`--down:#1e8449`、深色 `#ff6b6b`/`#4caf7d`，
+styles.css:15-31），Android 保留 `#C0392B`/`#27AE60`（原生语义色，AA 整改待后续）；
+跳变动效现四端中 web/桌面同源（0.8s flash），移动端受能力上限。
 
 | 语义 | Web（React 工程） | Desktop | Android | iOS | 裁决 |
 |---|---|---|---|---|---|
-| 涨跌色板 | `#c0392b` 涨 / `#27ae60` 跌（`web/app/src/styles.css` `.flash-up/down`） | 桌面同源 React 产物（同 `styles.css` 色板；壳层注记 `app.js:447`/`--up/--down` 随 frontendDist 切换退休） | `widget_up #C0392B` / `widget_down #27AE60`（`colors.xml`） | 灵动岛 `.red`/`.green`（`docs/ios-live-activities.md` §4） | ✅ 四端同值红涨绿跌（2026-10 收敛，原生页 5 处语义色对齐；RSI 超买/超卖与 success/error 为警示语义不计入） |
-| 零涨跌（平盘）归属 | `pct >= 0` → 红色（含等号，`LiveQuoteBoard.tsx:89`） | 桌面同源 React（同一实现；壳层 `price >= open` 注记随切换退休） | 曾为 `> 0` → FLAT，**本项已改 `>= 0` → UP**（`HomeWidget.kt`，A 股平盘红惯例） | `>= 0 ? .red`（设计文档 §4） | ✅ 本项收敛：四端 0 归涨侧 |
+| 涨跌色板 | `var(--up)` 涨 / `var(--down)` 跌（`web/app/src/styles.css`：浅色 `#b3261e`/`#1e8449`、深色 `#ff6b6b`/`#4caf7d`，AA ≥4.5:1） | 桌面同源 React 产物（同 `styles.css` 色板；壳层注记 `app.js:447`/`--up/--down` 随 frontendDist 切换退休） | `widget_up #C0392B` / `widget_down #27AE60`（`colors.xml`） | 灵动岛 `.red`/`.green`（`docs/ios-live-activities.md` §4） | ✅ 红涨绿跌一致；web/桌面走 AA 令牌（浅/深两档），Android 保留 `#C0392B`/`#27AE60`（RSI 超买/超卖与 success/error 为警示语义不计入） |
+| 零涨跌（平盘）归属 | `pct >= 0` → 红色（含等号，`LiveQuoteBoard.tsx:88`） | 桌面同源 React（同一实现；壳层 `price >= open` 注记随切换退休） | 曾为 `> 0` → FLAT，**本项已改 `>= 0` → UP**（`HomeWidget.kt`，A 股平盘红惯例） | `>= 0 ? .red`（设计文档 §4） | ✅ 本项收敛：四端 0 归涨侧 |
 | 数字格式 | 价格原值、`pct.toFixed(2)`、`volume.toLocaleString()`、缺值 `—` | 桌面同源 React（千分位/两位小数与 Web 完全一致——壳层「无千分位」分歧随切换消除） | `Locale.ROOT` `"%.2f"` / `"%+.2f%%"` / `"--"`（防本地化小数点漂移） | Decimal 两位（设计文档 §2） | ✅ 两位小数 + 缺值占位符同形（桌面与 Web 同组件，壳层登记项随切换消除） |
 | 主题三态 | system/light/dark，缺省跟随系统（`ThemeToggle.tsx` + `matchMedia` 监听） | tauri v1 `theme` 仅 Light/Dark 无 system 档——窗口 chrome 留空走 OS，前端三态照常（`docs/theme-adaptation.md`） | `ThemePreference` SYSTEM/LIGHT/DARK，缺省 SYSTEM（`Theme.kt`，L511） | L119 交付面不动，跟随系统（设计文档登记） | ✅ 缺省口径统一：跟随系统 |
 | 行情过期语义 | feed 重试 2 次不可达 → 确定性模拟盘降级（L499） | 无过期语义（命令面 Rust 合成行情常新；React 端 LiveQuoteBoard 断线停更降级与 Web 同源） | 120s `STALE_AFTER_MS` 灰显（`WidgetContent.from`） | staleDate 120s（设计文档 §3） | ⚠️ Android/iOS 同 120s；web 为降级、桌面命令面无过期——形态分歧登记 |

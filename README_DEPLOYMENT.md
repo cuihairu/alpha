@@ -24,7 +24,7 @@ sudo ./scripts/deploy-ubuntu.sh
 
 - **Web 应用**: `http://your-server-ip`（需 nginx；脚本仅在已安装 nginx 时配置站点，未装时请先 `apt install -y nginx` 后重跑）
 - **API 网关**: `http://your-server-ip:9080/health`（网关 `/api/v1/*` 反代 data-engine；接口清单见 [docs/market-data-api.md](docs/market-data-api.md)）
-- **ClickHouse**: `http://localhost:8123`（防火墙默认不放行 8123，仅本机可访问；如需远程访问请自行放行并改密）
+- **ClickHouse**: `http://localhost:8123`（compose 将 8123 发布到全部接口，Docker 发布绕过 ufw；如需仅本机访问，compose 改 `127.0.0.1:8123:8123`，远程访问需自行放行并改密）
 
 ### 默认登录信息
 
@@ -116,12 +116,15 @@ sudo systemctl restart alpha-api-gateway alpha-data-engine alpha-real-time-feed
 
 ## 生产环境建议
 
-- 改掉 ClickHouse 默认口令 `admin/admin123`：口令写死在两处——
-  `docker-compose.yml` `CLICKHOUSE_PASSWORD` 与
-  `config/clickhouse-users.xml`，改完 `docker compose up -d --force-recreate
-  clickhouse` 重建，再同步 `scripts/deploy-ubuntu.sh:153` 的 init 口令；
+- 改掉 ClickHouse 默认口令 `admin/admin123`：口令写死多处——
+  `docker-compose.yml` `CLICKHOUSE_PASSWORD`（clickhouse 服务）与
+  `ALPHA__CLICKHOUSE__URL`/`ALPHA__CLICKHOUSE__PASSWORD`（data-engine 消费面）、
+  `config/clickhouse-users.xml`、`.env.example`、`scripts/clickhouse-init.sh`
+  默认，改完 `docker compose up -d --force-recreate clickhouse` 重建，再同步
+  `scripts/deploy-ubuntu.sh:153` 的 init 口令与 data-engine 消费面；
 - TLS 终止放 nginx：证书配进 `/etc/nginx/sites-available/alpha`（脚本已
-  站点化），8123/9081 等非网关端口继续不对外放行；
+  站点化），8123 未在 ufw 放行，9081/9082 已放行（`deploy-ubuntu.sh:294-296`），
+  如需收紧删 ufw 规则或让服务仅监听回环；
 - 鉴权默认全关（见 `docs/auth.md`），对外暴露前至少开网关 JWT 与
   data-engine `X-Api-Key`；
 - 备份对象按数据分级：ClickHouse 数据卷（行情归档）定期

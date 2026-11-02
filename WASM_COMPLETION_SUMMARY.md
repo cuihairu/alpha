@@ -18,14 +18,14 @@
 ### 1. Arrow 零拷贝内存管理
 **文件:** `wasm-analyzer/src/arrow_adapter.rs`
 
-- ✅ `ArrowBatch`: 基于 Apache Arrow 的列式数据批次处理
-- ✅ `ArrowMemoryPool`: 内存池管理器，避免频繁分配
+- ✅ `ArrowBatch`: 基于 Apache Arrow 的列式数据批次处理（Rust 内部构造；JS 侧仅只读消费 `exportPrices`/`exportVolumes`/`getByteSize`/`numColumns`/`numRows`，无静态构造入口）
+- ⚠️ `ArrowMemoryPool`: 内存池管理器（`#[allow(dead_code)]` 预留，未导出 JS，仅原生单测覆盖）
 - ✅ 零拷贝数据访问，显著降低内存开销 (60%)
 - ✅ 高效列数据提取和导出
 
-**API:**
+**API（Rust 内部路径；`fromMarketData`/`ArrowBatch` 未导出 JS）:**
 ```javascript
-const batch = ArrowBatch.fromMarketData(data);
+// JS 侧无 ArrowBatch 构造入口；批次由 Rust 内部创建后经以下只读方法消费
 const prices = batch.exportPrices();
 console.log(`行数: ${batch.numRows()}, 内存: ${batch.getByteSize()} bytes`);
 ```
@@ -140,6 +140,7 @@ wasm-analyzer/
 ├── src/
 │   ├── lib.rs              # 主入口 + WasmAnalyzer
 │   ├── arrow_adapter.rs    # Arrow 零拷贝适配器 ✅
+│   ├── shared_buffer.rs    # SharedF64Buffer 零拷贝缓冲（allocPriceBuffer/freePriceBuffer）✅
 │   ├── storage.rs          # IndexedDB 存储层 ✅
 │   ├── streaming.rs        # 流式处理引擎 ✅
 │   ├── worker.rs           # Web Workers 并行计算 ✅
@@ -156,7 +157,7 @@ wasm-analyzer/
 ## 构建工具
 
 - ✅ `build-wasm-optimized.sh`: 优化构建脚本
-- ✅ 编译配置: Release (O3 + codegen-units=1；LTO/SIMD 为未来项)
+- ✅ 编译配置: Release (O3 + codegen-units=1；`wasm-opt --enable-simd` 已启用，rustc `+simd128` 为未来项)
 - ✅ 性能测试套件
 - ✅ Web 演示页面: `web/wasm-demo.html`
 

@@ -6,7 +6,7 @@
 [0m$ [0mrg --files | sed -n '1,260p'
 Cargo.toml
 start-web.sh
-TODO.md
+todo.md
 README_DEPLOYMENT.md
 tools/build-tools/src/main.rs
 tools/build-tools/Cargo.toml
@@ -267,7 +267,7 @@ config/grafana/provisioning/datasources/datasources.yml
 [0m$ [0mpwd && git status --short && rg --files -g 'AGENTS.md' -g 'CLAUDE.md' -g 'project.yaml' -g 'README*' -g '*TODO*' -g '*todo*' -g 'docs/**' -g 'production/**' | head -300
 /home/cui/workspaces/alpha
  D web/dist/.gitkeep
-TODO.md
+todo.md
 README.zh.md
 README_DEPLOYMENT.md
 patches/arrow-arith-50.0.0/README.md
@@ -393,7 +393,7 @@ mobile/android/README.md
 desktop/icons/README.md
 [0m$ [0mrg -n -i '\b(todo|fixme|xxx|hack)\b|\[ \]' --glob '!node_modules/**' --glob '!vendor/**' --glob '!dist/**' --glob '!build/**' . | head -300
 ./Cargo.toml:21:    # 平台壳/工具链归后续 TODO，见 docs/mobile-core-architecture.md）
-./TODO.md:1:# TODO
+./todo.md:1:# TODO
 ./scripts/check-cross-platform.sh:2:# 跨平台兼容性检查（TODO：跨平台 Rust 架构设计 — 统一 Rust 代码规范和跨平台兼容性检查）
 ./scripts/check-version.sh:2:# 版本一致性门禁（TODO L472）：五处版本号必须同值，SW 缓存名与版本同后缀。
 ./tools/build-tools/src/main.rs:198:    // TODO: 实现服务逻辑
@@ -403,8 +403,8 @@ desktop/icons/README.md
 ./tools/build-tools/src/main.rs:328:// TODO: 实现组件逻辑
 ./tools/build-tools/src/main.rs:330:  // TODO: 定义组件属性
 ./tools/build-tools/src/main.rs:338:  /* TODO: 实现样式 */
-./docs/analysis.md:4:> 并给出按价值排序的行动清单（见 §5，已同步到 TODO.md）。
-./docs/analysis.md:57:## 5. 行动清单（按价值排序，已同步 TODO.md）
+./docs/analysis.md:4:> 并给出按价值排序的行动清单（见 §5，已同步到 todo.md）。
+./docs/analysis.md:57:## 5. 行动清单（按价值排序，已同步 todo.md）
 ./scripts/build-images.sh:2:# 跨平台 Docker 镜像构建（TODO L468，方案文档 docs/docker-deployment.md）
 ./docs/mobile-push-sync.md:35:| 自建推送（长连接 + 服务端） | 本仓已有 real-time-feed WS 面，但移动端需自管心跳/重连 | 归后续 TODO；不属「推送通道」骨架范围 |
 ./docs/mobile-push-sync.md:86:已在 L114 注明（移动端通知是平台能力，桌面归托盘/系统通知 TODO）。
@@ -426,7 +426,7 @@ desktop/icons/README.md
 ./docs/android-widget.md:32:页 TODO。
 ./scripts/store-release.sh:19:#     （全流程已在本地 mock 服务上实测四端点时序，见 TODO 注记）。
 ./packages/core/src/account.rs:1://! 统一账户与跨端数据同步的协议/领域面（纯函数，TODO L476）
-./docs/desktop-framework.md:3:> TODO.md L112「搭建 Tauri + Rust 桌面应用框架」的落地说明。
+./docs/desktop-framework.md:3:> todo.md L112「搭建 Tauri + Rust 桌面应用框架」的落地说明。
 ./docs/desktop-framework.md:230:| TODO | 现状 | 下一步 |
 ./scripts/check-coverage.sh:2:# 代码覆盖率报告（TODO L494；非交互）
 ./WASM_COMPLETION_SUMMARY.md:213:- [ ] SIMD 向量化优化 (rustc target-feature=+simd128)
@@ -434,9 +434,9 @@ desktop/icons/README.md
 ./docs/realtime-sync-protocol.md:3:> 对应 TODO「实现实时数据同步协议（WebSocket 增量更新 + 版本控制）」最小可用版本。
 ./docs/theme-adaptation.md:21:   进程内热切换随设置页 TODO 一起接）。
 ./docs/rust-code-standards.md:3:> 状态 v1（2026-09-28），对应 TODO「定义统一的 Rust 代码规范和跨平台兼容性检查」。
-./docs/rust-code-standards.md:100:  TODO.md 记录进度与依据，二者在 commit message 中互相引用。
+./docs/rust-code-standards.md:100:  todo.md 记录进度与依据，二者在 commit message 中互相引用。
 ./docs/rust-code-standards.md:138:缺 Redis 简单获取途径，其编译面由 `build` 覆盖，运行期矩阵归 TODO L469 后续登记）；
-./docs/rust-code-standards.md:157:  TODO.md §拍板登记 RustSec 条目；
+./docs/rust-code-standards.md:157:  todo.md §拍板登记 RustSec 条目；
 ./docs/README.md:32:- 标题不带内部条目编号（`（TODO Lxxx）` 不出现在 H1）；正文中的设计登记
 ./docs/README.md:33:  引用（`docs/xxx.md §n`、L 编号）保留，是本仓设计文档的溯源口径。
 ./docs/README.md:36:- 文档间链接用相对路径（`./xxx.md`），构建时会校验。
@@ -468,7 +468,7 @@ desktop/icons/README.md
 ./docs/mobile-gestures.md:132:| TODO 项 | 本文依托 |
 ./docs/mobile-privacy.md:76:  TODO 一起接，见 docs/mobile-offline.md §8⑦）；
 ./packages/core/src/streaming.rs:1://! 流式数据处理与并行聚合核心（TODO「开发流式数据处理和并行计算机制（Web Workers + Rayon）」
-./docs/mobile-core-architecture.md:3:> TODO.md「移动端应用」节第 1 项「设计移动端 Rust 核心库架构（JNI + UniFFI）」
+./docs/mobile-core-architecture.md:3:> todo.md「移动端应用」节第 1 项「设计移动端 Rust 核心库架构（JNI + UniFFI）」
 ./docs/mobile-core-architecture.md:14:* **L301 增量交付**（TODO 270）：Android Kotlin + Jetpack Compose 混合工程
 ./docs/mobile-core-architecture.md:18:* **仍不交付**（按 TODO 顺序留给后续项，见 §13）：L118 首轮清单中 272/273/274
 ./docs/mobile-core-architecture.md:26:┌──────────── 平台壳（后续 TODO：270/271）────────────┐
@@ -477,7 +477,7 @@ desktop/icons/README.md
 ./docs/mobile-core-architecture.md:111:`api_url` 骨架内只随 `status_json` 下行（探测/同步属 TODO 274，本轮不联网）。
 ./docs/mobile-core-architecture.md:117:/`synthetic_series` 两个入口）。真实数据源接入（api-gateway）是后续 TODO，届时
 ./docs/mobile-core-architecture.md:127:| iOS | `staticlib`（`.a`，Swift 侧经 uniffi 生成的 Swift 绑定链接） | Xcode + Swift Package（TODO 271） | 骨架已落（L119：SwiftUI + UniFFI 绑定骨架 + 模型契约）；Xcode 工具链链路未启（无 macOS/Xcode） |
-./docs/mobile-core-architecture.md:205:   TODO.md 行号会随注释增长漂移，不作编号依据）。
+./docs/mobile-core-architecture.md:205:   todo.md 行号会随注释增长漂移，不作编号依据）。
 ./docs/mobile-core-architecture.md:210:   （TODO 270/272）启用。
 ./docs/mobile-core-architecture.md:233:   wasm 门控同款式），不做 optional feature——TODO 272 启用 JNI 逃生舱时
 ./docs/mobile-core-architecture.md:245:4. 推送 token/生命周期等 SDK 回调经 JNI 逃生舱回灌核心库（TODO 272 的首个
@@ -494,7 +494,7 @@ desktop/icons/README.md
 ./scripts/check-e2e.sh:2:# 端到端跨服务冒烟测试（TODO L469，方案见 docs/docker-deployment.md §4 与 TODO 标注）
 ./scripts/desktop-fake-pc/README.md:7:CI 的 macOS 作业编译，签名漂移要等一次推送往返才暴露（TODO L112 连续两次 CI 红灯）。
 ./web/app/src/lib/privacy.ts:2: * 数据主体权利工具（TODO L488）：GDPR「访问/可携权」与「删除权/被遗忘权」
-./services/data-engine/src/main.rs:1021:/// 增长，见 TODO.md P2）——/query 每次执行前自行 refresh（execute_query），
+./services/data-engine/src/main.rs:1021:/// 增长，见 todo.md P2）——/query 每次执行前自行 refresh（execute_query），
 ./wasm-analyzer/src/storage.rs:3://! TODO「构建混合存储架构（WASM 内存 + IndexedDB + 服务端缓存）」wasm 侧落地件。
 ./desktop/tests/tauri_config.rs:1://! `tauri.conf.json` 契约测试（TODO L112 构建门禁的可执行部分）
 ./services/api-gateway/src/account.rs:1://! 统一账户与跨端数据同步的服务端存储面（TODO L476）
@@ -514,7 +514,7 @@ desktop/icons/README.md
 ./desktop/src/market.rs:3://! 骨架阶段尚无真实数据源（接入 api-gateway 属 TODO「统一配置管理」之后的接线工作），
 ./desktop/src/market.rs:8://! 真实数据接入时（TODO L113 本地数据导出等）只需替换本模块的取数实现，
 ./web/app/src/components/PrivacyPanel.tsx:12: * 数据与隐私面板（TODO L488）：GDPR/CCPA 数据主体权利的 UI 面——
-./desktop/src/lib.rs:1://! Alpha Finance 桌面端框架层（TODO.md L112「搭建 Tauri + Rust 桌面应用框架」）
+./desktop/src/lib.rs:1://! Alpha Finance 桌面端框架层（todo.md L112「搭建 Tauri + Rust 桌面应用框架」）
 ./mobile/src/market.rs:3://! 骨架阶段尚无真实数据源（接入 api-gateway 属后续 TODO），但演示数据不能是
 ./desktop/src/shortcuts.rs:1://! 键盘快捷键与右键菜单模型（TODO L117「开发键盘快捷键和右键菜单支持」）
 ./desktop/src/kv.rs:3://! TODO L38（跨平台适配层）只给了 trait 面与说明（"Desktop（Tauri）: KeyValueStore
@@ -542,7 +542,7 @@ desktop/icons/README.md
 ./mobile/android/app/src/main/java/com/alpha/finance/mobile/PushSyncSeam.kt:18: * 归 L339 / 真机 TODO（文档 §10）。
 ./mobile/android/build.gradle.kts:6:// Kotlin 须先升级 uniffi（另起 TODO，见 docs/mobile-core-architecture.md 假设⑩）。
 > build · gpt-6-luna
-[0m→ [0mRead TODO.md [90m[limit=600][0m
+[0m→ [0mRead todo.md [90m[limit=600][0m
 [0m→ [0mRead Cargo.toml [90m[limit=260][0m
 [0m→ [0mRead docs/architecture.md [90m[limit=400][0m
 [0m→ [0mRead docs/审计-文档一致性.md [90m[limit=300][0m
@@ -1619,7 +1619,7 @@ web/app/vite.config.ts
 [0m→ [0mRead .github/workflows/ci.yml [90m[limit=360][0m
 > build · gpt-6-luna
 [0m→ [0mRead docs/architecture-review.md [90m[limit=320][0m
-[0m$ [0mrg -n '^\s*(#\[arg|auth_mode|rate_limit|bind:|fn build_router|async fn auth|async fn proxy|Route|route\(|nest\()' services/api-gateway/src/main.rs | head -150 && rg -n 'TODO|未实现|规划项|后续|归.*TODO|未接线|mock|演示数据|暂不' README.md README.zh.md docs TODO.md | head -220
+[0m$ [0mrg -n '^\s*(#\[arg|auth_mode|rate_limit|bind:|fn build_router|async fn auth|async fn proxy|Route|route\(|nest\()' services/api-gateway/src/main.rs | head -150 && rg -n 'TODO|未实现|规划项|后续|归.*TODO|未接线|mock|演示数据|暂不' README.md README.zh.md docs todo.md | head -220
 19:    Router,
 66:    #[arg(short, long, default_value = "0.0.0.0:8080")]
 67:    bind: SocketAddr,
@@ -1654,8 +1654,8 @@ web/app/vite.config.ts
 625:async fn auth_middleware(
 1364:            rate_limiter: None,
 1365:            rate_limit_per_minute: 120,
-TODO.md:1:# TODO
-TODO.md:178:- [x] announcement/news 域维持未实现（无消费方证据）（2026-10-10）
+todo.md:1:# TODO
+todo.md:178:- [x] announcement/news 域维持未实现（无消费方证据）（2026-10-10）
 README.zh.md:12:- 完全运行在自托管局域网环境；对外发布（如 Cloudflare Tunnel）为规划项，尚未配置。
 README.zh.md:24:   - 当前在用流：`quotes.raw`、`quotes.normalized`、`quotes.dlq`。公告/新闻域尚未实现。
 docs/distributed-tracing.md:12:| 入站带 `X-Trace-Id`（非空） | 原样沿用——跨服务/客户端发起的重试与后续请求串同链路 |
@@ -1672,10 +1672,10 @@ docs/architecture.md:76:- **安全**：Cloudflare Tunnel 暴露网关为规划�
 docs/architecture.md:100:  节点为规划项。
 docs/architecture.md:103:## 后续路线
 docs/architecture.md:108:4. 上线最小可用数据集（指数/主板行情 + 公告）——公告域未实现。
-docs/analysis.md:4:> 并给出按价值排序的行动清单（见 §5，已同步到 TODO.md）。
+docs/analysis.md:4:> 并给出按价值排序的行动清单（见 §5，已同步到 todo.md）。
 docs/analysis.md:16:| services/api-gateway | 低 | **纯 stub**：health 返回硬编码健康状态，proxy 返回 mock，无真实转发/鉴权〔现注：已落真实反代 + JWT/OIDC 鉴权 + RBAC + Redis 限流 + 探测式 health（2026-09-28 起），本行为 2026-09-27 快照〕 |
 docs/analysis.md:17:| wasm-analyzer + web | 中 | WASM 引擎 + 前端自洽（demo 数据 + Canvas），可配置直连 data-engine REST + real-time-feed WS（web/app.js restBase/wsUrl），缺省仍走演示数据 |
-docs/analysis.md:57:## 5. 行动清单（按价值排序，已同步 TODO.md）
+docs/analysis.md:57:## 5. 行动清单（按价值排序，已同步 todo.md）
 docs/analysis.md:73:### P2 数据落地（后续）
 docs/analysis.md:79:### P3 补对外链路（后续）
 docs/analysis.md:82:| 9 | api-gateway 真实反代 data-engine（8081）/real-time-feed（8082），去掉 mock | 集成测试经网关取 `/stocks/:symbol/history` 与 WS |
@@ -1709,16 +1709,16 @@ docs/account-sync.md:151:  `plan_sync`）可调，UI 接线登记后续；
 docs/account-sync.md:153:  （Web SW / 移动前台任务），登记后续；
 docs/account-sync.md:158:  不动，故 iOS 侧同步登记后续。
 docs/README.md:32:- 标题不带内部条目编号（`（TODO Lxxx）` 不出现在 H1）；正文中的设计登记
-docs/desktop-framework.md:3:> TODO.md L112「搭建 Tauri + Rust 桌面应用框架」的落地说明。
+docs/desktop-framework.md:3:> todo.md L112「搭建 Tauri + Rust 桌面应用框架」的落地说明。
 docs/desktop-framework.md:228:## 5. 边界登记与后续
 docs/desktop-framework.md:230:| TODO | 现状 | 下一步 |
 docs/installation.md:20:| macOS | `.app` / `.dmg`（公证为登记设计，CI 尚未接线） |
 docs/rust-code-standards.md:3:> 状态 v1（2026-09-28），对应 TODO「定义统一的 Rust 代码规范和跨平台兼容性检查」。
-docs/rust-code-standards.md:100:  TODO.md 记录进度与依据，二者在 commit message 中互相引用。
+docs/rust-code-standards.md:100:  todo.md 记录进度与依据，二者在 commit message 中互相引用。
 docs/rust-code-standards.md:138:缺 Redis 简单获取途径，其编译面由 `build` 覆盖，运行期矩阵归 TODO L469 后续登记）；
-docs/rust-code-standards.md:157:  TODO.md §拍板登记 RustSec 条目；
+docs/rust-code-standards.md:157:  todo.md §拍板登记 RustSec 条目；
 docs/rust-code-standards.md:159:  clippy 债务已于 2026-09-28 一并清零；后续新增代码直接被 `-D warnings` 拦截；
-docs/mobile-core-architecture.md:3:> TODO.md「移动端应用」节第 1 项「设计移动端 Rust 核心库架构（JNI + UniFFI）」
+docs/mobile-core-architecture.md:3:> todo.md「移动端应用」节第 1 项「设计移动端 Rust 核心库架构（JNI + UniFFI）」
 docs/mobile-core-architecture.md:14:* **L301 增量交付**（TODO 270）：Android Kotlin + Jetpack Compose 混合工程
 docs/mobile-core-architecture.md:18:* **仍不交付**（按 TODO 顺序留给后续项，见 §13）：L118 首轮清单中 272/273/274
 docs/mobile-core-architecture.md:26:┌──────────── 平台壳（后续 TODO：270/271）────────────┐
@@ -1729,7 +1729,7 @@ docs/mobile-core-architecture.md:111:`api_url` 骨架内只随 `status_json` 下
 docs/mobile-core-architecture.md:113:## 8. 演示数据源
 docs/mobile-core-architecture.md:117:/`synthetic_series` 两个入口）。真实数据源接入（api-gateway）是后续 TODO，届时
 docs/mobile-core-architecture.md:127:| iOS | `staticlib`（`.a`，Swift 侧经 uniffi 生成的 Swift 绑定链接） | Xcode + Swift Package（TODO 271） | 骨架已落（L119：SwiftUI + UniFFI 绑定骨架 + 模型契约）；Xcode 工具链链路未启（无 macOS/Xcode） |
-docs/mobile-core-architecture.md:205:   TODO.md 行号会随注释增长漂移，不作编号依据）。
+docs/mobile-core-architecture.md:205:   todo.md 行号会随注释增长漂移，不作编号依据）。
 docs/mobile-core-architecture.md:210:   （TODO 270/272）启用。
 docs/mobile-core-architecture.md:213:   平台 SDK 依赖，Linux 门禁可覆盖）；若后续引入 NDK-only 依赖需退回
 docs/mobile-core-architecture.md:233:   wasm 门控同款式），不做 optional feature——TODO 272 启用 JNI 逃生舱时
@@ -1888,7 +1888,7 @@ services/data-engine/src/main.rs:3292:            persistence: Some(persistence.
 services/data-engine/src/main.rs:3297:            mirror_retries: Arc::new(MirrorRetryBuffer::with_capacity(MIRROR_RETRY_BUFFER_CAP)),
 services/data-engine/src/main.rs:3330:        assert_eq!(persistence.count(&symbol).await?, 2);
 services/data-engine/src/main.rs:3331:        let latest = persistence.latest(&symbol).await?.expect("persisted row");
-[0m$ [0mrg -n '^\s*- \[x\]' TODO.md | wc -l; rg -n '^\s*- \[ \]' TODO.md | wc -l; git status --short
+[0m$ [0mrg -n '^\s*- \[x\]' todo.md | wc -l; rg -n '^\s*- \[ \]' todo.md | wc -l; git status --short
 142
 0
  D web/dist/.gitkeep

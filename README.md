@@ -2,7 +2,7 @@
 
 # alpha
 
-<p align="center">[![Status](https://img.shields.io/badge/status-in%20development-orange)](https://github.com/cuihairu/alpha/releases) <a href="https://cuihairu.github.io/alpha//"><img src="https://img.shields.io/badge/docs-blue" alt="docs"></a>
+<p align="center"><a href="https://github.com/cuihairu/alpha/releases"><img src="https://img.shields.io/badge/status-in%20development-orange" alt="status"/></a> <a href="https://cuihairu.github.io/alpha/"><img src="https://img.shields.io/badge/docs-blue" alt="docs"/></a>
 </p>
 
 Internal A-share (China) market data platform focused on low-latency ingestion, cleaning, and distribution of freely available public data. Positioning: **self-hosted financial data & quant research foundation** (ingestion → normalization → storage → query → real-time distribution → indicators/analytics → backtesting); scope boundaries in `docs/architecture-review.md`. The current implementation is Rust-first, with a staged queue strategy that starts from Redis Streams and can evolve to NATS JetStream or Kafka as scale increases.  
@@ -24,14 +24,15 @@ Chinese architecture write-up: `docs/architecture.md`.
    - Phase 1 uses Redis Streams as the low-cost default for collector-to-consumer decoupling.  
    - Phase 2 can move to NATS JetStream when multi-consumer persistence and replay become mandatory.  
    - Kafka remains the high-throughput option only after data domains and audit/replay requirements justify the cost.  
-   - Streams currently in use: `quotes.raw`, `quotes.normalized`, `quotes.dlq`. The announcements/news domains are not implemented yet.
+   - Streams currently in use: `quotes.raw`, `quotes.normalized`, `quotes.dlq`. The announcements domain is not implemented yet; news collection is wired (`TaskSource::News`) but its queue streams and consumption face are pending.
 
 3. **Processing Services**  
    - Rust services consume stream messages, handle validation, schema mapping, and enrichment (price normalization, on-query indicators).  
    - Writes to storage targets:
      - TimescaleDB/PostgreSQL for tick/daily bars (optional mirror, off by default).
      - ClickHouse for market-data Parquet export/archival (no write path from the data pipeline yet).
-     - Redis for hot caches, deduplication locks, and rate-limit tokens.
+     - Parquet lake for partitioned bar writes (LakeWriter write/compaction/manifest; `lake.enabled` off by default, `/query` read path available).
+     - Redis for hot caches and rate-limit tokens (deduplication is a data-engine in-memory FIFO window, not a Redis lock).
    - Batch recomputation currently lives inside data-engine (MemTable refresh before `/query`); no separate ETL jobs.
 
 4. **Public/Private APIs**  

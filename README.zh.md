@@ -2,7 +2,7 @@
 
 # alpha
 
-<p align="center">[![Status](https://img.shields.io/badge/status-in%20development-orange)](https://github.com/cuihairu/alpha/releases) <a href="https://cuihairu.github.io/alpha/zh//"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs"></a>
+<p align="center"><a href="https://github.com/cuihairu/alpha/releases"><img src="https://img.shields.io/badge/status-in%20development-orange" alt="status"/></a> <a href="https://cuihairu.github.io/alpha/"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs"/></a>
 </p>
 
 内部 A 股市场数据平台，专注于低延迟采集、清洗与分发可自由获取的公开数据。定位：**自托管金融数据与量化研究底座**（采集 → 标准化 → 存储 → 查询 → 实时分发 → 指标/分析 → 回测）；范围边界见 `docs/architecture-review.md`。当前实现以 Rust 为主，队列采用分阶段策略：从 Redis Streams 起步，可随规模增长演进到 NATS JetStream 或 Kafka。  
@@ -24,14 +24,15 @@
    - 第一阶段以 Redis Streams 作为采集与消费解耦的低成本默认实现。  
    - 第二阶段在多消费者持久化与回放成为刚需时，可迁移至 NATS JetStream。  
    - Kafka 仅在数据域与审计/回放需求证明其成本合理后，才作为高吞吐选项。  
-   - 当前在用流：`quotes.raw`、`quotes.normalized`、`quotes.dlq`。公告/新闻域尚未实现。
+   - 当前在用流：`quotes.raw`、`quotes.normalized`、`quotes.dlq`。公告域尚未实现；新闻采集已接线（`TaskSource::News`），仅队列流与消费面待建。
 
 3. **处理服务**  
    - Rust 服务消费流消息，处理校验、schema 映射与增强（价格标准化、查询态指标）。  
    - 存储写入目标：
      - TimescaleDB/PostgreSQL 存 tick/日 K（可选镜像，默认关闭）。
      - ClickHouse 用于行情 Parquet 导出/归档（数据管线尚无写入路径）。
-     - Redis 承担热缓存、去重锁与限流令牌。
+     - Parquet 数据湖分区写入（LakeWriter write/compaction/manifest；`lake.enabled` 默认关，`/query` 读旁路可用）。
+     - Redis 承担热缓存与限流令牌（去重为 data-engine 内存 FIFO 窗口，非 Redis 锁）。
    - 批量重算目前在 data-engine 内部（`/query` 执行前刷新 MemTable）；无独立 ETL 作业。
 
 4. **对内/对外 API**  

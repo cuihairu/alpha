@@ -9,14 +9,14 @@
 
 核心数据平面已打通并有测试覆盖；文档站与架构审查详见 `docs/`。平台持续开发中，
 按 `docs/architecture-review.md` §5 的分期推进（P0 文档收敛 ✅ → P1 数据模型 ✅ →
-P2 数据质量（首项 sequence 断档告警已落）→ P3 API 分层/数据集/Experiment → P4 UI 收敛）。
+P2 数据质量 ✅（五维告警已接入）→ P3 API 分层/数据集/Experiment（登记表已落，API 分层+MCP 待做）→ P4 UI 收敛）。
 
 ## 五个核心域
 
 | 域 | 落点 |
 |---|---|
 | ingestion（采集） | `services/collector`：task templates（YAML/JSON 声明式数据源）+ cron 调度 + 东方财富行情源 + cleaner + rate_limiter + 重试策略 |
-| data（数据仓） | `packages/storage` + `services/data-engine`：Redis Streams 消息契约 + 内存/内存镜像时序 + ClickHouse 导出归档（Parquet 数据湖为设计稿，未立项） |
+| data（数据仓） | `packages/storage` + `services/data-engine`：Redis Streams 消息契约 + 内存/内存镜像时序 + ClickHouse 导出归档 + Parquet 数据湖（LakeWriter 分区写入/compaction/manifest 已落地，见 docs/data-lake-parquet.md §9） |
 | research（研究） | `packages/core`：indicators（RSI/MACD/SMA/EMA/布林带/ATR…）/ backtest / optimize / risk / parallel + `wasm-analyzer`（WASM 契约层） |
 | realtime（实时） | `services/real-time-feed`：Redis Streams 消费 + WebSocket 连接级订阅 + DLQ 兜底 |
 | access（访问） | `services/api-gateway` + `services/data-engine` HTTP 面：REST/WS + API key 门 + 追踪 + Prometheus 指标 |
@@ -26,7 +26,7 @@ P2 数据质量（首项 sequence 断档告警已落）→ P3 API 分层/数据�
 ```
 packages/
   core/       研究域：indicators / backtest / optimize / risk / analytics / parallel / crypto / hybrid_cache …
-  protocols/  契约层（纯 serde、wasm-clean）：events（Envelope v2）/ instrument（Instrument 契约）/ rest / websocket / grpc
+  protocols/  契约层（纯 serde、wasm-clean）：events（Envelope v2）/ instrument（Instrument 契约）/ dataset（DatasetDescriptor/ExperimentRecord）/ rest / websocket / grpc
   storage/    Redis Streams 队列 / 时序存储 / Timescale 镜像 / ClickHouse / 缓存 / 限流 / 加密
 services/
   collector/         数据源运行时：task templates + cron 调度 + 行情抓取 + 重试 + 限流
@@ -34,10 +34,10 @@ services/
   real-time-feed/    WebSocket 实时分发（连接级订阅 + DLQ）
   api-gateway/       外部访问面：REST/WS 反代 + 鉴权 + 追踪
   alert-webhook/     告警出口
-  crawlers/          采集脚本（Python/多语言）
+crawlers/            采集脚本（Python/多语言）
 desktop/             Tauri 桌面（框架层零 Tauri 依赖 + 接线层，跨端契约）
 mobile/              alpha-mobile（UniFFI proc-macro 桥 + 确定性行情骨架，workspace 成员）
-wasm-analyzer/       WASM 客户端分析契约（--no-default-features 纯 serde）
+wasm-analyzer/       WASM 分析引擎（wasm-bindgen 绑定 + arrow 零拷贝 + 流式/Worker 并行）
 web/                 Web 前端（状态：UI 收敛为 API consumer，见 architecture-review §P4）
 docs/                Docusaurus 文档站（architecture / architecture-review 等 42+ 篇）
 scripts/             门禁脚本 10 个：check-lint / check-cross-platform / check-desktop / check-e2e 等
@@ -82,10 +82,11 @@ scripts/             门禁脚本 10 个：check-lint / check-cross-platform / c
 
 ## 下一步（按分期）
 
-- **P2 数据质量**：sequence 断档告警已落地（9254efe：collector `next_source_sequence`
-  发布侧编号 + data-engine `SequenceGapMonitor` 断档/回退计数指标）；完整性/连续性/
-  异常/重复检测待做
-- **P3**：三级 API 分层（Public/Research/Internal）；Research Dataset + Experiment 登记表；MCP 慢启动
+- **P2 数据质量** ✅：五维告警已接入消费路径（data-engine `SequenceGapMonitor`/
+  `PriceOutlierMonitor`/`SourceDivergenceMonitor`；`alpha_dataquality_*` 指标：
+  sequence_gaps/sequence_regressions/price_outliers/source_divergences/duplicates/
+  invalid_payloads/quarantined）
+- **P3**：三级 API 分层（Public/Research/Internal）+ MCP 慢启动（剩余项）；Research Dataset + Experiment 登记表 ✅ 已落（packages/storage/src/dataset_registry.rs）
 - **P4**：UI 回归 API consumer 定位
 
 **Alpha = 自托管金融数据与量化研究基础平台。**

@@ -1,7 +1,7 @@
 # Alpha 平台现状分析（2026-09-27）
 
 > 范围：main @ e88de7e。目标：盘点各模块完成度、端到端管线真实状态、测试与部署现状，
-> 并给出按价值排序的行动清单（见 §5，已同步到 TODO.md）。
+> 并给出按价值排序的行动清单（见 §5，已同步到 todo.md）。
 
 ## 1. 模块完成度
 
@@ -54,7 +54,7 @@ collector /streams/quotes/publish ──┴→ quotes.raw → data-engine(normal
 - `main_simple.rs` 内 `/tasks/:id/execute` 走 Python 子进程路径，与 `/streams/quotes/publish` 的 Rust 直采路径**并存且语义分裂**（前者结果丢弃）。
 - README/PROJECT_SUMMARY 与实际（端口、Python 爬虫地位、「已完成」表述）有多处出入。
 
-## 5. 行动清单（按价值排序，已同步 TODO.md）
+## 5. 行动清单（按价值排序，已同步 todo.md）
 
 ### P0 打通并守住端到端管线（本轮实施）
 | # | 事项 | 验收标准 |

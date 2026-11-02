@@ -171,7 +171,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      # beforeBuildCommand = `cd web && npm run build`（root web 的 wasm+prod 链）
+      # beforeBuildCommand = `cd web/app && npm run build`（web/app React 产物，frontendDist 指向其 dist）
       - name: 安装 web 依赖
         run: npm ci --prefix web --no-audit --no-fund
 
