@@ -1604,6 +1604,35 @@ fn process_and_system_memory_bytes() -> Option<(u64, u64)> {
     Some((rss_pages * 4096, total_kb * 1024))
 }
 
+/// /query 只读门（安全扫描 S-2）：用 sqlparser 解析并校验全部语句均为查询类
+/// （SELECT/WITH/EXPLAIN/SHOW/DESCRIBE）。解析失败一律拒绝（防御性）——客户端
+/// 不可经 /query 执行 DDL/DML（CREATE EXTERNAL TABLE ... LOCATION 'file://…'
+/// 可读任意文件、INSERT/UPDATE/DELETE/DROP 破坏数据）。
+fn is_read_only_query(sql: &str) -> bool {
+    use datafusion::sql::sqlparser::ast::Statement;
+    use datafusion::sql::sqlparser::dialect::GenericDialect;
+    use datafusion::sql::sqlparser::parser::Parser;
+
+    match Parser::parse_sql(&GenericDialect, sql) {
+        Ok(stmts) => {
+            !stmts.is_empty()
+                && stmts.iter().all(|s| {
+                    matches!(
+                        s,
+                        Statement::Query(_)
+                            | Statement::Explain { .. }
+                            | Statement::ExplainTable { .. }
+                            | Statement::ShowVariable { .. }
+                            | Statement::ShowCreate { .. }
+                            | Statement::ShowColumns { .. }
+                            | Statement::ShowTables { .. }
+                    )
+                })
+        }
+        Err(_) => false,
+    }
+}
+
 /// 执行 SQL 查询
 #[tracing::instrument(skip(state, request))]
 async fn execute_query(
@@ -1611,6 +1640,11 @@ async fn execute_query(
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, ApiErrorResponse> {
     let start = Instant::now();
+    if !is_read_only_query(&request.query) {
+        return Err(ApiErrorResponse::bad_request(
+            "/query 只允许只读查询（SELECT/WITH/EXPLAIN/SHOW/DESCRIBE）",
+        ));
+    }
     state
         .refresh_query_tables()
         .await
@@ -2712,6 +2746,37 @@ mod tests {
         assert_eq!(response.data[0]["symbol"], "AAPL");
         assert_eq!(response.data[0]["max_price"], 102.0);
         assert_eq!(response.data[0]["total_volume"], 30);
+    }
+
+    /// S-2 回归：/query 只读门拒绝 DDL/DML（CREATE EXTERNAL TABLE 读任意文件、
+    /// DROP/INSERT/UPDATE/DELETE 破坏数据），只读 SELECT 照常放行。
+    #[tokio::test]
+    async fn execute_query_rejects_ddl_and_dml() {
+        let state = Arc::new(AppState::new(test_config()).await);
+        for ddl in [
+            "CREATE EXTERNAL TABLE t STORED AS CSV LOCATION 'file:///etc/passwd'",
+            "DROP TABLE market_data",
+            "INSERT INTO market_data VALUES (1, 2)",
+            "DELETE FROM market_data WHERE symbol = 'AAPL'",
+        ] {
+            let res = execute_query(
+                State(state.clone()),
+                Json(QueryRequest {
+                    query: ddl.to_string(),
+                }),
+            )
+            .await;
+            assert!(res.is_err(), "应拒绝非只读语句: {ddl}");
+        }
+        let Json(response) = execute_query(
+            State(state),
+            Json(QueryRequest {
+                query: "SELECT 1 AS x".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(response.success);
     }
 
     /// /query 湖历史层（data-lake-parquet §6 接缝）：落湖分区注册为
