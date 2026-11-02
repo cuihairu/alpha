@@ -660,11 +660,21 @@ impl SimpleCollector {
         }
     }
 
+    /// 生成脚本里的字符串字面量：JSON 字面量在 Python/JS/Go 均为合法字符串字面量，
+    /// 引号/反斜杠/控制字符一律转义。URL 经此收口，杜绝爬虫源码注入（安全扫描 S-1）。
+    fn script_json_literal(s: &str) -> String {
+        serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
+    }
+
+    /// shell 单引号字面量：`'…'` 内不能含单引号，用 `'\''` 转义（S-1 收口）。
+    fn script_shell_literal(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+
     /// 生成脚本代码
     fn generate_script_code(&self, task: &TaskDefinition, language: &CrawlerLanguage) -> String {
         match language {
             CrawlerLanguage::Python => {
-                let headers_repr = format!("{:?}", task.config.request.headers);
                 format!(
                     r#"
 	import json
@@ -673,7 +683,7 @@ impl SimpleCollector {
 	from datetime import datetime, timezone
 
 	def main():
-	    url = "{}"
+	    url = {}
 	    headers = {}
 
 	    try:
@@ -706,7 +716,9 @@ impl SimpleCollector {
 	if __name__ == "__main__":
 	    main()
 	"#,
-                    task.config.request.url, headers_repr
+                    Self::script_json_literal(&task.config.request.url),
+                    serde_json::to_string(&task.config.request.headers)
+                        .unwrap_or_else(|_| "{}".to_string())
                 )
             }
             CrawlerLanguage::NodeJs => {
@@ -714,7 +726,7 @@ impl SimpleCollector {
                     r#"
 const https = require('https');
 const fs = require('fs');
-const url = '{}';
+const url = {};
 https.get(url, (res) => {{
     let data = '';
     res.on('data', (chunk) => {{
@@ -739,7 +751,7 @@ https.get(url, (res) => {{
     console.error('Error:', err.message);
 }});
 "#,
-                    task.config.request.url
+                    Self::script_json_literal(&task.config.request.url)
                 )
             }
             CrawlerLanguage::Go => {
@@ -756,7 +768,7 @@ import (
 )
 
 func main() {{
-    url := "{}"
+    url := {}
 
     resp, err := http.Get(url)
     if err != nil {{
@@ -781,38 +793,40 @@ func main() {{
     fmt.Println(string(output))
 }}
 "#,
-                    task.config.request.url
+                    Self::script_json_literal(&task.config.request.url)
                 )
             }
             CrawlerLanguage::Shell => {
+                let header_args = task
+                    .config
+                    .request
+                    .headers
+                    .iter()
+                    .map(|(k, v)| {
+                        format!(
+                            "-H {}",
+                            Self::script_shell_literal(&format!("{}: {}", k, v))
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 format!(
                     r#"
 #!/bin/bash
 
-URL="{}"
-HEADERS='{}'
+URL={}
 
 echo "Fetching data from: $URL"
 
 # 使用curl获取数据
 if command -v curl >/dev/null 2>&1; then
-    if [ -n "$HEADERS" ]; then
-        curl -s -H "$HEADERS" "$URL" 2>/dev/null || echo "Error: Failed to fetch data"
-    else
-        curl -s "$URL" 2>/dev/null || echo "Error: Failed to fetch data"
-    fi
+    curl -s {} "$URL" 2>/dev/null || echo "Error: Failed to fetch data"
 else
     echo "Error: curl command not found"
 fi
 "#,
-                    task.config.request.url,
-                    task.config
-                        .request
-                        .headers
-                        .iter()
-                        .map(|(k, v)| format!("-H '{}: {}'", k, v))
-                        .collect::<Vec<_>>()
-                        .join(" ")
+                    Self::script_shell_literal(&task.config.request.url),
+                    header_args
                 )
             }
             CrawlerLanguage::Rust => {
@@ -1428,5 +1442,48 @@ mod tests {
         let shell_code = collector.generate_script_code(&task, &CrawlerLanguage::Shell);
         assert!(shell_code.contains("curl"));
         assert!(shell_code.contains(&task.config.request.url));
+    }
+
+    /// S-1 回归：URL/header 里的引号+语句逃逸必须收进字符串字面量，不得原样
+    /// 出现在生成脚本里（collector 生成面曾把 url 裸插进四种语言模板）。
+    #[test]
+    fn test_script_code_generation_neutralizes_injection() {
+        let collector = SimpleCollector::new("/tmp");
+        let mut task = TaskDefinition::new(
+            "inject-script",
+            TaskSource::Custom {
+                source_type: "test".to_string(),
+                endpoint: "https://api.example.com".to_string(),
+                params: HashMap::new(),
+            },
+            "Inject Script",
+        );
+        let malicious_url = "\";import os;os.system('id');#";
+        let mut headers = HashMap::new();
+        headers.insert(
+            "X-Test".to_string(),
+            "\"};import os;os.system('id');#".to_string(),
+        );
+        task.config.request.url = malicious_url.to_string();
+        task.config.request.headers = headers;
+
+        // 关键断言：url 行必须是「一个完整字符串字面量」，即载荷全部被收进
+        // 字面量内部（serde_json 转义所有引号/反斜杠/控制字符），无语句断句逃逸。
+        let json_url = serde_json::to_string(malicious_url).unwrap();
+        let json_headers = serde_json::to_string(&task.config.request.headers).unwrap();
+        let shell_url = format!("'{}'", malicious_url.replace('\'', "'\\''"));
+
+        let python_code = collector.generate_script_code(&task, &CrawlerLanguage::Python);
+        assert!(python_code.contains(&format!("url = {}", json_url)));
+        assert!(python_code.contains(&format!("headers = {}", json_headers)));
+
+        let nodejs_code = collector.generate_script_code(&task, &CrawlerLanguage::NodeJs);
+        assert!(nodejs_code.contains(&format!("const url = {};", json_url)));
+
+        let go_code = collector.generate_script_code(&task, &CrawlerLanguage::Go);
+        assert!(go_code.contains(&format!("url := {}", json_url)));
+
+        let shell_code = collector.generate_script_code(&task, &CrawlerLanguage::Shell);
+        assert!(shell_code.contains(&format!("URL={}", shell_url)));
     }
 }
