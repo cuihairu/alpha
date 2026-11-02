@@ -193,3 +193,6 @@
 
 ## 审核发现（89db63ca..HEAD 只审不改）
 - [x] 审核发现：本轮 diff 未见问题（89db63ca..HEAD）。该区间仅 1 笔提交 82d09c1（docs：新增 2026-11-01-code-review.md 巡检报告 + 14 张 before/after 截图），纯文档无任何代码/配置改动；报告引用的 5 笔修复（c0ab9bb/c401e34/2d38125/b636a2d/89db63c）及其 3 项回归测试均核实存在，file:line 证据准确，截图均为有效 PNG。无安全/正确性/测试缺口可提。（核实：82d09c1；docs/review/2026-11-01-code-review.md:1-5；回归测试 c0ab9bb/services/collector/src/main_simple.rs:1450、c401e34/services/data-engine/src/main.rs:2754、b636a2d/packages/core/src/indicators.rs:261）
+
+## 审核发现（82d09c1d..HEAD 只审不改）
+- [x] 审核发现：本轮 diff 未见问题（82d09c1d..5e5d0cf）。该区间仅 1 笔提交 5e5d0cf（docs：todo.md 追加 3 行，即上一轮 89db63ca..HEAD 的审核结论落盘），纯文档无任何代码/配置改动。本轮复核：git log/diff --stat 确认区间内仅此一笔且只触及 todo.md；交叉验证了 5e5d0cf 结论中的事实主张——82d09c1 提交存在且内容为巡检报告+14 张 PNG、5 笔被引修复（c0ab9bb/c401e34/2d38125/b636a2d/89db63c）均在仓库历史中、3 项回归测试 file:line（c0ab9bb/services/collector/src/main_simple.rs:1450、c401e34/services/data-engine/src/main.rs:2754、b636a2d/packages/core/src/indicators.rs:261）逐条比对源码属实，无虚假记载。无安全/正确性/测试缺口可提。（核实：5e5d0cf；todo.md:194-195）
