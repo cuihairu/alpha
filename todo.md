@@ -199,3 +199,6 @@
 
 ## 审核发现（5e5d0cfb..HEAD 只审不改）
 - [x] 审核发现：本轮 diff 未见问题（5e5d0cfb..HEAD）。该区间仅 1 笔提交 1d526c8（docs：todo.md 追加 3 行，即上一轮 82d09c1d..HEAD 的审核结论落盘），纯文档无任何代码/配置改动。本轮复核：git log/diff --name-only 确认区间内仅此一笔且只触及 todo.md；交叉验证了 1d526c8 结论中的事实主张——82d09c1 提交存在且内容为巡检报告 + 14 张 PNG（7 issue × before/after）、5 笔被引修复（c0ab9bb/c401e34/2d38125/b636a2d/89db63c）均在仓库历史中、3 项回归测试 file:line（c0ab9bb/services/collector/src/main_simple.rs:1450、c401e34/services/data-engine/src/main.rs:2754、b636a2d/packages/core/src/indicators.rs:261）逐条比对源码属实，无虚假记载。无安全/正确性/测试缺口可提。（核实：1d526c8；todo.md:194-195；复核：todo.md:201）
+
+## 审核发现（1d526c80..HEAD 只审不改）
+- [x] 审核发现：本轮 diff 未见问题（1d526c80..HEAD）。该区间仅 1 笔提交 dc50e56（docs：todo.md 追加 3 行，即上一轮 5e5d0cfb..HEAD 的审核结论落盘），纯文档无任何代码/配置改动。本轮复核：git log/diff --stat 确认区间内仅此一笔且只触及 todo.md；交叉验证了 dc50e56 结论中的事实主张——1d526c8 提交存在且为 docs（todo.md 追加 3 行）、5e5d0cfb..1d526c8 区间仅此一笔、82d09c1 提交存在且内容为巡检报告 + 14 张 PNG（7 issue × before/after）、5 笔被引修复（c0ab9bb/c401e34/2d38125/b636a2d/89db63c）均在仓库历史中、3 项回归测试 file:line（c0ab9bb/services/collector/src/main_simple.rs:1450、c401e34/services/data-engine/src/main.rs:2754、b636a2d/packages/core/src/indicators.rs:261）逐条比对源码属实，无虚假记载。无安全/正确性/测试缺口可提。（核实：dc50e56；todo.md:199-201）
