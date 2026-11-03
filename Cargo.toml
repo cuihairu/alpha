@@ -54,9 +54,9 @@ tower-http = { version = "0.5", features = ["cors", "trace", "compression-br"] }
 hyper = { version = "1.0", features = ["full"] }
 
 # 数据处理
-datafusion = "35.0"
-arrow = "50.0"
-parquet = "50.0"
+datafusion = "55.2.0"
+arrow = "59.2.0"
+parquet = "59.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
@@ -124,5 +124,3 @@ alpha-core = { path = "packages/core" }
 alpha-protocols = { path = "packages/protocols", default-features = false }
 alpha-storage = { path = "packages/storage" }
 
-[patch.crates-io]
-arrow-arith = { path = "patches/arrow-arith-50.0.0" }

@@ -82,7 +82,7 @@ impl Accumulator for Vwap {
         Ok(())
     }
 
-    fn evaluate(&self) -> Result<ScalarValue> {
+    fn evaluate(&mut self) -> Result<ScalarValue> {
         Ok(ScalarValue::Float64(
             (self.sum_v > 0.0).then(|| self.sum_pv / self.sum_v),
         ))
@@ -92,7 +92,7 @@ impl Accumulator for Vwap {
         std::mem::size_of_val(self)
     }
 
-    fn state(&self) -> Result<Vec<ScalarValue>> {
+    fn state(&mut self) -> Result<Vec<ScalarValue>> {
         Ok(vec![
             ScalarValue::Float64(Some(self.sum_pv)),
             ScalarValue::Float64(Some(self.sum_v)),
@@ -146,7 +146,7 @@ impl Accumulator for RangePct {
         Ok(())
     }
 
-    fn evaluate(&self) -> Result<ScalarValue> {
+    fn evaluate(&mut self) -> Result<ScalarValue> {
         Ok(ScalarValue::Float64(match (self.min, self.max) {
             (Some(min), Some(max)) if min > 0.0 && min.is_finite() => {
                 Some((max - min) / min * 100.0)
@@ -159,7 +159,7 @@ impl Accumulator for RangePct {
         std::mem::size_of_val(self)
     }
 
-    fn state(&self) -> Result<Vec<ScalarValue>> {
+    fn state(&mut self) -> Result<Vec<ScalarValue>> {
         Ok(vec![
             ScalarValue::Float64(self.min),
             ScalarValue::Float64(self.max),
@@ -203,7 +203,7 @@ impl Accumulator for AvgSpread {
         Ok(())
     }
 
-    fn evaluate(&self) -> Result<ScalarValue> {
+    fn evaluate(&mut self) -> Result<ScalarValue> {
         Ok(ScalarValue::Float64(
             (self.count > 0).then(|| self.sum / self.count as f64),
         ))
@@ -213,7 +213,7 @@ impl Accumulator for AvgSpread {
         std::mem::size_of_val(self)
     }
 
-    fn state(&self) -> Result<Vec<ScalarValue>> {
+    fn state(&mut self) -> Result<Vec<ScalarValue>> {
         Ok(vec![
             ScalarValue::Float64(Some(self.sum)),
             ScalarValue::Int64(Some(self.count)),
@@ -286,7 +286,7 @@ mod tests {
         Arc::new(UInt64Array::from(vals))
     }
 
-    fn evaluate(acc: &dyn Accumulator) -> Option<f64> {
+    fn evaluate(acc: &mut dyn Accumulator) -> Option<f64> {
         match acc.evaluate().unwrap() {
             ScalarValue::Float64(v) => v,
             other => panic!("期望 Float64，得到 {other:?}"),
@@ -302,7 +302,7 @@ mod tests {
         ])
         .unwrap();
         // (100×10 + 102×20) / 30 = 3040/30
-        assert!((evaluate(&acc).unwrap() - 3040.0 / 30.0).abs() < 1e-9);
+        assert!((evaluate(&mut acc).unwrap() - 3040.0 / 30.0).abs() < 1e-9);
     }
 
     #[test]
@@ -310,7 +310,7 @@ mod tests {
         let mut acc = Vwap::default();
         acc.update_batch(&[f64s(vec![Some(100.0)]), u64s(vec![Some(0)])])
             .unwrap();
-        assert_eq!(evaluate(&acc), None);
+        assert_eq!(evaluate(&mut acc), None);
     }
 
     #[test]
@@ -319,19 +319,19 @@ mod tests {
         acc.update_batch(&[f64s(vec![Some(100.0), Some(95.0), Some(110.0)])])
             .unwrap();
         // (110−95)/95×100
-        assert!((evaluate(&acc).unwrap() - 15.0 / 95.0 * 100.0).abs() < 1e-9);
+        assert!((evaluate(&mut acc).unwrap() - 15.0 / 95.0 * 100.0).abs() < 1e-9);
     }
 
     #[test]
     fn range_pct_single_row_is_zero_and_invalid_min_is_null() {
         let mut acc = RangePct::default();
         acc.update_batch(&[f64s(vec![Some(100.0)])]).unwrap();
-        assert_eq!(evaluate(&acc), Some(0.0));
+        assert_eq!(evaluate(&mut acc), Some(0.0));
 
         let mut bad = RangePct::default();
         bad.update_batch(&[f64s(vec![Some(0.0), Some(-1.0)])])
             .unwrap();
-        assert_eq!(evaluate(&bad), None);
+        assert_eq!(evaluate(&mut bad), None);
     }
 
     #[test]
@@ -343,13 +343,13 @@ mod tests {
         ])
         .unwrap();
         // 两对完整报价：1.0 与 1.0 → 均值 1.0（中间行 bid 缺失跳过）
-        assert!((evaluate(&acc).unwrap() - 1.0).abs() < 1e-9);
+        assert!((evaluate(&mut acc).unwrap() - 1.0).abs() < 1e-9);
 
         let mut empty = AvgSpread::default();
         empty
             .update_batch(&[f64s(vec![None]), f64s(vec![Some(1.0)])])
             .unwrap();
-        assert_eq!(evaluate(&empty), None);
+        assert_eq!(evaluate(&mut empty), None);
     }
 
     #[test]
@@ -372,7 +372,7 @@ mod tests {
             .collect();
         let mut merged = Vwap::default();
         merged.merge_batch(&cols).unwrap();
-        assert!((evaluate(&merged).unwrap() - 3040.0 / 30.0).abs() < 1e-9);
+        assert!((evaluate(&mut merged).unwrap() - 3040.0 / 30.0).abs() < 1e-9);
     }
 
     #[tokio::test]

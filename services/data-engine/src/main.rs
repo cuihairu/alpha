@@ -38,7 +38,8 @@ use chrono::{DateTime, Duration, Utc};
 use datafusion::{
     arrow::{
         array::{
-            ArrayRef, Float64Array, Int64Array, StringArray, TimestampMillisecondArray, UInt64Array,
+            ArrayRef, Float64Array, Int64Array, StringArray, StringViewArray,
+            TimestampMillisecondArray, UInt64Array,
         },
         datatypes::{DataType, TimeUnit},
         record_batch::RecordBatch,
@@ -2208,6 +2209,10 @@ fn array_value_to_json(array: &ArrayRef, row_idx: usize) -> anyhow::Result<serde
     match array.data_type() {
         DataType::Utf8 => {
             let array = array.as_any().downcast_ref::<StringArray>().unwrap();
+            Ok(serde_json::Value::String(array.value(row_idx).to_string()))
+        }
+        DataType::Utf8View => {
+            let array = array.as_any().downcast_ref::<StringViewArray>().unwrap();
             Ok(serde_json::Value::String(array.value(row_idx).to_string()))
         }
         DataType::Int64 => {
