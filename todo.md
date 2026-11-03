@@ -209,7 +209,7 @@
 
 ## 漏洞扫描遗留（2026-11-03 全舰队扫描，源 scratch/vuln-scan-*.md）
 
-- [ ] VULN-ALPHA-001 [中危·RUSTSEC-2024-0363] sqlx 0.7.4→0.8.1【跨大版本需改代码】：一次消除 sqlx 自身 + rustls 0.21.12（0346/0349）+ rustls-webpki 0.101.7（0098/0099/0104/0382）+ webpki-roots 0.25.4（0381）共 8 个 RUSTSEC ID；验收：cargo audit 中上述 8 个 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿
+- [x] VULN-ALPHA-001 [中危·RUSTSEC-2024-0363] sqlx 0.7.4→0.8.1【跨大版本需改代码】：一次消除 sqlx 自身 + rustls 0.21.12（0346/0349）+ rustls-webpki 0.101.7（0098/0099/0104/0382）+ webpki-roots 0.25.4（0381）共 8 个 RUSTSEC ID；验收：cargo audit 中上述 8 个 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿。（证据：`Cargo.toml:64` 声明 sqlx 0.8.1，实际解析 sqlx 0.8.6 / rustls 0.23.46 / rustls-webpki 0.103.16 / webpki-roots 0.26.11；`cargo audit` 输出中 RUSTSEC-2024-0363、2026-0346、2026-0349、2026-0098、2026-0099、2026-0104、2026-0382、2026-0381 均不存在；`cargo test --workspace --exclude alpha-desktop` = 627 passed、0 failed、6 ignored）
 - [ ] VULN-ALPHA-002 [低危·RUSTSEC-2026-0258] h2 0.3.27→0.4【跨大版本需改代码】：hyper 0.14/axum 0.6/tonic 0.10 生态锁定，需 tonic 0.10→≥0.11（连带 axum 0.6→0.7、hyper 0.14→1.x）；验收：cargo audit 该 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿
 - [ ] VULN-ALPHA-003 [高危 7.5·RUSTSEC-2026-0435] thrift 0.17.0→0.23【跨大版本需改代码】：由 parquet 50/datafusion 35 引入，需升 arrow 生态；验收：cargo audit 该 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿
 - [ ] VULN-ALPHA-004 [低危 3.8·RUSTSEC-2024-0358] object_store 0.9.1→0.10【跨大版本需改代码】：datafusion 35 引入；验收：cargo audit 该 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿
