@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use alpha_core::errors::{AlphaError, AlphaResult};
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use crate::jwt::{decode_header, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
 /// 访问令牌声明（自签与 OIDC 统一子集：sub/exp/iat/scope/roles）
@@ -104,12 +104,12 @@ pub fn create_token_with_roles(
         iat: now,
         exp: now + ttl.as_secs() as i64,
     };
-    encode(
+    crate::jwt::encode(
         &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(secret.as_bytes()),
     )
-    .map_err(|e| AlphaError::AuthenticationError(format!("token 签发失败: {e}")))
+    .map_err(|_| AlphaError::AuthenticationError("token 签发失败".to_string()))
 }
 
 /// 校验自签 token：签名错/过期/格式坏一律 `AuthError`（调用方统一转 401，
@@ -119,14 +119,15 @@ pub fn verify_token(secret: &str, token: &str) -> AlphaResult<Claims> {
     validation.validate_exp = true;
     // 自签 token 的签发与校验同机同钟，无需时钟漂移容忍（leeway 0：ttl 到期即拒）
     validation.leeway = 0;
-    validation.required_spec_claims.insert("exp".to_string());
-    decode::<Claims>(
+    validation.required_spec_claims.push("exp".to_string());
+    let value = crate::jwt::decode(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
         &validation,
     )
-    .map(|d| d.claims)
-    .map_err(|_| AlphaError::AuthenticationError("invalid or expired token".to_string()))
+    .map_err(|_| AlphaError::AuthenticationError("invalid or expired token".to_string()))?;
+    serde_json::from_value(value)
+        .map_err(|_| AlphaError::AuthenticationError("invalid or expired token".to_string()))
 }
 
 /// RBAC 判定（L484，纯函数）：admin 全通；读方法（GET/HEAD/OPTIONS）
@@ -168,7 +169,7 @@ pub fn verify_oidc_token(
     expected_issuer: &str,
     expected_audience: &str,
 ) -> AlphaResult<Claims> {
-    let header = jsonwebtoken::decode_header(token)
+    let header = decode_header(token)
         .map_err(|_| AlphaError::AuthenticationError("malformed token header".to_string()))?;
     let kid = header
         .kid
@@ -185,8 +186,9 @@ pub fn verify_oidc_token(
     if !expected_audience.is_empty() {
         validation.set_audience(&[expected_audience]);
     }
-    decode::<Claims>(token, key, &validation)
-        .map(|d| d.claims)
+    let value = crate::jwt::decode(token, key, &validation)
+        .map_err(|_| AlphaError::AuthenticationError("invalid or expired token".to_string()))?;
+    serde_json::from_value(value)
         .map_err(|_| AlphaError::AuthenticationError("invalid or expired token".to_string()))
 }
 
@@ -253,7 +255,7 @@ pub fn verify_any(
     token: &str,
 ) -> AlphaResult<Claims> {
     if let Some(store) = jwks {
-        let has_kid = jsonwebtoken::decode_header(token)
+        let has_kid = decode_header(token)
             .ok()
             .and_then(|h| h.kid)
             .is_some();
@@ -362,7 +364,7 @@ mod tests {
 
     #[test]
     fn oidc_kid_routing_and_issuer_checks() {
-        use jsonwebtoken::EncodingKey;
+        use crate::jwt::encode;
 
         // 两把 HMAC 键模拟 IdP 轮换：token 用 key-1 签，jwks 同步含 key-1
         let token = encode(
@@ -417,7 +419,7 @@ mod tests {
     /// kid → 拒绝且不回退自签（防降级混淆）
     #[test]
     fn verify_any_dispatches_by_kid_presence() {
-        use jsonwebtoken::EncodingKey;
+        use crate::jwt::encode;
         let config = AuthConfig {
             mode: AuthMode::JwtRequired,
             secret: "self-secret".to_string(),

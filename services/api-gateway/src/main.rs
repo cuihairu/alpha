@@ -28,6 +28,7 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 mod account;
 mod audit;
 mod auth;
+mod jwt;
 mod shield;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -143,7 +144,7 @@ fn resolve_url(env_key: &str, arg_value: &str) -> String {
 
 /// OIDC JWKS 键表（L502）：kid → 校验键。启动拉取 + 后台定时刷新，
 /// 刷新失败保旧表（fail-closed：无键票据照旧 401，不因刷新抖动放行）
-pub type JwksStore = Arc<tokio::sync::RwLock<HashMap<String, jsonwebtoken::DecodingKey>>>;
+pub type JwksStore = Arc<tokio::sync::RwLock<HashMap<String, jwt::DecodingKey>>>;
 
 /// 网关共享状态
 #[derive(Clone)]
@@ -2826,10 +2827,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        jsonwebtoken::encode(
-            &jsonwebtoken::Header {
+        jwt::encode(
+            &jwt::Header {
                 kid: Some(kid.to_string()),
-                ..jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256)
+                ..jwt::Header::new(jwt::Algorithm::HS256)
             },
             &auth::Claims {
                 sub: "carol".to_string(),
@@ -2838,7 +2839,7 @@ mod tests {
                 iat: now,
                 exp: now + 300,
             },
-            &jsonwebtoken::EncodingKey::from_secret(secret),
+            &jwt::EncodingKey::from_secret(secret),
         )
         .unwrap()
     }
