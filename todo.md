@@ -206,3 +206,12 @@
 ## 审核发现（dc50e564..076b9f3f 只审不改）
 - [x] 审核发现：076b9f3 新增结论把区间标注为「1d526c80..HEAD」并称「该区间仅 1 笔提交 dc50e56」，但当前 HEAD=076b9f3 下 `git rev-list --count 1d526c80..HEAD` 实为 2 笔（dc50e56+076b9f3 自身），该主张仅对父区间 1d526c80..dc50e56 成立，标签与结论自相矛盾，属审核台账事实性不一致。已核实属实并将上方结论区间修正为「1d526c80..dc50e56」、事实主张保留（dc50e56 确实为 5e5d0cfb..HEAD 审核结论落盘）。（修正：f476122；todo.md:207）
 - [x] 审核发现：本轮 diff 未见问题（dc50e564..076b9f3f）。该区间仅 1 笔提交 076b9f3（docs：todo.md 追加 3 行，即上一轮 1d526c80..HEAD 的审核结论落盘，含 1 项后续被本行发现的事实性不一致），纯文档无任何代码/配置改动。本轮复核：git log/diff --stat 确认区间内仅此一笔且只触及 todo.md；交叉验证了 076b9f3 结论中的事实主张——dc50e56 提交存在且为 docs（todo.md 追加 3 行）、1d526c8 提交存在且为 docs、5 笔被引修复（c0ab9bb/c401e34/2d38125/b636a2d/89db63c）均在仓库历史中、3 项回归测试 file:line（c0ab9bb/services/collector/src/main_simple.rs:1450、c401e34/services/data-engine/src/main.rs:2754、b636a2d/packages/core/src/indicators.rs:261）逐条比对源码属实，无虚假记载；唯一发现（区间计数自相矛盾）已由本行上方修正。无安全/正确性/测试缺口可提。（核实：076b9f3；todo.md:203-208）
+
+## 漏洞扫描遗留（2026-11-03 全舰队扫描，源 scratch/vuln-scan-*.md）
+
+- [ ] VULN-ALPHA-001 [中危·RUSTSEC-2024-0363] sqlx 0.7.4→0.8.1【跨大版本需改代码】：一次消除 sqlx 自身 + rustls 0.21.12（0346/0349）+ rustls-webpki 0.101.7（0098/0099/0104/0382）+ webpki-roots 0.25.4（0381）共 8 个 RUSTSEC ID；验收：cargo audit 中上述 8 个 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿
+- [ ] VULN-ALPHA-002 [低危·RUSTSEC-2026-0258] h2 0.3.27→0.4【跨大版本需改代码】：hyper 0.14/axum 0.6/tonic 0.10 生态锁定，需 tonic 0.10→≥0.11（连带 axum 0.6→0.7、hyper 0.14→1.x）；验收：cargo audit 该 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿
+- [ ] VULN-ALPHA-003 [高危 7.5·RUSTSEC-2026-0435] thrift 0.17.0→0.23【跨大版本需改代码】：由 parquet 50/datafusion 35 引入，需升 arrow 生态；验收：cargo audit 该 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿
+- [ ] VULN-ALPHA-004 [低危 3.8·RUSTSEC-2024-0358] object_store 0.9.1→0.10【跨大版本需改代码】：datafusion 35 引入；验收：cargo audit 该 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿
+- [ ] VULN-ALPHA-005 [中危·RUSTSEC-2026-0387] crypto-bigint 0.5.5→0.7.6+【跨大版本需改代码】：由 elliptic-curve 0.13/p256 或 rsa 0.9 锁定，走 p256/jsonwebtoken 升级路径；验收：cargo audit 该 ID 清零 + cargo test --workspace --exclude alpha-desktop 绿
+- [ ] VULN-ALPHA-006 [BLOCKED·上游无修复·中危 5.9·RUSTSEC-2023-0071] rsa 0.9.10（经 sqlx-mysql/jsonwebtoken 引入）：RUSTSEC patched 为空，等上游发布或对 JWT 换纯 ECDSA/P-256 校验路径；不勾，验收：上游出 patched 或换库后 cargo audit 该 ID 清零
