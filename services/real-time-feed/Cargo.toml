@@ -24,7 +24,7 @@ tracing-subscriber = { workspace = true }
 
 # 指标（/metrics Prometheus 文本面）
 metrics = { workspace = true }
-metrics-exporter-prometheus = "0.13"
+metrics-exporter-prometheus = { version = "0.18", default-features = false, features = ["http-listener"] }
 
 # 广播通道
 tokio-stream = "0.1"

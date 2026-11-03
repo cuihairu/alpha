@@ -42,7 +42,7 @@ tracing-subscriber = { workspace = true }
 
 # 指标（/metrics Prometheus 文本面）
 metrics = { workspace = true }
-metrics-exporter-prometheus = "0.13"
+metrics-exporter-prometheus = { version = "0.18", default-features = false, features = ["http-listener"] }
 
 # 时间
 chrono = { workspace = true }
@@ -52,7 +52,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 
 # HTTP 客户端
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12", features = ["json"] }
 
 # WebSocket 反代上游客户端
 tokio-tungstenite = "0.21"
