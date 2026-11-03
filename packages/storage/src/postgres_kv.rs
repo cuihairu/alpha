@@ -58,7 +58,7 @@ impl PostgresKvStorage {
             "CREATE TABLE IF NOT EXISTS {table} (key TEXT PRIMARY KEY, value BYTEA NOT NULL, expires_at TIMESTAMPTZ NULL);",
             table = self.table
         );
-        sqlx::query(&ddl)
+        sqlx::query(sqlx::AssertSqlSafe(ddl.as_str()))
             .execute(&self.pool)
             .await
             .map_err(|e| AlphaError::StorageError(format!("Postgres schema init failed: {e}")))?;
@@ -67,7 +67,7 @@ impl PostgresKvStorage {
             "CREATE INDEX IF NOT EXISTS {table}_expires_at_idx ON {table}(expires_at);",
             table = self.table
         );
-        sqlx::query(&index_ddl)
+        sqlx::query(sqlx::AssertSqlSafe(index_ddl.as_str()))
             .execute(&self.pool)
             .await
             .map_err(|e| AlphaError::StorageError(format!("Postgres index init failed: {e}")))?;
@@ -93,7 +93,7 @@ impl StorageBackend for PostgresKvStorage {
             table = self.table
         );
 
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(key)
             .bind(value)
             .bind(ttl)
@@ -113,7 +113,7 @@ impl StorageBackend for PostgresKvStorage {
             table = self.table
         );
 
-        let row = sqlx::query_scalar::<_, Vec<u8>>(&sql)
+        let row = sqlx::query_scalar::<_, Vec<u8>>(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(key)
             .fetch_optional(&self.pool)
             .await
@@ -124,7 +124,7 @@ impl StorageBackend for PostgresKvStorage {
 
     async fn delete(&self, key: &str) -> AlphaResult<bool> {
         let sql = format!("DELETE FROM {table} WHERE key = $1", table = self.table);
-        let res = sqlx::query(&sql)
+        let res = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(key)
             .execute(&self.pool)
             .await
@@ -142,7 +142,7 @@ impl StorageBackend for PostgresKvStorage {
             "#,
             table = self.table
         );
-        let exists = sqlx::query_scalar::<_, bool>(&sql)
+        let exists = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(key)
             .fetch_one(&self.pool)
             .await
@@ -161,7 +161,7 @@ impl StorageBackend for PostgresKvStorage {
             "#,
             table = self.table
         );
-        let keys = sqlx::query_scalar::<_, String>(&sql)
+        let keys = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(like)
             .fetch_all(&self.pool)
             .await
@@ -171,7 +171,7 @@ impl StorageBackend for PostgresKvStorage {
 
     async fn clear(&self) -> AlphaResult<()> {
         let sql = format!("TRUNCATE TABLE {table}", table = self.table);
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .execute(&self.pool)
             .await
             .map_err(|e| AlphaError::StorageError(format!("Postgres clear failed: {e}")))?;
