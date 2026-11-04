@@ -8,6 +8,7 @@ use base64::Engine as _;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
+use subtle::ConstantTimeEq;
 
 pub type HmacSha256 = Hmac<Sha256>;
 
@@ -121,11 +122,7 @@ pub fn decode_header(token: &str) -> Result<Header, ()> {
 }
 
 /// 签发 JWT（HS256）。
-pub fn encode<T: Serialize>(
-    header: &Header,
-    claims: &T,
-    key: &EncodingKey,
-) -> Result<String, ()> {
+pub fn encode<T: Serialize>(header: &Header, claims: &T, key: &EncodingKey) -> Result<String, ()> {
     let mut h = serde_json::json!({
         "alg": "HS256",
         "typ": "JWT",
@@ -142,7 +139,11 @@ pub fn encode<T: Serialize>(
 }
 
 /// 校验并解码 JWT（HS256），验证 exp/iss/aud。
-pub fn decode(token: &str, key: &DecodingKey, validation: &Validation) -> Result<serde_json::Value, ()> {
+pub fn decode(
+    token: &str,
+    key: &DecodingKey,
+    validation: &Validation,
+) -> Result<serde_json::Value, ()> {
     let mut parts = token.split('.');
     let header_b64 = parts.next().ok_or(())?;
     let claims_b64 = parts.next().ok_or(())?;
@@ -159,17 +160,22 @@ pub fn decode(token: &str, key: &DecodingKey, validation: &Validation) -> Result
     let signing_input = format!("{header_b64}.{claims_b64}");
     let expected = hmac_sign(&key.secret, signing_input.as_bytes())?;
     let sig = b64url_decode(sig_b64)?;
-    if expected != sig {
+    // 恒定时间比较：不因签名前缀匹配长度而泄露响应时序（jsonwebtoken 同款语义）
+    if !bool::from(expected.ct_eq(&sig)) {
         return Err(());
     }
 
     let claims_bytes = b64url_decode(claims_b64)?;
     let value: serde_json::Value = serde_json::from_slice(&claims_bytes).map_err(|_| ())?;
+    // required_spec_claims：声明即强制存在，与 validate_exp 开关正交
+    // （jsonwebtoken 语义一致，杜绝「validate_exp=false 时静默不校验」的死配置）
+    for claim in &validation.required_spec_claims {
+        if value.get(claim).is_none() {
+            return Err(());
+        }
+    }
     if validation.validate_exp {
-        let exp = value
-            .get("exp")
-            .and_then(|v| v.as_i64())
-            .ok_or(())?;
+        let exp = value.get("exp").and_then(|v| v.as_i64()).ok_or(())?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -185,10 +191,104 @@ pub fn decode(token: &str, key: &DecodingKey, validation: &Validation) -> Result
         }
     }
     if let Some(aud) = &validation.aud {
-        let token_aud = value.get("aud").and_then(|v| v.as_str()).ok_or(())?;
-        if !aud.iter().any(|a| a == token_aud) {
+        // RFC 7519 §4.1.3：aud 可为字符串或字符串数组；任一成员命中即通过。
+        let token_auds = match value.get("aud") {
+            Some(v) => match v {
+                serde_json::Value::String(s) => vec![s.as_str()],
+                serde_json::Value::Array(arr) => {
+                    let mut out = Vec::with_capacity(arr.len());
+                    for item in arr {
+                        match item.as_str() {
+                            Some(s) => out.push(s),
+                            None => return Err(()),
+                        }
+                    }
+                    out
+                }
+                _ => return Err(()),
+            },
+            None => return Err(()),
+        };
+        if !aud.iter().any(|a| token_auds.iter().any(|t| a == t)) {
             return Err(());
         }
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECRET: &[u8] = b"test-secret-please-ignore";
+
+    fn enc<T: Serialize>(claims: &T) -> String {
+        encode(
+            &Header::new(Algorithm::HS256),
+            claims,
+            &EncodingKey::from_secret(SECRET),
+        )
+        .unwrap()
+    }
+
+    fn val() -> Validation {
+        let mut v = Validation::new(Algorithm::HS256);
+        v.validate_exp = true;
+        v.required_spec_claims.push("exp".to_string());
+        v
+    }
+
+    fn dec(token: &str) -> Result<serde_json::Value, ()> {
+        decode(token, &DecodingKey::from_secret(SECRET), &val())
+    }
+
+    #[test]
+    fn alg_none_rejected() {
+        // 头声称 alg=none，签名仍用 HS256 密钥计算——decode 必须因算法不符拒绝
+        let h = b64url_encode(b"{\"alg\":\"none\",\"typ\":\"JWT\"}");
+        let c = b64url_encode(b"{\"sub\":\"u\",\"exp\":9999999999}");
+        let sig = b64url_encode(&hmac_sign(SECRET, format!("{h}.{c}").as_bytes()).unwrap());
+        assert!(decode(
+            &format!("{h}.{c}.{sig}"),
+            &DecodingKey::from_secret(SECRET),
+            &val()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn extra_segment_rejected() {
+        let t = enc(&serde_json::json!({"sub":"u","exp":9999999999_i64}));
+        assert!(dec(&format!("{t}.extra")).is_err());
+    }
+
+    #[test]
+    fn empty_signature_rejected() {
+        let t = enc(&serde_json::json!({"sub":"u","exp":9999999999_i64}));
+        let base = t.rsplit_once('.').unwrap().0;
+        assert!(dec(&format!("{base}.")).is_err());
+    }
+
+    #[test]
+    fn aud_array_accepted() {
+        let mut v = val();
+        v.set_audience(&["my-client"]);
+        let t = enc(&serde_json::json!({"aud":["other","my-client"],"exp":9999999999_i64}));
+        assert!(decode(t.as_str(), &DecodingKey::from_secret(SECRET), &v).is_ok());
+    }
+
+    #[test]
+    fn missing_exp_rejected_by_required_spec_claims() {
+        let t = enc(&serde_json::json!({"sub":"u"}));
+        assert!(dec(&t).is_err());
+    }
+
+    #[test]
+    fn constant_time_compare_rejects_different() {
+        let t = enc(&serde_json::json!({"sub":"u","exp":9999999999_i64}));
+        let mut tampered = t.clone();
+        let last = tampered.pop().unwrap();
+        tampered.push(if last == 'a' { 'b' } else { 'a' });
+        assert!(dec(&tampered).is_err());
+    }
 }

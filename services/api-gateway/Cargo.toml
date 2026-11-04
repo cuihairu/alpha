@@ -61,6 +61,8 @@ futures-util = "0.3"
 # JWT 认证（纯 HMAC-SHA256 实现，避免 p256/rsa 生态——见 auth.rs）
 hmac = "0.12"
 sha2 = "0.10"
+# 恒定时间签名比对（侧信道防护，替代 Vec<u8> 逐字节短路比较）
+subtle = "2"
 # OIDC JWKS oct 键的 base64url 解码（RFC 7517，L502 接线）
 base64 = { workspace = true }
 

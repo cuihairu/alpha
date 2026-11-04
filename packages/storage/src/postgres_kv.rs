@@ -31,6 +31,25 @@ impl PostgresKvStorage {
         max_connections: Option<u32>,
         default_ttl_seconds: Option<u64>,
     ) -> AlphaResult<Self> {
+        // 表名进 SQL 标识符（经 AssertSqlSafe 关闭 sqlx 静态检查），必须在入口
+        // 收紧为可信标识符：仅小写字母/数字/下划线，首字符非数字。当前调用方传
+        // 常量（"alpha_kv"/"alpha_accounts"/测试 UUID），此校验防未来配置化输入
+        // 成为注入点，且不破坏现有调用。
+        let mut chars = table.chars();
+        let first = chars
+            .next()
+            .ok_or_else(|| AlphaError::StorageError("empty table name".to_string()))?;
+        if !(first.is_ascii_lowercase() || first == '_') {
+            return Err(AlphaError::StorageError(format!(
+                "invalid table name: {table}"
+            )));
+        }
+        if !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+            return Err(AlphaError::StorageError(format!(
+                "invalid table name: {table}"
+            )));
+        }
+
         let mut opts = PgPoolOptions::new();
         if let Some(max) = max_connections {
             opts = opts.max_connections(max);
