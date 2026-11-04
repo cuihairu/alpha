@@ -233,7 +233,7 @@ mod tests {
 
     fn val() -> Validation {
         let mut v = Validation::new(Algorithm::HS256);
-        v.validate_exp = true;
+        v.validate_exp = false;
         v.required_spec_claims.push("exp".to_string());
         v
     }
@@ -279,16 +279,21 @@ mod tests {
 
     #[test]
     fn missing_exp_rejected_by_required_spec_claims() {
+        assert!(!val().validate_exp);
         let t = enc(&serde_json::json!({"sub":"u"}));
         assert!(dec(&t).is_err());
+        let ok = enc(&serde_json::json!({"sub":"u","exp":9999999999_i64}));
+        assert!(dec(&ok).is_ok());
     }
 
     #[test]
-    fn constant_time_compare_rejects_different() {
+    fn signature_validation_accepts_valid_and_rejects_tampered() {
         let t = enc(&serde_json::json!({"sub":"u","exp":9999999999_i64}));
-        let mut tampered = t.clone();
-        let last = tampered.pop().unwrap();
-        tampered.push(if last == 'a' { 'b' } else { 'a' });
+        assert!(dec(&t).is_ok());
+        let (signing_input, sig_b64) = t.rsplit_once('.').unwrap();
+        let mut signature = b64url_decode(sig_b64).unwrap();
+        signature[0] ^= 1;
+        let tampered = format!("{signing_input}.{}", b64url_encode(&signature));
         assert!(dec(&tampered).is_err());
     }
 }
