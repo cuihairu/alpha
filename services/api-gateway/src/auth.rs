@@ -10,8 +10,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use alpha_core::errors::{AlphaError, AlphaResult};
 use crate::jwt::{decode_header, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use alpha_core::errors::{AlphaError, AlphaResult};
 use serde::{Deserialize, Serialize};
 
 /// 访问令牌声明（自签与 OIDC 统一子集：sub/exp/iat/scope/roles）
@@ -255,10 +255,7 @@ pub fn verify_any(
     token: &str,
 ) -> AlphaResult<Claims> {
     if let Some(store) = jwks {
-        let has_kid = decode_header(token)
-            .ok()
-            .and_then(|h| h.kid)
-            .is_some();
+        let has_kid = decode_header(token).ok().and_then(|h| h.kid).is_some();
         if has_kid {
             return verify_oidc_token(
                 store,
