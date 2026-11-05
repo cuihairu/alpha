@@ -245,3 +245,4 @@
 
 ## 审核发现（4b15461d185c95463a0a8358c59c5c7f3707d8aa..e03a108b7ee9c008d7aa590ff2a69cb1740d523e 只审不改）
 - [x] 审核发现：e03a108 提交信息「docs: relocate 9d2e116..6da182f audit block」仅描述区块搬迁，但该提交（git show e03a108 --numstat = 3 插入 0 删除，仅 todo.md）除新建 9d2e116..6da182f 区块标题行（todo.md:238）外还向 6da182f..caec9bd 区块追加一条新审核发现（todo.md:244），提交内容超出提交信息所述范围，属提交内容与信息描述不一致。已核实属实；因 e03a108 已推送至 origin/main（git branch -r --contains e03a108）且禁改写历史/force push，无法修改该提交信息，故在台账记录并接受此不一致（git show e03a108 --stat = 3 插入 0 删除仅 todo.md，含新区块标题行与新审核发现行；git show e03a108 确认新区块标题与 line 244 追加同处一并落地）。（修正：本行记录；todo.md:246-247）
+- [x] 审核发现：本轮 diff 未见问题（e03a108b..5bee3f6）。区间仅 1 笔提交 5bee3f6（todo: verify and tick e03a108 audit finding），只改 todo.md 审核台账（3+0），无生产代码/依赖/配置改动；已交叉验证：git rev-list --count e03a108b..5bee3f6 = 1、5bee3f6 父提交 = e03a108b（与区间下界一致），git diff --check 无空白错误，工作区除本台账外无未提交改动，无越权修改；本行区间上界已固定为 5bee3f6（避免结论提交自身使 ..HEAD 计数漂移）。审核通过，无需改动。（核实：5bee3f6；git rev-list/diff --check；todo.md:246-248）
