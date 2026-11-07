@@ -261,3 +261,34 @@
 - [x] 审核发现：结论行以「46c9ef22..HEAD」标注区间、主张上界已固定为 463f5df，且称「git rev-list --count 46c9ef22..HEAD = 1（清单：463f5df）」，但 46c9ef22..b1d2379 实为 2 笔（git rev-list --count 46c9ef22..b1d2379 = 2，清单：463f5df、b1d2379；b1d2379 父提交 = 463f5df）；该计数主张仅对 46c9ef22..463f5df 成立（=1），与「..HEAD 含结论自身致计数漂移」缺陷同类复发（todo.md:236、242、254 已发现并修复）。已核实属实并修复：上方结论行区间已固定为 46c9ef22..463f5df、计数主张改为 1（git rev-list --count 46c9ef22..463f5df = 1，仅 463f5df；463f5df 父提交 = 46c9ef22，与区间下界一致）。（修正：本行；todo.md 本行上方结论行）
 - [x] 审核发现：新增记录称当前 46c9ef22..HEAD 共 2 笔提交，但该区间还包含记录自身所在的 aee8dfa，实际共 3 笔，计数及清单失准（todo.md:261）。已核实属实并修复：上方结论行计数主张改为固定区间 46c9ef22..b1d2379 = 2（git rev-list --count 46c9ef22..b1d2379 = 2，清单：463f5df、b1d2379；b1d2379 父提交 = 463f5df），避免 ..HEAD 含后续提交 aee8dfa 致计数漂移；46c9ef22..aee8dfa = 3（aee8dfa、b1d2379、463f5df）。（修正：本行；todo.md:261）
 - [x] 审核发现：新增记录称当前 46c9ef22..HEAD 为 3 笔，但该区间还包含该记录所在的 6e348e3，实际为 4 笔，计数与清单失准（todo.md:262）。已核实属实并修复：该易漂移的「当前」计数改为固定区间 46c9ef22..aee8dfa = 3（aee8dfa、b1d2379、463f5df；aee8dfa 父提交 = b1d2379）；在 6e348e3 提交树中，git rev-list --count 46c9ef22..6e348e3 = 4（清单：6e348e3、aee8dfa、b1d2379、463f5df），原「当前 = 3」确实失准。（修正：本行上方相邻记录；git rev-list --count/--oneline 46c9ef22..6e348e3）
+## 源码分层分析 2026-11-07
+
+基于 HEAD `f59d8d53970b96ad147e6e38e5219fb73aa78fa2` 的源码证据归纳；实现口径详见 `docs/source-layer-analysis.md` 与 `docs/source-layer-glossary.md`。
+
+### 抽象层清单
+
+- L01 协议与共享领域模型——固化 REST/WS/事件/gRPC/instrument 合同与跨端行情、指标、回测、风控模型；代表模块 `packages/protocols/src/lib.rs:5`、`packages/core/src/lib.rs:6`。
+- L02 存储与基础设施——抽象 Memory/Redis/Postgres/ClickHouse/S3/本地文件，并提供队列、限流、加密、KV 与 Parquet 湖；代表模块 `packages/storage/src/lib.rs:10`。
+- L03 采集与数据摄入——装载模板、执行 HTTP/脚本、清洗与限流、观察源健康、归档原始证据并发布摄入流；代表模块 `services/collector/src/main_simple.rs:56`。
+- L04 流处理与计算服务——消费摄入流、规范行情、执行指标/SQL/绩效计算并写入 Timescale、ClickHouse 和 Parquet；代表模块 `services/data-engine/src/main.rs:245`。
+- L05 传播、安全与外部出口——统一 REST/WS 边界，执行认证、防滥用、限流、代理、账户同步、实时扇出和告警发送；代表模块 `services/api-gateway/src/main.rs:151`、`services/real-time-feed/src/main.rs:94`。
+- L06 终端运行时——组装 Web、desktop、mobile、WASM 的状态、本地持久化、平台桥、展示与浏览器引擎；代表模块 `web/app/src/App.tsx:33`、`desktop/src/state.rs:15`、`mobile/src/state.rs:23`。
+- L07 运维与交付——提供容器、观测、告警、合规、构建和发布入口，作为服务配置与可观测出口；代表模块 `docker-compose.yml:14`、`config/prometheus.yml:1`。
+
+### 超大文件候选
+
+- [ ] LAY-001 [P1] 拆分 services/data-engine/src/main.rs（3489 行）——启动装配、Redis 消费与 DLQ、DataFusion/湖注册、ClickHouse 导出、行情/指标/绩效路由和测试挤在同一 binary，天然边界已在 738/811/1349/1639 行分开。（services/data-engine/src/main.rs:190）
+- [ ] LAY-002 [P1] 拆分 services/api-gateway/src/main.rs（3003 行）——CLI/env 装配、JWKS 刷新、shield/auth/rate-limit 中间件、代理、账户处理器与测试混在一个入口；账户语义已有独立 `account.rs`，其余横切与路由仍可分层。（services/api-gateway/src/main.rs:64）
+- [ ] LAY-003 [P1] 拆分 services/collector/src/main_simple.rs（1489 行）——`SimpleCollector` 状态、执行链、Redis 发布、cron 装配、HTTP API 与 SSE 事件同文件，任务定义、raw archive、health 已各自存在，执行与路由适合独立模块。（services/collector/src/main_simple.rs:56）
+- [ ] LAY-004 [P1] 拆分 services/real-time-feed/src/main.rs（1146 行）——连接管理、业务告警窗口、版本化同步、Redis 消费/认领/DLQ、WS handler 和观测处理器集中在一个进程入口。（services/real-time-feed/src/main.rs:94）
+- [ ] LAY-005 [P1] 拆分 packages/core/src/account.rs（1182 行）——档案、ID/key 校验、同步计划/冲突裁决、请求响应协议和客户端 SyncState 生命周期在同一模块，前 643 行是类型/纯逻辑、655 行起主要是测试。（packages/core/src/account.rs:100）
+- [ ] LAY-006 [P1] 拆分 packages/storage/src/diagnosis.rs（1016 行）——诊断仓库同时承载采集器、数据库、文件等诊断 schema 与仓库聚合；文件内测试也使运行面和验证面难以独立评审。（packages/storage/src/diagnosis.rs:1）
+- [ ] LAY-007 [P2] 拆分 services/collector/src/types.rs（1121 行）——核心任务/请求/解析/存储类型从 52 行延伸到 637 行，而 857 行后是加密货币、外汇、商品、债券、基金、新闻、社媒、公告、ESG、研究等未接主链的领域枚举，宜按域拆分。（services/collector/src/types.rs:52）
+- [ ] LAY-008 [P2] 拆分 services/collector/src/task_templates.rs（1047 行）——模板 error、TaskTemplate/Parser/Storage schema、校验转换和大量测试同文件；44–167 行是配置契约，288 行起是转换逻辑，适合 schema 与 loader 分离。（services/collector/src/task_templates.rs:44）
+
+### 分类不合理处
+
+- `services/collector/src/types.rs:857` 起的加密货币、外汇、商品、债券、基金、新闻、社媒、公告、ESG、研究枚举集中放在通用任务类型文件，但当前主执行链只消费 A 股与新闻入口；应先拆域类型，接入时再落实现，避免通用 schema 预膨胀。
+
+## 审核发现（6e348e31..f59d8d5 只审不改）
+- [x] 审核发现：本轮 diff 未见问题（6e348e31..f59d8d5）。区间仅 1 笔提交 f59d8d5（todo: fix drift-prone HEAD count in 46c9ef22 audit record），只改 todo.md 审核台账（2+1），纯文档无代码/配置改动；已交叉验证：git rev-list --count 6e348e31..f59d8d5 = 1（清单：f59d8d5）、f59d8d5 父提交 = 6e348e31（与区间下界一致）、git diff --stat/--name-only 确认仅触及 todo.md、git diff --check 无空白错误，无越权修改；本行区间上界固定为 f59d8d5，且已移出错误的 46c9ef22..463f5df 区块。（核实：f59d8d5；git rev-list/diff --stat/--name-only/--check；cargo test --workspace --all-targets --exclude alpha-desktop = 633 passed, 0 failed, 4 ignored）
