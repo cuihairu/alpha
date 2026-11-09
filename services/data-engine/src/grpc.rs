@@ -10,7 +10,8 @@ use alpha_protocols::proto::data_engine::{
 };
 use tonic::{async_trait, transport::Server, Request, Response, Status};
 
-use crate::{calculate_performance_metrics, fetch_points, AppState};
+use crate::market_routes::{calculate_performance_metrics, fetch_points};
+use crate::AppState;
 
 pub async fn serve_grpc(addr: SocketAddr, state: Arc<AppState>) -> anyhow::Result<()> {
     let svc = DataEngineGrpc { state };
