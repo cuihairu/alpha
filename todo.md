@@ -278,7 +278,7 @@
 ### 超大文件候选
 
 - [x] LAY-001 [P1] 拆分 services/data-engine/src/main.rs（3489 行）——按天然边界拆为 bootstrap（存储装配 738-809）/normalizer（Redis 消费与 DLQ、镜像补写、湖维护、运维端点 811-1310）/exports（ClickHouse 导出 1312-1587）/market_routes（行情/指标/绩效路由+测试 1589-3489），main.rs 留启动装配与路由组装（736 行）；纯搬移行为不变，条目核对 0 丢失 0 重复（3213294；workspace clippy 0 lint、633 过 0 败，data-engine 52+1 与拆分前一致；services/data-engine/src/main.rs:66）
-- [ ] LAY-002 [P1] 拆分 services/api-gateway/src/main.rs（3003 行）——CLI/env 装配、JWKS 刷新、shield/auth/rate-limit 中间件、代理、账户处理器与测试混在一个入口；账户语义已有独立 `account.rs`，其余横切与路由仍可分层。（services/api-gateway/src/main.rs:64）
+- [x] LAY-002 [P1] 拆分 services/api-gateway/src/main.rs（3003 行）——按职责分层拆为 middleware（身份识别 + shield/auth/rate-limit 中间件 + 请求日志，312 行）/proxy（REST/WS 反代与逐跳头过滤，314 行）/routes（健康聚合、指标、账户档案/sync、token 签发，310 行）/tests（全量测试模块，1677 行），main.rs 留 CLI/env 装配、GatewayState、JWKS 刷新与路由组装（435 行）；纯搬移行为不变，条目核对 0 丢失 0 重复（bb58a7f；workspace clippy 0 lint、633 过 0 败与拆分前一致，api-gateway 70 过 0 败；services/api-gateway/src/main.rs:64）
 - [ ] LAY-003 [P1] 拆分 services/collector/src/main_simple.rs（1489 行）——`SimpleCollector` 状态、执行链、Redis 发布、cron 装配、HTTP API 与 SSE 事件同文件，任务定义、raw archive、health 已各自存在，执行与路由适合独立模块。（services/collector/src/main_simple.rs:56）
 - [ ] LAY-004 [P1] 拆分 services/real-time-feed/src/main.rs（1146 行）——连接管理、业务告警窗口、版本化同步、Redis 消费/认领/DLQ、WS handler 和观测处理器集中在一个进程入口。（services/real-time-feed/src/main.rs:94）
 - [ ] LAY-005 [P1] 拆分 packages/core/src/account.rs（1182 行）——档案、ID/key 校验、同步计划/冲突裁决、请求响应协议和客户端 SyncState 生命周期在同一模块，前 643 行是类型/纯逻辑、655 行起主要是测试。（packages/core/src/account.rs:100）
