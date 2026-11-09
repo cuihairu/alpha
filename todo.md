@@ -277,7 +277,7 @@
 
 ### 超大文件候选
 
-- [ ] LAY-001 [P1] 拆分 services/data-engine/src/main.rs（3489 行）——启动装配、Redis 消费与 DLQ、DataFusion/湖注册、ClickHouse 导出、行情/指标/绩效路由和测试挤在同一 binary，天然边界已在 738/811/1349/1639 行分开。（services/data-engine/src/main.rs:190）
+- [x] LAY-001 [P1] 拆分 services/data-engine/src/main.rs（3489 行）——按天然边界拆为 bootstrap（存储装配 738-809）/normalizer（Redis 消费与 DLQ、镜像补写、湖维护、运维端点 811-1310）/exports（ClickHouse 导出 1312-1587）/market_routes（行情/指标/绩效路由+测试 1589-3489），main.rs 留启动装配与路由组装（736 行）；纯搬移行为不变，条目核对 0 丢失 0 重复（3213294；workspace clippy 0 lint、633 过 0 败，data-engine 52+1 与拆分前一致；services/data-engine/src/main.rs:66）
 - [ ] LAY-002 [P1] 拆分 services/api-gateway/src/main.rs（3003 行）——CLI/env 装配、JWKS 刷新、shield/auth/rate-limit 中间件、代理、账户处理器与测试混在一个入口；账户语义已有独立 `account.rs`，其余横切与路由仍可分层。（services/api-gateway/src/main.rs:64）
 - [ ] LAY-003 [P1] 拆分 services/collector/src/main_simple.rs（1489 行）——`SimpleCollector` 状态、执行链、Redis 发布、cron 装配、HTTP API 与 SSE 事件同文件，任务定义、raw archive、health 已各自存在，执行与路由适合独立模块。（services/collector/src/main_simple.rs:56）
 - [ ] LAY-004 [P1] 拆分 services/real-time-feed/src/main.rs（1146 行）——连接管理、业务告警窗口、版本化同步、Redis 消费/认领/DLQ、WS handler 和观测处理器集中在一个进程入口。（services/real-time-feed/src/main.rs:94）
@@ -292,3 +292,4 @@
 
 ## 审核发现（6e348e31..f59d8d5 只审不改）
 - [x] 审核发现：本轮 diff 未见问题（6e348e31..f59d8d5）。区间仅 1 笔提交 f59d8d5（todo: fix drift-prone HEAD count in 46c9ef22 audit record），只改 todo.md 审核台账（2+1），纯文档无代码/配置改动；已交叉验证：git rev-list --count 6e348e31..f59d8d5 = 1（清单：f59d8d5）、f59d8d5 父提交 = 6e348e31（与区间下界一致）、git diff --stat/--name-only 确认仅触及 todo.md、git diff --check 无空白错误，无越权修改；本行区间上界固定为 f59d8d5，且已移出错误的 46c9ef22..463f5df 区块。（核实：f59d8d5；git rev-list/diff --stat/--name-only/--check；cargo test --workspace --all-targets --exclude alpha-desktop = 633 passed, 0 failed, 4 ignored）
+
