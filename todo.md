@@ -293,3 +293,7 @@
 ## 审核发现（6e348e31..f59d8d5 只审不改）
 - [x] 审核发现：本轮 diff 未见问题（6e348e31..f59d8d5）。区间仅 1 笔提交 f59d8d5（todo: fix drift-prone HEAD count in 46c9ef22 audit record），只改 todo.md 审核台账（2+1），纯文档无代码/配置改动；已交叉验证：git rev-list --count 6e348e31..f59d8d5 = 1（清单：f59d8d5）、f59d8d5 父提交 = 6e348e31（与区间下界一致）、git diff --stat/--name-only 确认仅触及 todo.md、git diff --check 无空白错误，无越权修改；本行区间上界固定为 f59d8d5，且已移出错误的 46c9ef22..463f5df 区块。（核实：f59d8d5；git rev-list/diff --stat/--name-only/--check；cargo test --workspace --all-targets --exclude alpha-desktop = 633 passed, 0 failed, 4 ignored）
 
+- [ ] 审核发现：本轮 diff 未见问题（bf8ca1a3..HEAD）。
+
+## 审核发现（dc15b63dc2..bf8ca1a3bf5dc985f3d59527c53671a5e66b6f5f 只审不改）
+- [x] 审核发现：本轮 diff 未见问题（dc15b63dc2..bf8ca1a3bf5，区间上界钉为 bf8ca1a）。区间仅 1 笔提交 bf8ca1a（build: bump fast-uri and serialize-javascript overrides），只改 docs/pnpm-lock.yaml + docs/pnpm-workspace.yaml（697+/697- 对称：workspace overrides 两处 bump + lock 重生成），纯依赖清单无代码/配置改动；已交叉验证：git rev-list --count dc15b63dc2..bf8ca1a3bf5 = 1（清单：bf8ca1a）、git diff --name-only 仅上述两文件、git diff --check 无空白错误、pnpm install --frozen-lockfile 解析通过（overrides 与 lock 一致）、docs pnpm build 全绿（Server/Client 编译 + 静态产物）；本行原文 `..HEAD` 为漂移面，已按 f59d8d5 先例钉死上界。（核实：bf8ca1a；git rev-list/diff --name-only/diff --check；pnpm install --frozen-lockfile + pnpm build；cargo test --workspace --all-targets --exclude alpha-desktop = 633 passed, 0 failed）
