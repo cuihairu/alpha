@@ -589,7 +589,8 @@ mod tests {
         let missing_price = serde_json::json!({"symbol": "sh600000", "volume": 1u64});
         assert!(normalize_quote(&quote_envelope(missing_price)).is_none());
         // price 非数值
-        let price_not_f64 = serde_json::json!({"symbol": "sh600000", "price": "12.5", "volume": 1u64});
+        let price_not_f64 =
+            serde_json::json!({"symbol": "sh600000", "price": "12.5", "volume": 1u64});
         assert!(normalize_quote(&quote_envelope(price_not_f64)).is_none());
         // 缺 volume
         let missing_volume = serde_json::json!({"symbol": "sh600000", "price": 1.0});
@@ -597,7 +598,8 @@ mod tests {
         // volume 非非负整数（负数/小数 as_u64 均失败）
         let volume_negative = serde_json::json!({"symbol": "sh600000", "price": 1.0, "volume": -5});
         assert!(normalize_quote(&quote_envelope(volume_negative)).is_none());
-        let volume_fractional = serde_json::json!({"symbol": "sh600000", "price": 1.0, "volume": 1.5});
+        let volume_fractional =
+            serde_json::json!({"symbol": "sh600000", "price": 1.0, "volume": 1.5});
         assert!(normalize_quote(&quote_envelope(volume_fractional)).is_none());
     }
 
@@ -628,7 +630,10 @@ mod tests {
 
         assert_eq!(obj.get("symbol").and_then(|v| v.as_str()), Some("sh600000"));
         assert_eq!(obj.get("name").and_then(|v| v.as_str()), Some("浦发银行"));
-        assert_eq!(obj.get("change_percent").and_then(|v| v.as_f64()), Some(1.2));
+        assert_eq!(
+            obj.get("change_percent").and_then(|v| v.as_f64()),
+            Some(1.2)
+        );
         assert_eq!(obj.get("price").and_then(|v| v.as_f64()), Some(12.5));
         assert_eq!(obj.get("volume").and_then(|v| v.as_u64()), Some(12345));
         // 覆盖生效：bid 取规范化后的 bid1 值，不再是被污染的 99.0
