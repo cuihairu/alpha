@@ -463,11 +463,181 @@ impl StorageLayerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
 
     #[tokio::test]
     async fn test_storage_config_default() {
         let config = StorageConfig::default();
         assert_eq!(config.postgres.host, "localhost");
         assert_eq!(config.redis.url, "redis://localhost:6379");
+    }
+
+    fn sample_quote() -> RealtimeQuote {
+        RealtimeQuote {
+            symbol: "sh600000".to_string(),
+            name: "浦发银行".to_string(),
+            price: 12.5,
+            pre_close: 12.3,
+            open: 12.1,
+            high: 12.8,
+            low: 12.0,
+            volume: 100_000,
+            amount: 1_250_000.0,
+            change: 0.2,
+            change_percent: 1.63,
+            bid1: Some(12.49),
+            ask1: Some(12.51),
+            bid1_volume: Some(500),
+            ask1_volume: Some(600),
+            timestamp: Utc::now(),
+            source: "test".to_string(),
+        }
+    }
+
+    fn sample_kline() -> KlineData {
+        KlineData {
+            symbol: "sh600000".to_string(),
+            kline_type: crate::sources::KlineType::Min1,
+            timestamp: Utc::now().timestamp_millis(),
+            open: 12.1,
+            high: 12.8,
+            low: 12.0,
+            close: 12.5,
+            volume: 100_000,
+            amount: 1_250_000.0,
+            change_percent: 1.63,
+            change: 0.2,
+            turnover_rate: Some(0.5),
+        }
+    }
+
+    async fn disconnected_layer() -> StorageLayer {
+        // 双存储均禁用：new 不发起任何外部连接，池保持 None
+        let config = StorageConfig {
+            enable_timescale: false,
+            enable_redis: false,
+            ..StorageConfig::default()
+        };
+        StorageLayer::new(config).await.expect("禁用模式下构造必然成功")
+    }
+
+    #[test]
+    fn postgres_and_redis_config_defaults() {
+        let pg = PostgresConfig::default();
+        assert_eq!(pg.port, 5432);
+        assert_eq!(pg.database, "alpha_finance");
+        assert_eq!(pg.max_connections, 10);
+        let redis = RedisConfig::default();
+        assert_eq!(redis.default_ttl_seconds, 3600);
+        assert_eq!(redis.max_connections, 10);
+    }
+
+    #[test]
+    fn storage_config_serialization_roundtrip() {
+        let config = StorageConfig::default();
+        let json = serde_json::to_string(&config).expect("序列化成功");
+        let parsed: StorageConfig = serde_json::from_str(&json).expect("反序列化成功");
+        assert_eq!(parsed.postgres.host, config.postgres.host);
+        assert_eq!(parsed.enable_timescale, config.enable_timescale);
+    }
+
+    #[test]
+    fn storage_error_display_messages() {
+        assert_eq!(
+            StorageError::DatabaseError("boom".into()).to_string(),
+            "Database error: boom"
+        );
+        assert_eq!(
+            StorageError::ConnectionError("down".into()).to_string(),
+            "Connection error: down"
+        );
+        assert_eq!(
+            StorageError::SerializationError("bad json".into()).to_string(),
+            "Serialization error: bad json"
+        );
+        assert_eq!(
+            StorageError::RedisError("nope".into()).to_string(),
+            "Redis error: nope"
+        );
+        assert_eq!(
+            StorageError::NotFound("key".into()).to_string(),
+            "Not found: key"
+        );
+    }
+
+    #[tokio::test]
+    async fn disconnected_layer_has_no_pools_and_passes_health_check() {
+        let layer = disconnected_layer().await;
+        // 未启用即未连接：无池无客户端；无外部依赖可失败，健康检查恒通过
+        let healthy = layer.health_check().await;
+        assert!(healthy);
+    }
+
+    #[tokio::test]
+    async fn save_realtime_quote_requires_timescale_connection() {
+        let layer = disconnected_layer().await;
+        let err = layer
+            .save_realtime_quote(&sample_quote())
+            .await
+            .expect_err("未连接应报错");
+        assert!(matches!(err, StorageError::ConnectionError(_)));
+        assert_eq!(err.to_string(), "Connection error: TimescaleDB not connected");
+    }
+
+    #[tokio::test]
+    async fn save_realtime_quotes_batch_requires_timescale_connection() {
+        let layer = disconnected_layer().await;
+        let err = layer
+            .save_realtime_quotes(&[sample_quote(), sample_quote()])
+            .await
+            .expect_err("未连接应报错");
+        assert!(matches!(err, StorageError::ConnectionError(_)));
+    }
+
+    #[tokio::test]
+    async fn save_kline_requires_timescale_connection() {
+        let layer = disconnected_layer().await;
+        let err = layer
+            .save_kline(&sample_kline())
+            .await
+            .expect_err("未连接应报错");
+        assert!(matches!(err, StorageError::ConnectionError(_)));
+    }
+
+    #[tokio::test]
+    async fn init_schema_requires_timescale_connection() {
+        let layer = disconnected_layer().await;
+        let err = layer.init_schema().await.expect_err("未连接应报错");
+        assert!(matches!(err, StorageError::ConnectionError(_)));
+    }
+
+    #[tokio::test]
+    async fn cache_and_get_quote_require_redis_connection() {
+        let layer = disconnected_layer().await;
+        let cache_err = layer
+            .cache_realtime_quote(&sample_quote())
+            .await
+            .expect_err("未连接 Redis 应报错");
+        assert_eq!(cache_err.to_string(), "Connection error: Redis not connected");
+        let get_err = layer
+            .get_cached_quote("sh600000")
+            .await
+            .expect_err("未连接 Redis 应报错");
+        assert!(matches!(get_err, StorageError::ConnectionError(_)));
+    }
+
+    #[tokio::test]
+    async fn handle_wraps_layer_and_returns_arc_reference() {
+        let config = StorageConfig {
+            enable_timescale: false,
+            enable_redis: false,
+            ..StorageConfig::default()
+        };
+        let handle = StorageLayerHandle::new(config)
+            .await
+            .expect("句柄构造成功");
+        let layer = handle.get().await.expect("获取内部层成功");
+        let healthy = layer.health_check().await;
+        assert!(healthy);
     }
 }
