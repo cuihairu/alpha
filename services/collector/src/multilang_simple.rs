@@ -242,3 +242,252 @@ fn sanitize_filename(input: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{AShareDataSource, TaskSource};
+
+    fn a_share_task(id: &str) -> TaskDefinition {
+        TaskDefinition::new(
+            id,
+            TaskSource::AShare {
+                source: AShareDataSource::EastMoney,
+                symbols: vec!["000001".to_string()],
+            },
+            "多语言爬虫任务",
+        )
+    }
+
+    fn temp_workspace() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "alpha-crawler-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("创建临时工作目录");
+        dir
+    }
+
+    #[test]
+    fn crawler_language_maps_command_and_extension() {
+        assert_eq!(CrawlerLanguage::Python.command(), "python3");
+        assert_eq!(CrawlerLanguage::Python.extension(), "py");
+        assert_eq!(CrawlerLanguage::NodeJs.command(), "node");
+        assert_eq!(CrawlerLanguage::NodeJs.extension(), "js");
+        assert_eq!(CrawlerLanguage::Go.command(), "go");
+        assert_eq!(CrawlerLanguage::Go.extension(), "go");
+        assert_eq!(CrawlerLanguage::Rust.command(), "cargo");
+        assert_eq!(CrawlerLanguage::Rust.extension(), "rs");
+        assert_eq!(CrawlerLanguage::Shell.command(), "bash");
+        assert_eq!(CrawlerLanguage::Shell.extension(), "sh");
+    }
+
+    #[test]
+    fn default_config_uses_python_with_hour_timeout() {
+        let config = CrawlerConfig::default();
+        assert_eq!(config.language, CrawlerLanguage::Python);
+        assert_eq!(config.timeout, Some(3600));
+        assert_eq!(config.arguments, Vec::<String>::new());
+        assert!(config.script_path.is_none());
+        assert!(config.inline_code.is_none());
+    }
+
+    #[test]
+    fn sanitize_filename_keeps_only_safe_chars() {
+        assert_eq!(sanitize_filename("task-01_a"), "task-01_a");
+        assert_eq!(sanitize_filename("a/b\\c:d"), "a_b_c_d");
+        assert_eq!(sanitize_filename("中文 task"), "___task");
+        assert_eq!(sanitize_filename(""), "");
+    }
+
+    #[test]
+    fn parse_stdout_handles_json_object_array_and_fallback() {
+        assert_eq!(
+            parse_stdout_as_json_or_text(r#"{"price": 1.5}"#),
+            serde_json::json!({"price": 1.5})
+        );
+        assert_eq!(
+            parse_stdout_as_json_or_text("[1, 2]"),
+            serde_json::json!([1, 2])
+        );
+        // 伪 JSON 开头但解析失败 → 退回 text 包装
+        assert_eq!(
+            parse_stdout_as_json_or_text("{not json"),
+            serde_json::json!({"text": "{not json"})
+        );
+        assert_eq!(
+            parse_stdout_as_json_or_text("plain text output"),
+            serde_json::json!({"text": "plain text output"})
+        );
+        assert_eq!(parse_stdout_as_json_or_text("  \n\t "), serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn inline_bash_script_completes_with_json_data() {
+        let ws = temp_workspace();
+        let crawler = MultilangCrawler::new(&ws);
+        crawler.initialize().await.expect("初始化临时目录");
+
+        let mut config = CrawlerConfig {
+            language: CrawlerLanguage::Shell,
+            inline_code: Some(r#"echo '{"price": 10.5, "symbol": "sh600000"}'"#.to_string()),
+            ..CrawlerConfig::default()
+        };
+        config.timeout = Some(30);
+        let result = crawler
+            .execute_crawler(&a_share_task("bash-ok"), &config)
+            .await
+            .expect("执行成功");
+
+        assert_eq!(result.status, TaskStatus::Completed);
+        assert!(result.error.is_none());
+        assert_eq!(
+            result.data,
+            Some(serde_json::json!({"price": 10.5, "symbol": "sh600000"}))
+        );
+        assert_eq!(result.metadata.get("exit_code"), Some(&serde_json::json!(0)));
+        assert_eq!(
+            result.metadata.get("language"),
+            Some(&serde_json::json!(CrawlerLanguage::Shell))
+        );
+        let script_path = result
+            .metadata
+            .get("script_path")
+            .and_then(|v| v.as_str())
+            .expect("script_path 元数据存在");
+        // 任务 id "bash-ok" 的连字符是保留字符：文件名保持 bash-ok_crawler.sh
+        assert!(script_path.ends_with("bash-ok_crawler.sh"));
+        assert!(ws.join("temp").join("bash-ok_crawler.sh").exists());
+
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    #[tokio::test]
+    async fn failing_script_returns_failed_status_with_stderr() {
+        let ws = temp_workspace();
+        let crawler = MultilangCrawler::new(&ws);
+        crawler.initialize().await.expect("初始化临时目录");
+
+        let config = CrawlerConfig {
+            language: CrawlerLanguage::Shell,
+            inline_code: Some("echo boom-stderr >&2; exit 3".to_string()),
+            timeout: Some(30),
+            ..CrawlerConfig::default()
+        };
+        let result = crawler
+            .execute_crawler(&a_share_task("bash-fail"), &config)
+            .await
+            .expect("执行器本身不报错");
+
+        assert_eq!(result.status, TaskStatus::Failed);
+        assert!(result.data.is_none());
+        let error = result.error.expect("stderr 进入 error 字段");
+        assert!(error.contains("boom-stderr"));
+        assert_eq!(
+            result.metadata.get("exit_code"),
+            Some(&serde_json::json!(3))
+        );
+
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    #[tokio::test]
+    async fn timeout_aborts_long_running_script() {
+        let ws = temp_workspace();
+        let crawler = MultilangCrawler::new(&ws);
+        crawler.initialize().await.expect("初始化临时目录");
+
+        let config = CrawlerConfig {
+            language: CrawlerLanguage::Shell,
+            inline_code: Some("sleep 30".to_string()),
+            timeout: Some(1),
+            ..CrawlerConfig::default()
+        };
+        let err = crawler
+            .execute_crawler(&a_share_task("bash-slow"), &config)
+            .await
+            .expect_err("超时应产生错误");
+        assert!(
+            err.to_string().contains("elapsed") || err.to_string().contains("deadline"),
+            "超时错误应指明 deadline：{}",
+            err
+        );
+
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    #[tokio::test]
+    async fn missing_script_and_inline_code_is_rejected() {
+        let ws = temp_workspace();
+        let crawler = MultilangCrawler::new(&ws);
+        crawler.initialize().await.expect("初始化临时目录");
+
+        let config = CrawlerConfig {
+            language: CrawlerLanguage::Shell,
+            script_path: None,
+            inline_code: None,
+            timeout: Some(30),
+            ..CrawlerConfig::default()
+        };
+        let err = crawler
+            .execute_crawler(&a_share_task("no-script"), &config)
+            .await
+            .expect_err("缺脚本应报错");
+        assert!(err.to_string().contains("missing script_path or inline_code"));
+
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    #[tokio::test]
+    async fn rust_language_is_not_supported_in_simple_runner() {
+        let ws = temp_workspace();
+        let crawler = MultilangCrawler::new(&ws);
+        crawler.initialize().await.expect("初始化临时目录");
+
+        let config = CrawlerConfig {
+            language: CrawlerLanguage::Rust,
+            inline_code: Some("fn main() {}".to_string()),
+            timeout: Some(30),
+            ..CrawlerConfig::default()
+        };
+        let err = crawler
+            .execute_crawler(&a_share_task("rust-run"), &config)
+            .await
+            .expect_err("Rust 应显式拒绝");
+        assert!(err.to_string().contains("not supported"));
+
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    #[tokio::test]
+    async fn script_path_resolves_relative_to_workspace_root() {
+        let ws = temp_workspace();
+        let crawler = MultilangCrawler::new(&ws);
+        crawler.initialize().await.expect("初始化临时目录");
+        let script_dir = ws.join("scripts");
+        std::fs::create_dir_all(&script_dir).expect("创建 scripts 目录");
+        std::fs::write(script_dir.join("echo_task.sh"), "echo path-script")
+            .expect("写脚本文件");
+
+        let config = CrawlerConfig {
+            language: CrawlerLanguage::Shell,
+            script_path: Some(PathBuf::from("scripts/echo_task.sh")),
+            timeout: Some(30),
+            ..CrawlerConfig::default()
+        };
+        let result = crawler
+            .execute_crawler(&a_share_task("path-script"), &config)
+            .await
+            .expect("相对路径脚本执行成功");
+
+        assert_eq!(result.status, TaskStatus::Completed);
+        assert_eq!(
+            result.data,
+            Some(serde_json::json!({"text": "path-script"}))
+        );
+        // script_path 分支不落临时目录（复用仓库内脚本）
+        assert!(!ws.join("temp").join("path_script_crawler.sh").exists());
+
+        std::fs::remove_dir_all(&ws).ok();
+    }
+}
