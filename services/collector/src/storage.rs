@@ -518,7 +518,9 @@ mod tests {
             enable_redis: false,
             ..StorageConfig::default()
         };
-        StorageLayer::new(config).await.expect("禁用模式下构造必然成功")
+        StorageLayer::new(config)
+            .await
+            .expect("禁用模式下构造必然成功")
     }
 
     #[test]
@@ -581,7 +583,10 @@ mod tests {
             .await
             .expect_err("未连接应报错");
         assert!(matches!(err, StorageError::ConnectionError(_)));
-        assert_eq!(err.to_string(), "Connection error: TimescaleDB not connected");
+        assert_eq!(
+            err.to_string(),
+            "Connection error: TimescaleDB not connected"
+        );
     }
 
     #[tokio::test]
@@ -618,7 +623,10 @@ mod tests {
             .cache_realtime_quote(&sample_quote())
             .await
             .expect_err("未连接 Redis 应报错");
-        assert_eq!(cache_err.to_string(), "Connection error: Redis not connected");
+        assert_eq!(
+            cache_err.to_string(),
+            "Connection error: Redis not connected"
+        );
         let get_err = layer
             .get_cached_quote("sh600000")
             .await
@@ -633,9 +641,7 @@ mod tests {
             enable_redis: false,
             ..StorageConfig::default()
         };
-        let handle = StorageLayerHandle::new(config)
-            .await
-            .expect("句柄构造成功");
+        let handle = StorageLayerHandle::new(config).await.expect("句柄构造成功");
         let layer = handle.get().await.expect("获取内部层成功");
         let healthy = layer.health_check().await;
         assert!(healthy);

@@ -260,10 +260,7 @@ mod tests {
     }
 
     fn temp_workspace() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "alpha-crawler-test-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir = std::env::temp_dir().join(format!("alpha-crawler-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("创建临时工作目录");
         dir
     }
@@ -319,7 +316,10 @@ mod tests {
             parse_stdout_as_json_or_text("plain text output"),
             serde_json::json!({"text": "plain text output"})
         );
-        assert_eq!(parse_stdout_as_json_or_text("  \n\t "), serde_json::Value::Null);
+        assert_eq!(
+            parse_stdout_as_json_or_text("  \n\t "),
+            serde_json::Value::Null
+        );
     }
 
     #[tokio::test]
@@ -345,7 +345,10 @@ mod tests {
             result.data,
             Some(serde_json::json!({"price": 10.5, "symbol": "sh600000"}))
         );
-        assert_eq!(result.metadata.get("exit_code"), Some(&serde_json::json!(0)));
+        assert_eq!(
+            result.metadata.get("exit_code"),
+            Some(&serde_json::json!(0))
+        );
         assert_eq!(
             result.metadata.get("language"),
             Some(&serde_json::json!(CrawlerLanguage::Shell))
@@ -433,7 +436,9 @@ mod tests {
             .execute_crawler(&a_share_task("no-script"), &config)
             .await
             .expect_err("缺脚本应报错");
-        assert!(err.to_string().contains("missing script_path or inline_code"));
+        assert!(err
+            .to_string()
+            .contains("missing script_path or inline_code"));
 
         std::fs::remove_dir_all(&ws).ok();
     }
@@ -466,8 +471,7 @@ mod tests {
         crawler.initialize().await.expect("初始化临时目录");
         let script_dir = ws.join("scripts");
         std::fs::create_dir_all(&script_dir).expect("创建 scripts 目录");
-        std::fs::write(script_dir.join("echo_task.sh"), "echo path-script")
-            .expect("写脚本文件");
+        std::fs::write(script_dir.join("echo_task.sh"), "echo path-script").expect("写脚本文件");
 
         let config = CrawlerConfig {
             language: CrawlerLanguage::Shell,
