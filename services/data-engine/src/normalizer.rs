@@ -524,3 +524,176 @@ pub(crate) async fn health_check(State(state): State<Arc<AppState>>) -> Json<ser
         "time_series": stats,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn quote_envelope(payload: serde_json::Value) -> StreamEnvelope {
+        StreamEnvelope::new(RAW_QUOTES_STREAM, "quote", "eastmoney", None, payload)
+    }
+
+    fn full_payload() -> serde_json::Value {
+        serde_json::json!({
+            "symbol": "sh600000",
+            "price": 12.5,
+            "volume": 12345u64,
+            "bid1": 12.49,
+            "ask1": 12.51,
+            "open": 12.1,
+            "high": 12.8,
+            "low": 12.0,
+        })
+    }
+
+    #[test]
+    fn normalize_quote_maps_required_and_optional_fields() {
+        let event_time = Utc.with_ymd_and_hms(2026, 11, 11, 1, 2, 3).unwrap();
+        let envelope = quote_envelope(full_payload()).with_event_time(event_time);
+
+        let md = normalize_quote(&envelope).expect("完整载荷应可规范化");
+        assert_eq!(md.symbol, "sh600000");
+        assert_eq!(md.price, 12.5);
+        assert_eq!(md.volume, 12345);
+        assert_eq!(md.bid, Some(12.49));
+        assert_eq!(md.ask, Some(12.51));
+        assert_eq!(md.open, Some(12.1));
+        assert_eq!(md.high, Some(12.8));
+        assert_eq!(md.low, Some(12.0));
+        assert_eq!(md.timestamp, event_time);
+    }
+
+    #[test]
+    fn normalize_quote_falls_back_to_ingest_ts_without_event_time() {
+        let envelope = quote_envelope(full_payload());
+        let md = normalize_quote(&envelope).expect("无 event_time 应回退 ingest_ts");
+        assert_eq!(md.timestamp, envelope.ingest_ts);
+    }
+
+    #[test]
+    fn normalize_quote_rejects_non_object_payload() {
+        assert!(normalize_quote(&quote_envelope(serde_json::json!("str"))).is_none());
+        assert!(normalize_quote(&quote_envelope(serde_json::json!([1, 2]))).is_none());
+    }
+
+    #[test]
+    fn normalize_quote_rejects_missing_or_mistyped_required_fields() {
+        // 缺 symbol
+        let missing_symbol = serde_json::json!({"price": 1.0, "volume": 1u64});
+        assert!(normalize_quote(&quote_envelope(missing_symbol)).is_none());
+        // symbol 非字符串
+        let symbol_not_str = serde_json::json!({"symbol": 42, "price": 1.0, "volume": 1u64});
+        assert!(normalize_quote(&quote_envelope(symbol_not_str)).is_none());
+        // 缺 price
+        let missing_price = serde_json::json!({"symbol": "sh600000", "volume": 1u64});
+        assert!(normalize_quote(&quote_envelope(missing_price)).is_none());
+        // price 非数值
+        let price_not_f64 = serde_json::json!({"symbol": "sh600000", "price": "12.5", "volume": 1u64});
+        assert!(normalize_quote(&quote_envelope(price_not_f64)).is_none());
+        // 缺 volume
+        let missing_volume = serde_json::json!({"symbol": "sh600000", "price": 1.0});
+        assert!(normalize_quote(&quote_envelope(missing_volume)).is_none());
+        // volume 非非负整数（负数/小数 as_u64 均失败）
+        let volume_negative = serde_json::json!({"symbol": "sh600000", "price": 1.0, "volume": -5});
+        assert!(normalize_quote(&quote_envelope(volume_negative)).is_none());
+        let volume_fractional = serde_json::json!({"symbol": "sh600000", "price": 1.0, "volume": 1.5});
+        assert!(normalize_quote(&quote_envelope(volume_fractional)).is_none());
+    }
+
+    #[test]
+    fn normalize_quote_rejects_non_positive_price() {
+        let zero = serde_json::json!({"symbol": "sh600000", "price": 0.0, "volume": 1u64});
+        assert!(normalize_quote(&quote_envelope(zero)).is_none());
+        let negative = serde_json::json!({"symbol": "sh600000", "price": -1.0, "volume": 1u64});
+        assert!(normalize_quote(&quote_envelope(negative)).is_none());
+    }
+
+    #[test]
+    fn normalized_payload_merges_normalized_fields_over_upstream() {
+        // 上游附加字段 name/change_percent 应保留；同名污染字段 bid:99.0 应被
+        // 规范化值（bid1 → bid）覆盖
+        let envelope = quote_envelope(serde_json::json!({
+            "symbol": "sh600000",
+            "price": 12.5,
+            "volume": 12345u64,
+            "bid1": 12.49,
+            "bid": 99.0,
+            "name": "浦发银行",
+            "change_percent": 1.2,
+        }));
+        let market_data = normalize_quote(&envelope).expect("上游载荷可规范化");
+        let payload = normalized_payload(&envelope, &market_data);
+        let obj = payload.as_object().expect("合并结果为对象");
+
+        assert_eq!(obj.get("symbol").and_then(|v| v.as_str()), Some("sh600000"));
+        assert_eq!(obj.get("name").and_then(|v| v.as_str()), Some("浦发银行"));
+        assert_eq!(obj.get("change_percent").and_then(|v| v.as_f64()), Some(1.2));
+        assert_eq!(obj.get("price").and_then(|v| v.as_f64()), Some(12.5));
+        assert_eq!(obj.get("volume").and_then(|v| v.as_u64()), Some(12345));
+        // 覆盖生效：bid 取规范化后的 bid1 值，不再是被污染的 99.0
+        assert_eq!(obj.get("bid").and_then(|v| v.as_f64()), Some(12.49));
+    }
+
+    #[test]
+    fn normalized_payload_handles_non_object_upstream() {
+        let envelope = quote_envelope(serde_json::json!("not-an-object"));
+        let market_data = MarketData {
+            symbol: "sh600000".to_string(),
+            timestamp: envelope.ingest_ts,
+            price: 1.0,
+            volume: 1,
+            bid: None,
+            ask: None,
+            open: None,
+            high: None,
+            low: None,
+        };
+        let payload = normalized_payload(&envelope, &market_data);
+        let obj = payload.as_object().expect("非对象上游退化为仅规范化字段");
+        assert_eq!(obj.get("symbol").and_then(|v| v.as_str()), Some("sh600000"));
+        assert_eq!(obj.get("price").and_then(|v| v.as_f64()), Some(1.0));
+    }
+
+    #[test]
+    fn build_normalized_envelope_passes_upstream_contract_through() {
+        let event_time = Utc.with_ymd_and_hms(2026, 11, 11, 0, 0, 0).unwrap();
+        let process_time = Utc.with_ymd_and_hms(2026, 11, 11, 0, 0, 1).unwrap();
+        let upstream = quote_envelope(full_payload())
+            .with_event_time(event_time)
+            .with_source_event_id("src-evt-1")
+            .with_market("cn")
+            .with_sequence(7)
+            .with_trace_id("trace-abc");
+
+        let market_data = normalize_quote(&upstream).expect("上游载荷可规范化");
+        let normalized = build_normalized_envelope(&upstream, &market_data, process_time);
+
+        assert_eq!(normalized.stream, NORMALIZED_QUOTES_STREAM);
+        assert_eq!(normalized.event_type, "normalized_quote");
+        assert_eq!(normalized.source, "data-engine");
+        assert_eq!(normalized.event_time, Some(event_time));
+        assert_eq!(normalized.source_event_id.as_deref(), Some("src-evt-1"));
+        assert_eq!(normalized.market.as_deref(), Some("cn"));
+        assert_eq!(normalized.sequence, Some(7));
+        assert_eq!(normalized.trace_id.as_deref(), Some("trace-abc"));
+        assert_eq!(normalized.process_time, Some(process_time));
+        // 换跳重新打指纹与 ingest_ts
+        assert_ne!(normalized.payload_hash, upstream.payload_hash);
+        assert!(normalized.ingest_ts >= upstream.ingest_ts);
+    }
+
+    #[test]
+    fn build_normalized_envelope_keeps_absent_contract_fields_none() {
+        let upstream = quote_envelope(full_payload());
+        let market_data = normalize_quote(&upstream).expect("上游载荷可规范化");
+        let process_time = Utc.with_ymd_and_hms(2026, 11, 11, 0, 0, 2).unwrap();
+        let normalized = build_normalized_envelope(&upstream, &market_data, process_time);
+
+        assert_eq!(normalized.event_time, None);
+        assert_eq!(normalized.source_event_id, None);
+        assert_eq!(normalized.market, None);
+        assert_eq!(normalized.sequence, None);
+        assert_eq!(normalized.trace_id, None);
+    }
+}
