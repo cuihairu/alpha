@@ -259,10 +259,27 @@ mod tests {
         )
     }
 
-    fn temp_workspace() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("alpha-crawler-test-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).expect("创建临时工作目录");
-        dir
+    /// 临时工作目录（RAII）：panic 触发 unwinding 时 Drop 仍清场，
+    /// 不在 /tmp 留陈旧目录（Codex 深审 2026-11-12 [m] 收敛）。
+    struct TempWorkspace(PathBuf);
+
+    impl TempWorkspace {
+        fn new() -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("alpha-crawler-test-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).expect("创建临时工作目录");
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempWorkspace {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
     }
 
     #[test]
@@ -324,8 +341,8 @@ mod tests {
 
     #[tokio::test]
     async fn inline_bash_script_completes_with_json_data() {
-        let ws = temp_workspace();
-        let crawler = MultilangCrawler::new(&ws);
+        let ws = TempWorkspace::new();
+        let crawler = MultilangCrawler::new(ws.path());
         crawler.initialize().await.expect("初始化临时目录");
 
         let mut config = CrawlerConfig {
@@ -360,15 +377,13 @@ mod tests {
             .expect("script_path 元数据存在");
         // 任务 id "bash-ok" 的连字符是保留字符：文件名保持 bash-ok_crawler.sh
         assert!(script_path.ends_with("bash-ok_crawler.sh"));
-        assert!(ws.join("temp").join("bash-ok_crawler.sh").exists());
-
-        std::fs::remove_dir_all(&ws).ok();
+        assert!(ws.path().join("temp").join("bash-ok_crawler.sh").exists());
     }
 
     #[tokio::test]
     async fn failing_script_returns_failed_status_with_stderr() {
-        let ws = temp_workspace();
-        let crawler = MultilangCrawler::new(&ws);
+        let ws = TempWorkspace::new();
+        let crawler = MultilangCrawler::new(ws.path());
         crawler.initialize().await.expect("初始化临时目录");
 
         let config = CrawlerConfig {
@@ -390,14 +405,12 @@ mod tests {
             result.metadata.get("exit_code"),
             Some(&serde_json::json!(3))
         );
-
-        std::fs::remove_dir_all(&ws).ok();
     }
 
     #[tokio::test]
     async fn timeout_aborts_long_running_script() {
-        let ws = temp_workspace();
-        let crawler = MultilangCrawler::new(&ws);
+        let ws = TempWorkspace::new();
+        let crawler = MultilangCrawler::new(ws.path());
         crawler.initialize().await.expect("初始化临时目录");
 
         let config = CrawlerConfig {
@@ -415,14 +428,12 @@ mod tests {
             "超时错误应指明 deadline：{}",
             err
         );
-
-        std::fs::remove_dir_all(&ws).ok();
     }
 
     #[tokio::test]
     async fn missing_script_and_inline_code_is_rejected() {
-        let ws = temp_workspace();
-        let crawler = MultilangCrawler::new(&ws);
+        let ws = TempWorkspace::new();
+        let crawler = MultilangCrawler::new(ws.path());
         crawler.initialize().await.expect("初始化临时目录");
 
         let config = CrawlerConfig {
@@ -439,14 +450,12 @@ mod tests {
         assert!(err
             .to_string()
             .contains("missing script_path or inline_code"));
-
-        std::fs::remove_dir_all(&ws).ok();
     }
 
     #[tokio::test]
     async fn rust_language_is_not_supported_in_simple_runner() {
-        let ws = temp_workspace();
-        let crawler = MultilangCrawler::new(&ws);
+        let ws = TempWorkspace::new();
+        let crawler = MultilangCrawler::new(ws.path());
         crawler.initialize().await.expect("初始化临时目录");
 
         let config = CrawlerConfig {
@@ -460,16 +469,14 @@ mod tests {
             .await
             .expect_err("Rust 应显式拒绝");
         assert!(err.to_string().contains("not supported"));
-
-        std::fs::remove_dir_all(&ws).ok();
     }
 
     #[tokio::test]
     async fn script_path_resolves_relative_to_workspace_root() {
-        let ws = temp_workspace();
-        let crawler = MultilangCrawler::new(&ws);
+        let ws = TempWorkspace::new();
+        let crawler = MultilangCrawler::new(ws.path());
         crawler.initialize().await.expect("初始化临时目录");
-        let script_dir = ws.join("scripts");
+        let script_dir = ws.path().join("scripts");
         std::fs::create_dir_all(&script_dir).expect("创建 scripts 目录");
         std::fs::write(script_dir.join("echo_task.sh"), "echo path-script").expect("写脚本文件");
 
@@ -490,8 +497,10 @@ mod tests {
             Some(serde_json::json!({"text": "path-script"}))
         );
         // script_path 分支不落临时目录（复用仓库内脚本）
-        assert!(!ws.join("temp").join("path_script_crawler.sh").exists());
-
-        std::fs::remove_dir_all(&ws).ok();
+        assert!(!ws
+            .path()
+            .join("temp")
+            .join("path_script_crawler.sh")
+            .exists());
     }
 }

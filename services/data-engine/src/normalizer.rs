@@ -613,16 +613,21 @@ mod tests {
 
     #[test]
     fn normalized_payload_merges_normalized_fields_over_upstream() {
-        // 上游附加字段 name/change_percent 应保留；同名污染字段 bid:99.0 应被
-        // 规范化值（bid1 → bid）覆盖
+        // 上游附加字段 name/change_percent/change/pre_close/source 应保留（
+        // real-time-feed 依赖 change/change_percent，审计依赖 name/pre_close/source）；
+        // 同名污染字段 bid:99.0 应被规范化值（bid1 → bid）覆盖
         let envelope = quote_envelope(serde_json::json!({
             "symbol": "sh600000",
             "price": 12.5,
             "volume": 12345u64,
             "bid1": 12.49,
+            "ask1": 12.51,
             "bid": 99.0,
             "name": "浦发银行",
             "change_percent": 1.2,
+            "change": 0.2,
+            "pre_close": 12.3,
+            "source": "eastmoney",
         }));
         let market_data = normalize_quote(&envelope).expect("上游载荷可规范化");
         let payload = normalized_payload(&envelope, &market_data);
@@ -634,10 +639,22 @@ mod tests {
             obj.get("change_percent").and_then(|v| v.as_f64()),
             Some(1.2)
         );
+        assert_eq!(obj.get("change").and_then(|v| v.as_f64()), Some(0.2));
+        assert_eq!(obj.get("pre_close").and_then(|v| v.as_f64()), Some(12.3));
+        assert_eq!(
+            obj.get("source").and_then(|v| v.as_str()),
+            Some("eastmoney")
+        );
         assert_eq!(obj.get("price").and_then(|v| v.as_f64()), Some(12.5));
         assert_eq!(obj.get("volume").and_then(|v| v.as_u64()), Some(12345));
         // 覆盖生效：bid 取规范化后的 bid1 值，不再是被污染的 99.0
         assert_eq!(obj.get("bid").and_then(|v| v.as_f64()), Some(12.49));
+        // 上游缺省字段由 normalized 补齐
+        assert_eq!(obj.get("ask").and_then(|v| v.as_f64()), Some(12.51));
+        assert_eq!(
+            obj.get("timestamp"),
+            Some(&serde_json::to_value(market_data.timestamp).expect("时间戳可序列化"))
+        );
     }
 
     #[test]
@@ -683,6 +700,8 @@ mod tests {
         assert_eq!(normalized.sequence, Some(7));
         assert_eq!(normalized.trace_id.as_deref(), Some("trace-abc"));
         assert_eq!(normalized.process_time, Some(process_time));
+        // normalized 信封的 payload 含规范化字段
+        assert_eq!(normalized.payload["price"], 12.5);
         // 换跳重新打指纹与 ingest_ts
         assert_ne!(normalized.payload_hash, upstream.payload_hash);
         assert!(normalized.ingest_ts >= upstream.ingest_ts);

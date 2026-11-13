@@ -760,9 +760,7 @@ mod tests {
 
     use crate::bootstrap::initialize_persistence;
     use crate::exports::{export_market_data_parquet, MarketDataParquetParams};
-    use crate::normalizer::{
-        build_normalized_envelope, normalize_quote, normalized_payload, run_lake_maintenance_round,
-    };
+    use crate::normalizer::run_lake_maintenance_round;
     use crate::outlier::PriceOutlierMonitor;
     use crate::sequence_gap::SequenceGapMonitor;
     use crate::settings::{AppConfig, StorageConfig};
@@ -770,14 +768,14 @@ mod tests {
     use crate::{
         api_key_matches, build_router, build_session_context, global_metrics_handle,
         seed_instruments, AppState, MirrorRetryBuffer, RecentPayloads, LAKE_TABLE,
-        MIRROR_RETRY_BUFFER_CAP, NORMALIZED_QUOTES_STREAM, PAYLOAD_DEDUP_WINDOW,
+        MIRROR_RETRY_BUFFER_CAP, PAYLOAD_DEDUP_WINDOW,
     };
     use alpha_core::{
         analytics::AnalysisEngine, errors::AlphaResult, indicators::TechnicalIndicators,
     };
     use alpha_storage::lake::{LakeWriter, MarketBar};
     use alpha_storage::partition::PartitionScheme;
-    use alpha_storage::{StreamEnvelope, TimescaleTimeSeriesStorage};
+    use alpha_storage::TimescaleTimeSeriesStorage;
     use axum::http::HeaderValue;
     use axum::Router;
     use datafusion::prelude::SessionContext;
@@ -1414,205 +1412,6 @@ mod tests {
         // 价差均值 = (1.0 + 1.0 + 1.2) / 3
         let spread = row["spread"].as_f64().unwrap();
         assert!((spread - 3.2 / 3.0).abs() < 1e-9);
-    }
-
-    fn quote_envelope(payload: serde_json::Value) -> StreamEnvelope {
-        StreamEnvelope::new("quotes.raw", "quote", "eastmoney", None, payload)
-    }
-
-    #[test]
-    fn normalize_quote_maps_bid_ask_fields() {
-        let envelope = quote_envelope(serde_json::json!({
-            "symbol": "000001",
-            "price": 12.34,
-            "volume": 5000,
-            "bid1": 12.30,
-            "ask1": 12.40,
-            "open": 12.10,
-            "high": 12.50,
-            "low": 12.00
-        }));
-
-        let market_data = normalize_quote(&envelope).unwrap();
-        assert_eq!(market_data.symbol, "000001");
-        assert_eq!(market_data.price, 12.34);
-        assert_eq!(market_data.volume, 5000);
-        assert_eq!(market_data.bid, Some(12.30));
-        assert_eq!(market_data.ask, Some(12.40));
-        assert_eq!(market_data.open, Some(12.10));
-        assert_eq!(market_data.high, Some(12.50));
-        assert_eq!(market_data.low, Some(12.00));
-    }
-
-    #[test]
-    fn normalize_quote_rejects_invalid_payloads() {
-        let missing_price = quote_envelope(serde_json::json!({ "symbol": "000001", "volume": 1 }));
-        assert!(normalize_quote(&missing_price).is_none());
-
-        let negative_price =
-            quote_envelope(serde_json::json!({ "symbol": "000001", "price": -1.0, "volume": 1 }));
-        assert!(normalize_quote(&negative_price).is_none());
-
-        let not_an_object = StreamEnvelope::new(
-            "quotes.raw",
-            "quote",
-            "eastmoney",
-            None,
-            serde_json::json!("scalar"),
-        );
-        assert!(normalize_quote(&not_an_object).is_none());
-    }
-
-    #[test]
-    fn normalized_payload_preserves_upstream_and_overrides_normalized_fields() {
-        let envelope = quote_envelope(serde_json::json!({
-            "symbol": "000001",
-            "name": "平安银行",
-            "price": 12.0,
-            "volume": 1000,
-            "change": 0.12,
-            "change_percent": 0.98,
-            "pre_close": 12.22,
-            "source": "eastmoney"
-        }));
-
-        // 规范化结果与上游原始值不同（例如标准化/修正后），应覆盖上游同名字段
-        let market_data = MarketData {
-            symbol: "000001".to_string(),
-            timestamp: Utc::now(),
-            price: 12.34,
-            volume: 5000,
-            bid: Some(12.30),
-            ask: Some(12.40),
-            open: Some(12.10),
-            high: Some(12.50),
-            low: Some(12.00),
-        };
-
-        let payload = normalized_payload(&envelope, &market_data);
-        let obj = payload.as_object().unwrap();
-
-        // 上游独有字段保留（real-time-feed 依赖 change/change_percent，审计依赖 name/pre_close/source）
-        assert_eq!(obj["change"], 0.12);
-        assert_eq!(obj["change_percent"], 0.98);
-        assert_eq!(obj["pre_close"], 12.22);
-        assert_eq!(obj["name"], "平安银行");
-        assert_eq!(obj["source"], "eastmoney");
-        // 规范化字段覆盖上游同名字段
-        assert_eq!(obj["price"], 12.34);
-        assert_eq!(obj["volume"], 5000);
-        assert_eq!(obj["bid"], 12.30);
-        assert_eq!(obj["ask"], 12.40);
-        assert_eq!(
-            obj["timestamp"],
-            serde_json::to_value(market_data.timestamp).unwrap()
-        );
-    }
-
-    #[test]
-    fn normalized_payload_handles_non_object_upstream() {
-        let envelope = StreamEnvelope::new(
-            "quotes.raw",
-            "quote",
-            "eastmoney",
-            None,
-            serde_json::json!("garbage"),
-        );
-        let market_data = MarketData {
-            symbol: "000001".to_string(),
-            timestamp: Utc::now(),
-            price: 12.34,
-            volume: 1,
-            bid: None,
-            ask: None,
-            open: None,
-            high: None,
-            low: None,
-        };
-
-        let payload = normalized_payload(&envelope, &market_data);
-        assert_eq!(payload["symbol"], "000001");
-        assert_eq!(payload["price"], 12.34);
-    }
-
-    /// 时间模型（§3.3）：normalize 的行情时刻取 event_time（源侧事件时刻），
-    /// v1 消息缺 event_time 时退回 ingest_ts。
-    #[test]
-    fn normalize_quote_prefers_event_time_and_falls_back_to_ingest() {
-        let event_ts = Utc::now() - Duration::minutes(3);
-        let with_event = StreamEnvelope::new(
-            "quotes.raw",
-            "quote",
-            "eastmoney",
-            None,
-            serde_json::json!({"symbol": "000001", "price": 12.34, "volume": 1}),
-        )
-        .with_event_time(event_ts);
-        let got = normalize_quote(&with_event).unwrap();
-        assert_eq!(got.timestamp, event_ts, "event_time 优先于 ingest_ts");
-
-        // v1 老消息：无 event_time → 退回 ingest_ts（历史行为不变）
-        let legacy = quote_envelope(serde_json::json!({
-            "symbol": "000001",
-            "price": 12.34,
-            "volume": 1
-        }));
-        let got = normalize_quote(&legacy).unwrap();
-        assert_eq!(got.timestamp, legacy.ingest_ts);
-    }
-
-    /// Envelope v2 转发：process_time 打本跳时刻；上游契约字段
-    /// （event_time/source_event_id/market/sequence/trace_id）换跳不丢。
-    #[test]
-    fn normalized_envelope_carries_upstream_contract_and_process_time() {
-        let event_ts = Utc::now() - Duration::minutes(2);
-        let upstream = StreamEnvelope::new(
-            "quotes.raw",
-            "quote",
-            "eastmoney",
-            Some("000001".to_string()),
-            serde_json::json!({"symbol": "000001", "price": 12.34, "volume": 1}),
-        )
-        .with_event_time(event_ts)
-        .with_source_event_id("src-7")
-        .with_market("cn")
-        .with_sequence(42)
-        .with_trace_id("trace-1");
-        let market_data = MarketData {
-            symbol: "000001".to_string(),
-            timestamp: event_ts,
-            price: 12.34,
-            volume: 1,
-            bid: None,
-            ask: None,
-            open: None,
-            high: None,
-            low: None,
-        };
-
-        let process_ts = Utc::now();
-        let normalized = build_normalized_envelope(&upstream, &market_data, process_ts);
-        assert_eq!(normalized.stream, NORMALIZED_QUOTES_STREAM);
-        assert_eq!(normalized.event_type, "normalized_quote");
-        assert_eq!(normalized.event_time, Some(event_ts), "event_time 透传");
-        assert_eq!(normalized.source_event_id.as_deref(), Some("src-7"));
-        assert_eq!(normalized.market.as_deref(), Some("cn"));
-        assert_eq!(normalized.sequence, Some(42));
-        assert_eq!(normalized.trace_id.as_deref(), Some("trace-1"));
-        assert_eq!(normalized.process_time, Some(process_ts), "本跳处理时刻");
-        // normalized 信封的 payload 含规范化字段（normalized_payload 既有契约）
-        assert_eq!(normalized.payload["price"], 12.34);
-
-        // v1 上游（v2 字段全缺）→ 透传后保持缺省，仅 process_time 为本跳新打
-        let legacy =
-            quote_envelope(serde_json::json!({"symbol": "000001", "price": 1.0, "volume": 1}));
-        let legacy_normalized = build_normalized_envelope(&legacy, &market_data, process_ts);
-        assert!(legacy_normalized.event_time.is_none());
-        assert!(legacy_normalized.source_event_id.is_none());
-        assert!(legacy_normalized.market.is_none());
-        assert!(legacy_normalized.sequence.is_none());
-        assert!(legacy_normalized.trace_id.is_none());
-        assert_eq!(legacy_normalized.process_time, Some(process_ts));
     }
 
     fn storage_settings(enabled: bool, url: Option<&str>) -> StorageConfig {
