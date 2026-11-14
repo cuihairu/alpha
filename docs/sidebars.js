@@ -1,6 +1,9 @@
-// 侧边栏 = docs/ 根下全部 42 篇文档的分类树。
+// 侧边栏 = docs/ 根下 46 篇文档的分类树（当前登记 44 篇）。
 // 约定：内容与文件都在 docs/ 根（docusaurus.config.js 的 docs.path = '.'），
-// 新增文档后在此登记到对应分类；未登记的文档会成为 orphan（构建仅警告）。
+// 新增文档后在此登记到对应分类；未登记的文档会成为 orphan（仍会构建出页，
+// 可直达 URL，但不进任何侧边栏与导航——Docusaurus 3.10.2 实测构建不警告）。
+// 例外：source-layer-analysis.en / source-layer-glossary.en 两篇英文对照页
+// 有意不登记（站点单 locale zh-CN，无 locale 路由/切换器），见审计 G2 记录。
 
 module.exports = {
   tutorialSidebar: [

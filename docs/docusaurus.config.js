@@ -20,7 +20,7 @@ const config = {
     [
       'classic',
       {
-        // 文档内容就放在 docs/ 根（42 篇工程文档），不再维护 docs/docs/ 子树。
+        // 文档内容就放在 docs/ 根（46 篇工程文档），不再维护 docs/docs/ 子树。
         // path 相对 siteDir（docs/）；构建产物/依赖/生成目录必须显式排除——
         // path='.' 时 contentDir=siteDir，否则 node_modules 里的 README 会被当成文档。
         docs: {

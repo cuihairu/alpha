@@ -17,7 +17,7 @@
 ## 总体架构
 1. **数据采集**  
    - Rust collector（`services/collector`）为默认实现：YAML/JSON 任务模板 + cron 调度器 + UA/Accept-Language 每请求轮换 + 请求级重试（带抖动指数退避）。  
-   - `crawlers/python/` 存放标准库参考脚本（东财行情抓取）；模板执行器支持多语言执行（Python/Node/Go/Rust/Shell）。  
+   - `crawlers/python/` 存放标准库参考脚本（东财行情抓取）；模板执行器支持多语言执行（Python/Node/Go/Shell）。`Rust` 仅在 `CrawlerLanguage` 枚举中登记，执行时被显式拒绝（`services/collector/src/multilang_simple.rs:174-175`，由回归测试 `:456-472` 锁定）。  
    - 代理池组件以库级组合面形式存在，未接入生产链路。
 
 2. **消息队列层**  
@@ -42,7 +42,7 @@
    - Web UI 为行情/分析看板；监控看板在 Grafana。
 
 5. **部署与网络**  
-   - Rust 二进制静态构建，经 docker-compose 或 systemd 运行（`scripts/deploy-ubuntu.sh`；快速指南：`README_DEPLOYMENT.md`）。  
+   - Rust 二进制为动态链接的 glibc 可执行文件（`cargo build --release`，无 musl/静态构建配置），经 docker-compose 或 systemd 运行（`scripts/deploy-ubuntu.sh`；快速指南：`README_DEPLOYMENT.md`）；运行镜像用 `debian:bookworm-slim` 并安装 `libpq5`/`curl` 正是为此。  
    - 内网承载整条管线；仅经 Cloudflare Tunnel 发布 API 网关为规划选项。  
    - CI/CD 走 GitHub Actions（lint/test/wasm/build/e2e/security + release 流水线）。
 
@@ -55,7 +55,7 @@
 - **核心语言**：Rust 用于处理服务、调度器与 API。
 - **爬虫**：默认 Rust collector；`crawlers/python` 作即席参考脚本。
 - **队列**：默认 Redis Streams，规划了到 NATS JetStream 与 Kafka 的升级路径。
-- **数据库**：TimescaleDB/PostgreSQL + ClickHouse（仅导出）+ Redis（缓存/限流）。S3/MinIO 存储后端已在 `packages/storage` 就绪；其上的原始响应归档写路径已实现（`RawArchiver`，env 门控，默认关闭）。
+- **数据库**：TimescaleDB/PostgreSQL + ClickHouse（仅导出）+ Redis（缓存/限流）。S3/MinIO 存储后端已在 `packages/storage` 就绪；其上的原始响应归档写路径已实现（`RawArchiver`，env 门控，默认关闭）。字段级 AES-256-GCM 存储加密作为 `packages/storage` 库能力存在（`EncryptedStorage`，env 门控 `ALPHA_STORAGE_ENC_KEY`，32 字节 Base64）；尚无服务消费方，属边界登记而非运维开关。
 - **Schema 定义**：队列/REST 用 serde JSON（Envelope v2，加性演进）；Protobuf 仅用于 gRPC 面。
 
 ## 路线图

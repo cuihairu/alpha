@@ -121,6 +121,17 @@ docs/data-lake-parquet.md）；`lake.maintenance_interval_secs>0` 才启动湖
 （jwt 模式下 `/ws` 升级亦需持票：`Authorization: Bearer` 头或 `?token=` 查询参数，
 客户端连 `ws://host/ws?token=<jwt>` 即可）。
 
+护栏与审计面另有 9 个**仅 env**（无 CLI 同名项）的开关，定义在
+`services/api-gateway/src/shield.rs:190-241` 与 `audit.rs:122-126`：
+`ALPHA_GATEWAY_BOT_DENY`（UA 拒绝，默认关）、`ALPHA_GATEWAY_SCAN_DETECT`（路径
+扫描检测，默认开）、`ALPHA_GATEWAY_SCAN_WINDOW_MS`、`ALPHA_GATEWAY_SCAN_MAX_DISTINCT`、
+`ALPHA_GATEWAY_BURST_GUARD`（默认开）、`ALPHA_GATEWAY_BURST_CAPACITY`、
+`ALPHA_GATEWAY_BURST_REFILL_PER_SEC`、`ALPHA_GATEWAY_AUDIT_FAILURE_WINDOW_MS`、
+`ALPHA_GATEWAY_AUDIT_FAILURE_THRESHOLD`（后两个是认证失败风暴检测窗口，只标记
+不封禁）。另外 `--rate-limit-per-minute` **没有同名 env**——诊断引擎建议项里
+出现的 `ALPHA_GATEWAY_RATE_LIMIT_PER_MINUTE` 是未实现变量（见审计 G2 记录），
+调它无效，只能改 CLI 参数重拉服务。
+
 **collector**：`ALPHA_COLLECTOR_BIND`（默认 `0.0.0.0:8083`）、
 `ALPHA_COLLECTOR_TASKS`（任务模板路径；进程未设置即不装载，示例在
 `config/collector.tasks.yaml`，docker-compose 默认挂载该示例并置此变量指向它）、

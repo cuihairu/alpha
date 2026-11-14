@@ -20,8 +20,14 @@ sidebar_position: 3
 | macOS | `.app` / `.dmg`（公证为登记设计，CI 尚未接线） |
 | Windows | `.exe`（nsis）/ `.msi` |
 
-桌面复用同一 Web 前端，功能与 Web 完全一致（含本手册用户指南全部条目）。
-自动更新走 Tauri updater 通道（见 `docs/auto-update.md`）。
+桌面复用同一 Web 前端，在其之上**另有桌面专属能力面板**（原生导出、价格
+告警、托盘状态、离线缓存与增量同步；`web/app/src/components/DesktopPanel.tsx`
+由 `isTauriRuntime` 门控，浏览器/PWA 面不渲染）——即桌面是 Web 的超集而非
+完全一致；本手册用户指南全部条目两形态均可用。
+自动更新通道为 Tauri updater，**当前登记未接线**：`updater.active=false`、
+公钥与 feed 端点为占位（`desktop/tauri.conf.json:75-81`；契约测试
+`updater_registered_but_inert` 锁定 inert，`desktop/tests/tauri_config.rs:226`），
+发布前置人工步骤见 `docs/auto-update.md`。
 
 ## Android
 

@@ -17,7 +17,7 @@ Chinese architecture write-up: `docs/architecture.md`.
 ## High-Level Architecture
 1. **Data Collectors**  
    - Rust collector (`services/collector`) is the default: YAML/JSON task templates + cron scheduler + per-request UA/Accept-Language rotation + request-level retry with jittered exponential backoff.  
-   - `crawlers/python/` holds a standard-library reference script (eastmoney quote fetch); multi-language execution (Python/Node/Go/Rust/Shell) is supported by the template runner.  
+   - `crawlers/python/` holds a standard-library reference script (eastmoney quote fetch); multi-language execution (Python/Node/Go/Shell) is supported by the template runner. `Rust` is enum-registered in `CrawlerLanguage` but explicitly rejected at execution time (`services/collector/src/multilang_simple.rs:174-175`, locked by regression test `:456-472`).  
    - A proxy pool component exists as a library-level composition surface; it is not wired into the production path.
 
 2. **Message Queue Layer**  
@@ -42,7 +42,7 @@ Chinese architecture write-up: `docs/architecture.md`.
    - Web UI is a quote/analysis dashboard; monitoring dashboards live in Grafana.
 
 5. **Deployment & Networking**  
-   - Rust binaries built statically and run via docker-compose or systemd (`scripts/deploy-ubuntu.sh`; quick guide: `README_DEPLOYMENT.md`).  
+   - Rust binaries are dynamically linked glibc executables (`cargo build --release`, no musl/static profile) and run via docker-compose or systemd (`scripts/deploy-ubuntu.sh`; quick guide: `README_DEPLOYMENT.md`); runtime images are `debian:bookworm-slim` with `libpq5`/`curl` installed for that reason.  
    - Internal network hosts the entire pipeline; publishing only the API gateway through Cloudflare Tunnel is a planned option.  
    - CI/CD via GitHub Actions (lint/test/wasm/build/e2e/security + release pipelines).
 
@@ -55,7 +55,7 @@ Chinese architecture write-up: `docs/architecture.md`.
 - **Core Language**: Rust for processing services, schedulers, and APIs.
 - **Crawlers**: Rust collector by default; `crawlers/python` for ad-hoc reference scripts.
 - **Queue**: Redis Streams by default, with planned upgrade paths to NATS JetStream and Kafka.
-- **Databases**: TimescaleDB/PostgreSQL + ClickHouse (export only) + Redis (cache/rate-limit). The S3/MinIO storage backend exists in `packages/storage`; raw-response archival on top of it is implemented (`RawArchiver`, env-gated, off by default).
+- **Databases**: TimescaleDB/PostgreSQL + ClickHouse (export only) + Redis (cache/rate-limit). The S3/MinIO storage backend exists in `packages/storage`; raw-response archival on top of it is implemented (`RawArchiver`, env-gated, off by default). Field-level AES-256-GCM storage encryption exists as a `packages/storage` library capability (`EncryptedStorage`, env-gated by `ALPHA_STORAGE_ENC_KEY`, 32-byte Base64); no service consumes it yet, so it is a boundary registration, not an operational switch.
 - **Schema Definition**: serde JSON (Envelope v2, additive evolution) for queue/REST; Protobuf only for the gRPC surface.
 
 ## Roadmap

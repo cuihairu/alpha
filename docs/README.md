@@ -1,13 +1,13 @@
 # Alpha 文档站
 
-Docusaurus 3 文档站，内容即 `docs/` 根下的 42 篇工程文档（`docusaurus.config.js`
+Docusaurus 3 文档站，内容即 `docs/` 根下的 46 篇工程文档（`docusaurus.config.js`
 中 `docs.path: '.'`——不再维护 `docs/docs/` 子树）。站点由 GitHub Pages 托管：
 `.github/workflows/docs.yml` 在 `main` 分支的 `docs/**` 或 `README.md`（仓库根）
 变更时自动构建部署，地址 https://cuihairu.github.io/alpha/ 。
 
 ```
 docs/
-├── *.md               # 全部文档内容（42 篇，与 sidebars.js 一一登记）
+├── *.md               # 全部文档内容（46 篇；sidebars.js 登记 44 篇，2 篇 .en 对照页为孤儿页）
 ├── docusaurus.config.js
 ├── sidebars.js        # 分类侧边栏：新文档写完在此登记，未登记成 orphan（构建警告）
 ├── src/css/custom.css # 主题色
