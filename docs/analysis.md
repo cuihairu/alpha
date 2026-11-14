@@ -84,6 +84,6 @@ collector /streams/quotes/publish ──┴→ quotes.raw → data-engine(normal
 | 11 | 清理 collector 死模块与根目录孤儿文件（`src/`、`tests/`） | `cargo build` 覆盖率与 lib.rs 声明一致 |
 
 ## 6. 风险提示
-- `patches/arrow-arith` 本地补丁 + datafusion 35/arrow 50 的版本耦合较脆，升级需整体验证。
+- arrow-arith 本地补丁 + arrow 生态的版本耦合较脆，升级需整体验证。〔现注：`patches/arrow-arith-50.0.0/` 已不再接线——全仓无 `[patch.crates-io]`，`Cargo.lock` 中 `arrow-arith` 直接来自 crates.io（59.3.2）；该目录现为孤儿产物，清理待拍板。现行版本 `datafusion 55.2` / `arrow 59.2`（`Cargo.toml:57-58`）。〕
 - normalizer 每条消息 `refresh_query_tables()` 全量重建 MemTable，行情放大后是 O(N²) 热点（记入 P2 优化项）。
 - api-gateway health 返回假健康状态，会对运维掩盖真实故障——P3 落地前建议先改为聚合真实 /health。〔现注：已修——health 改为真实并发探测三上游（2026-09-28）〕

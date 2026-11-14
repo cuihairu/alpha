@@ -154,7 +154,9 @@ POSTGRES_TEST_URL 门控的落库集成测试真实运行，2026-10-11 起——
   rsa：JWT 全 HS256 无 RSA 私钥运算）；记录风险 3（h2 需 axum 0.6→0.7 +
   tonic 0.10→0.12；webpki×3 默认部署无 TLS 条件性暴露，启用 TLS 需重评，
   需 sqlx 0.7→0.8；sqlx 无条件暴露，需 0.7→0.8）。逐条证据见
-  todo.md §拍板登记 RustSec 条目；
+  todo.md §拍板登记 RustSec 条目〔现注：该三条已清——h2 升 0.4
+  （4f0ebc7）、sqlx 升 0.9.0（d126a69）、webpki×3 随 rustls 0.23 清零，
+  证据见 todo.md VULN-ALPHA 台账〕；
 * data-engine/real-time-feed/storage/collector 尚有历史遗留的结构性
   clippy 债务已于 2026-09-28 一并清零；后续新增代码直接被 `-D warnings` 拦截；
 * fmt 工具链版本漂移风险（§1）：出现首个漂移案例时引入 rust-toolchain.toml。
