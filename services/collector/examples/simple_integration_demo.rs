@@ -2,7 +2,7 @@
 //!
 //! 展示多语言、多数据源的爬虫集成和自动发现功能
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -90,7 +90,7 @@ impl SimpleIntegrationSystem {
     }
 
     /// 初始化集成爬虫系统
-    pub fn initialize(&mut self) -> Result<()> {
+    pub async fn initialize(&mut self) -> Result<()> {
         println!("🚀 Alpha Finance 简化版集成爬虫系统");
         println!("==================================");
 
@@ -109,7 +109,7 @@ impl SimpleIntegrationSystem {
         println!("\n🔍 自动发现爬虫项目");
 
         // 模拟发现不同类型的爬虫
-        let crawler_configs = vec![
+        let crawler_configs = [
             // Scrapy爬虫
             CrawlerConfig {
                 name: "scrapy-redis".to_string(),
@@ -261,7 +261,7 @@ impl SimpleIntegrationSystem {
                 requires_nodejs: config.requires_nodejs,
             };
 
-            self.crawlers.push(discovered);
+            self.crawlers.push(discovered.clone());
 
             println!(
                 "  {}. {} ({})",
@@ -351,32 +351,33 @@ impl SimpleIntegrationSystem {
                     .find(|c| &c.name == crawler_name)
                     .unwrap();
 
-                if let Some(crawler) = crawler {
-                    let allocation = TaskAllocation {
-                        task_name: task_name.to_string(),
-                        data_source: data_source_key,
-                        crawler_name: crawler_name.clone(),
-                        allocation_reason: format!("{} 数据源匹配 {}", crawler.display_name),
-                        estimated_duration: match data_source {
-                            DataSource::Cryptocurrency => 300,
-                            DataSource::AShare => 600,
-                            DataSource::Forex => 400,
-                            DataSource::News => 200,
-                            DataSource::Commodities => 500,
-                            DataSource::Bonds => 700,
-                            DataSource::Funds => 800,
-                            DataSource::ResearchReports => 900,
-                        },
-                    };
+                let allocation = TaskAllocation {
+                    task_name: task_name.to_string(),
+                    data_source: data_source_key,
+                    crawler_name: crawler_name.clone(),
+                    allocation_reason: format!(
+                        "{:?} 数据源匹配 {}",
+                        data_source, crawler.display_name
+                    ),
+                    estimated_duration: match data_source {
+                        DataSource::Cryptocurrency => 300,
+                        DataSource::AShare => 600,
+                        DataSource::Forex => 400,
+                        DataSource::News => 200,
+                        DataSource::Commodities => 500,
+                        DataSource::Bonds => 700,
+                        DataSource::Funds => 800,
+                        DataSource::ResearchReports => 900,
+                    },
+                };
 
-                    println!("    ✅ 分配成功:");
-                    println!("      🤖 爬虫: {}", allocation.crawler_name);
-                    println!("      🎯 数据源: {}", allocation.data_source);
-                    println!("      ⏱️ 估计时间: {}秒", allocation.estimated_duration);
-                    println!("      📝 分配原因: {}", allocation.allocation_reason);
+                println!("    ✅ 分配成功:");
+                println!("      🤖 爬虫: {}", allocation.crawler_name);
+                println!("      🎯 数据源: {}", allocation.data_source);
+                println!("      ⏱️ 估计时间: {}秒", allocation.estimated_duration);
+                println!("      📝 分配原因: {}", allocation.allocation_reason);
 
-                    return Ok(allocation);
-                }
+                return Ok(allocation);
             }
         }
 
@@ -461,7 +462,7 @@ impl SimpleIntegrationSystem {
         ];
 
         for (task_name, data_source) in demo_tasks {
-            match self.allocate_task(task_name, data_source).await {
+            match self.allocate_task(task_name, &data_source).await {
                 Ok(allocation) => {
                     let execution_result = self.execute_task(&allocation).await?;
 
@@ -488,7 +489,7 @@ impl SimpleIntegrationSystem {
         println!("\n📈 第四步: 系统功能总结");
         println!("-------------------------------------");
 
-        let mut total_crawlers = self.crawlers.len();
+        let total_crawlers = self.crawlers.len();
         let python_crawlers = self.crawlers.iter().filter(|c| c.requires_python).count();
         let nodejs_crawlers = self.crawlers.iter().filter(|c| c.requires_nodejs).count();
         let other_crawlers = total_crawlers - python_crawlers - nodejs_crawlers;
@@ -524,7 +525,7 @@ impl SimpleIntegrationSystem {
         for (data_source, crawlers) in &self.data_source_mappings {
             println!("📈 {} 数据源:", data_source);
             for crawler_name in crawlers {
-                if let Some(crawler) = self.crawlers.iter().find(|c| c.name == crawler_name) {
+                if let Some(crawler) = self.crawlers.iter().find(|c| c.name == *crawler_name) {
                     println!("  🤖 {} ({})", crawler_name, crawler.framework);
                 }
             }
