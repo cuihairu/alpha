@@ -70,7 +70,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy（零警告）
-        run: cargo clippy --workspace --all-targets --exclude alpha-desktop -- -D warnings
+        # --all-features：2026-11-21 起启用，闭合「feature 门控目标不被编译」盲区
+        # （三个 collector example 曾带 --all-features 潜伏 11 个月未编译，见 todo 台账）。
+        # 仅 Test/Lint 两腿启用；构建矩阵腿与 Coverage 不启用（平台/基线口径原因，见台账）。
+        run: cargo clippy --workspace --all-targets --all-features --exclude alpha-desktop -- -D warnings
 
   test:
     name: Test
@@ -113,7 +116,10 @@ jobs:
           REDIS_TEST_URL: redis://127.0.0.1:6379
           TIMESCALE_TEST_URL: postgres://postgres:postgres@127.0.0.1:15432/postgres
           POSTGRES_TEST_URL: postgres://postgres:postgres@127.0.0.1:15432/postgres
-        run: cargo test --workspace --all-targets --exclude alpha-desktop
+        # --all-features：同 Lint 腿，闭合 feature 门控目标不被编译的盲区（2026-11-21，见 Lint 注）。
+        # 本地实测该口径 EXIT=0 / 656 passed；CI 侧 Redis/Postgres service 下 feature 门控
+        # 集成测试首次真跑，若失败属盲区暴露、按常规修复，非门禁回退理由。
+        run: cargo test --workspace --all-targets --all-features --exclude alpha-desktop
 
   desktop:
     name: Desktop (macOS)
