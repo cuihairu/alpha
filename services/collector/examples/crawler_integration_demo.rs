@@ -6,7 +6,6 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 // 由于这是独立演示，我们模拟必要的类型和结构
-use chrono;
 
 mod crawler_discovery {
     use super::*;
@@ -64,6 +63,8 @@ mod crawler_discovery {
     }
 
     pub struct CrawlerDiscoveryService {
+        // demo 存而未读：演示装配形态，discover 为模拟数据
+        #[allow(dead_code)]
         config: CrawlerDiscoveryConfig,
     }
 
@@ -75,97 +76,96 @@ mod crawler_discovery {
         pub async fn discover_crawlers(&self) -> Result<Vec<CrawlerProject>> {
             println!("🔍 开始发现爬虫项目...");
 
-            let mut discovered_projects = Vec::new();
-
             // 模拟发现不同的爬虫项目
-            discovered_projects.push(CrawlerProject {
-                name: "scrapy-finance-crawler".to_string(),
-                display_name: "Scrapy 金融数据爬虫".to_string(),
-                path: PathBuf::from("crawlers/scrapy-finance-crawler"),
-                language: "python".to_string(),
-                framework: "scrapy".to_string(),
-                supported_sources: vec![
-                    "ashare".to_string(),
-                    "cryptocurrency".to_string(),
-                    "forex".to_string(),
-                ],
-                config_files: vec![PathBuf::from("crawlers/scrapy-finance-crawler/settings.py")],
-                start_command: Some("scrapy crawl finance_spider".to_string()),
-                requires_python: true,
-                requires_nodejs: false,
-            });
-
-            discovered_projects.push(CrawlerProject {
-                name: "puppeteer-news-crawler".to_string(),
-                display_name: "Puppeteer 新闻爬虫".to_string(),
-                path: PathBuf::from("crawlers/puppeteer-news-crawler"),
-                language: "javascript".to_string(),
-                framework: "puppeteer".to_string(),
-                supported_sources: vec!["news".to_string(), "social_media".to_string()],
-                config_files: vec![PathBuf::from("crawlers/puppeteer-news-crawler/config.json")],
-                start_command: Some("node news_crawler.js".to_string()),
-                requires_python: false,
-                requires_nodejs: true,
-            });
-
-            discovered_projects.push(CrawlerProject {
-                name: "selenium-stock-crawler".to_string(),
-                display_name: "Selenium 股票爬虫".to_string(),
-                path: PathBuf::from("crawlers/selenium-stock-crawler"),
-                language: "python".to_string(),
-                framework: "selenium".to_string(),
-                supported_sources: vec![
-                    "ashare".to_string(),
-                    "hkshare".to_string(),
-                    "usshare".to_string(),
-                ],
-                config_files: vec![PathBuf::from("crawlers/selenium-stock-crawler/config.py")],
-                start_command: Some("python stock_crawler.py".to_string()),
-                requires_python: true,
-                requires_nodejs: false,
-            });
-
-            discovered_projects.push(CrawlerProject {
-                name: "node-crypto-trader".to_string(),
-                display_name: "Node.js 加密货币交易器".to_string(),
-                path: PathBuf::from("crawlers/node-crypto-trader"),
-                language: "javascript".to_string(),
-                framework: "node".to_string(),
-                supported_sources: vec!["cryptocurrency".to_string(), "forex".to_string()],
-                config_files: vec![PathBuf::from("crawlers/node-crypto-trader/package.json")],
-                start_command: Some("node index.js".to_string()),
-                requires_python: false,
-                requires_nodejs: true,
-            });
-
-            discovered_projects.push(CrawlerProject {
-                name: "go-commodity-crawler".to_string(),
-                display_name: "Go 大宗商品爬虫".to_string(),
-                path: PathBuf::from("crawlers/go-commodity-crawler"),
-                language: "go".to_string(),
-                framework: "go".to_string(),
-                supported_sources: vec![
-                    "commodities".to_string(),
-                    "economic_indicators".to_string(),
-                ],
-                config_files: vec![PathBuf::from("crawlers/go-commodity-crawler/go.mod")],
-                start_command: Some("go run main.go".to_string()),
-                requires_python: false,
-                requires_nodejs: false,
-            });
-
-            discovered_projects.push(CrawlerProject {
-                name: "rust-news-aggregator".to_string(),
-                display_name: "Rust 新闻聚合器".to_string(),
-                path: PathBuf::from("crawlers/rust-news-aggregator"),
-                language: "rust".to_string(),
-                framework: "rust".to_string(),
-                supported_sources: vec!["news".to_string(), "research_reports".to_string()],
-                config_files: vec![PathBuf::from("crawlers/rust-news-aggregator/Cargo.toml")],
-                start_command: Some("cargo run --release".to_string()),
-                requires_python: false,
-                requires_nodejs: false,
-            });
+            let discovered_projects = vec![
+                CrawlerProject {
+                    name: "scrapy-finance-crawler".to_string(),
+                    display_name: "Scrapy 金融数据爬虫".to_string(),
+                    path: PathBuf::from("crawlers/scrapy-finance-crawler"),
+                    language: "python".to_string(),
+                    framework: "scrapy".to_string(),
+                    supported_sources: vec![
+                        "ashare".to_string(),
+                        "cryptocurrency".to_string(),
+                        "forex".to_string(),
+                    ],
+                    config_files: vec![PathBuf::from(
+                        "crawlers/scrapy-finance-crawler/settings.py",
+                    )],
+                    start_command: Some("scrapy crawl finance_spider".to_string()),
+                    requires_python: true,
+                    requires_nodejs: false,
+                },
+                CrawlerProject {
+                    name: "puppeteer-news-crawler".to_string(),
+                    display_name: "Puppeteer 新闻爬虫".to_string(),
+                    path: PathBuf::from("crawlers/puppeteer-news-crawler"),
+                    language: "javascript".to_string(),
+                    framework: "puppeteer".to_string(),
+                    supported_sources: vec!["news".to_string(), "social_media".to_string()],
+                    config_files: vec![PathBuf::from(
+                        "crawlers/puppeteer-news-crawler/config.json",
+                    )],
+                    start_command: Some("node news_crawler.js".to_string()),
+                    requires_python: false,
+                    requires_nodejs: true,
+                },
+                CrawlerProject {
+                    name: "selenium-stock-crawler".to_string(),
+                    display_name: "Selenium 股票爬虫".to_string(),
+                    path: PathBuf::from("crawlers/selenium-stock-crawler"),
+                    language: "python".to_string(),
+                    framework: "selenium".to_string(),
+                    supported_sources: vec![
+                        "ashare".to_string(),
+                        "hkshare".to_string(),
+                        "usshare".to_string(),
+                    ],
+                    config_files: vec![PathBuf::from("crawlers/selenium-stock-crawler/config.py")],
+                    start_command: Some("python stock_crawler.py".to_string()),
+                    requires_python: true,
+                    requires_nodejs: false,
+                },
+                CrawlerProject {
+                    name: "node-crypto-trader".to_string(),
+                    display_name: "Node.js 加密货币交易器".to_string(),
+                    path: PathBuf::from("crawlers/node-crypto-trader"),
+                    language: "javascript".to_string(),
+                    framework: "node".to_string(),
+                    supported_sources: vec!["cryptocurrency".to_string(), "forex".to_string()],
+                    config_files: vec![PathBuf::from("crawlers/node-crypto-trader/package.json")],
+                    start_command: Some("node index.js".to_string()),
+                    requires_python: false,
+                    requires_nodejs: true,
+                },
+                CrawlerProject {
+                    name: "go-commodity-crawler".to_string(),
+                    display_name: "Go 大宗商品爬虫".to_string(),
+                    path: PathBuf::from("crawlers/go-commodity-crawler"),
+                    language: "go".to_string(),
+                    framework: "go".to_string(),
+                    supported_sources: vec![
+                        "commodities".to_string(),
+                        "economic_indicators".to_string(),
+                    ],
+                    config_files: vec![PathBuf::from("crawlers/go-commodity-crawler/go.mod")],
+                    start_command: Some("go run main.go".to_string()),
+                    requires_python: false,
+                    requires_nodejs: false,
+                },
+                CrawlerProject {
+                    name: "rust-news-aggregator".to_string(),
+                    display_name: "Rust 新闻聚合器".to_string(),
+                    path: PathBuf::from("crawlers/rust-news-aggregator"),
+                    language: "rust".to_string(),
+                    framework: "rust".to_string(),
+                    supported_sources: vec!["news".to_string(), "research_reports".to_string()],
+                    config_files: vec![PathBuf::from("crawlers/rust-news-aggregator/Cargo.toml")],
+                    start_command: Some("cargo run --release".to_string()),
+                    requires_python: false,
+                    requires_nodejs: false,
+                },
+            ];
 
             println!(
                 "✅ 发现完成！共找到 {} 个爬虫项目",

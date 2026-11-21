@@ -6,8 +6,6 @@
 //! - 自动爬虫发现和智能任务分配
 //! - 分布式爬虫管理和监控
 
-use std::collections::HashMap;
-
 /// 系统功能概览
 pub struct SystemCapabilities {
     /// 支持的数据源
@@ -139,6 +137,12 @@ impl SystemCapabilities {
         println!("  🔨 性能 ✅ - 异步并发处理和优化算法");
         println!("  🔨 可靠性 ✅ - 完整的错误处理和重试机制");
         println!("  🔨 可维护性 ✅ - 清晰的代码结构和完善的文档");
+    }
+}
+
+impl Default for SystemCapabilities {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
